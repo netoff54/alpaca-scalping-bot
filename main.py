@@ -70,10 +70,17 @@ def index():
         except Exception:
             db_summary = {"total_trades": 0, "winning_trades": 0, "total_pnl_usd": 0.0}
 
+        cooldown_info = {
+            "in_cooldown": scalper.client.is_banned(),
+            "resumes_at": time.strftime("%Y-%m-%d %H:%M:%S WIB", time.localtime(scalper.client.ban_until)) if scalper.client.is_banned() else "READY",
+            "seconds_left": max(0, int(scalper.client.ban_until - time.time())) if scalper.client.is_banned() else 0
+        }
+
         return {
             "status": "online",
             "service": "Binance Futures Scalping Autonomous Bot (Native Engine)",
             "exchange": "Binance USD(S)-M Futures",
+            "rate_limit_status": cooldown_info,
             "margin_mode": "ISOLATED",
             "leverage": f"{config.LEVERAGE}x",
             "order_type": "LIMIT ORDER (Maker Only / GTX)",
@@ -107,9 +114,15 @@ def health_check():
     """Health check endpoint resmi untuk Render Cloud Web Service (Respon instan <1ms)."""
     try:
         bal = scalper._cached_balance
+        cooldown_info = {
+            "in_cooldown": scalper.client.is_banned(),
+            "resumes_at": time.strftime("%Y-%m-%d %H:%M:%S WIB", time.localtime(scalper.client.ban_until)) if scalper.client.is_banned() else "READY",
+            "seconds_left": max(0, int(scalper.client.ban_until - time.time())) if scalper.client.is_banned() else 0
+        }
         return {
             "status": "healthy",
             "exchange": "Binance Futures",
+            "rate_limit_status": cooldown_info,
             "compounding": "ACTIVE",
             "futures_wallet_usdt": bal["total_wallet"],
             "available_usdt": bal["available"],

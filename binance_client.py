@@ -26,9 +26,54 @@ class BinanceFuturesClient:
         })
         self._symbols_rules: Dict[str, Dict[str, Any]] = {}
         self.allowed_crypto_symbols: Set[str] = set()
+        self.ban_until: float = 0.0
+        self._last_ban_log_time: float = 0.0
         
         # Muat pasar dan filter aturan presisi
         self.load_markets()
+
+    def is_banned(self) -> bool:
+        """Mengecek apakah IP server sedang dalam masa cooldown rate limit Binance."""
+        return time.time() < self.ban_until
+
+    def check_response_for_ban(self, resp_or_data: Any):
+        """Mendeteksi apakah Binance merespons dengan HTTP 418/429 atau kode -1003 ban."""
+        msg = ""
+        if isinstance(resp_or_data, requests.Response):
+            if resp_or_data.status_code in (418, 429):
+                msg = resp_or_data.text
+        elif isinstance(resp_or_data, dict):
+            if resp_or_data.get("code") in (-1003, -1000):
+                msg = str(resp_or_data)
+        elif isinstance(resp_or_data, str):
+            msg = resp_or_data
+
+        if "-1003" in msg or "IP banned" in msg or "Way too many requests" in msg:
+            import re
+            match = re.search(r"IP banned until (\d+)", msg)
+            now = time.time()
+            if match:
+                self.ban_until = float(match.group(1)) / 1000.0
+            else:
+                self.ban_until = max(self.ban_until, now + 120.0)
+            
+            if now - self._last_ban_log_time > 60:
+                self._last_ban_log_time = now
+                s_left = int(self.ban_until - now)
+                m_left = s_left // 60
+                sec_left = s_left % 60
+                console.log(f"[bold yellow]Rate limit Binance aktif. Server IP istirahat hingga {time.strftime('%H:%M:%S', time.localtime(self.ban_until))} WIB ({m_left}m {sec_left}s lagi).[/bold yellow]")
+
+    def _apply_fallback_symbols(self):
+        """Mengaktifkan daftar default 28 koin crypto likuid utama jika bursa sedang dalam cooldown."""
+        fallback = {
+            "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "ADAUSDT",
+            "AVAXUSDT", "LINKUSDT", "NEARUSDT", "APTUSDT", "TAOUSDT", "DOTUSDT", "FILUSDT",
+            "WLDUSDT", "ARBUSDT", "OPUSDT", "INJUSDT", "FETUSDT", "RENDERUSDT", "TIAUSDT",
+            "SEIUSDT", "ENAUSDT", "PEPEUSDT", "SHIBUSDT", "BONKUSDT", "WIFUSDT", "FLOKIUSDT"
+        }
+        if not self.allowed_crypto_symbols:
+            self.allowed_crypto_symbols = fallback
 
     def _sign(self, params: Dict[str, Any]) -> Dict[str, Any]:
         params["timestamp"] = int(time.time() * 1000)
@@ -48,11 +93,21 @@ class BinanceFuturesClient:
         1. Hanya menyaring kontrak pure crypto 'PERPETUAL' (mengabaikan TRADIFI_PERPETUAL, saham, & komoditas minyak/emas).
         2. Menyimpan aturan lot size, step size, tick size, dan precision desimal per koin.
         """
+        if self.is_banned():
+            self._apply_fallback_symbols()
+            return
+
         try:
             url = f"{self.base_url}/fapi/v1/exchangeInfo"
             resp = self.session.get(url, timeout=10)
+            self.check_response_for_ban(resp)
             data = resp.json()
+            self.check_response_for_ban(data)
             
+            if not isinstance(data, dict) or "symbols" not in data:
+                self._apply_fallback_symbols()
+                return
+
             rules_map = {}
             allowed = set()
             
@@ -99,20 +154,15 @@ class BinanceFuturesClient:
                 }
                 allowed.add(sym)
                 
-            self._symbols_rules = rules_map
-            self.allowed_crypto_symbols = allowed
-            console.log(f"[bold green]Berhasil memuat aturan presisi untuk {len(allowed)} koin crypto murni Binance Futures.[/bold green]")
+            if len(allowed) > 0:
+                self._symbols_rules = rules_map
+                self.allowed_crypto_symbols = allowed
+                console.log(f"[bold green]Berhasil memuat aturan presisi untuk {len(allowed)} koin crypto murni Binance Futures.[/bold green]")
+            else:
+                self._apply_fallback_symbols()
         except Exception as e:
-            console.log(f"[red]Gagal memuat exchangeInfo Binance: {e}[/red]")
-            # Fallback ke 30 koin crypto utama jika bursa sedang dalam cooldown
-            fallback = {
-                "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "ADAUSDT",
-                "AVAXUSDT", "LINKUSDT", "NEARUSDT", "APTUSDT", "TAOUSDT", "DOTUSDT", "FILUSDT",
-                "WLDUSDT", "ARBUSDT", "OPUSDT", "INJUSDT", "FETUSDT", "RENDERUSDT", "TIAUSDT",
-                "SEIUSDT", "ENAUSDT", "PEPEUSDT", "SHIBUSDT", "BONKUSDT", "WIFUSDT", "FLOKIUSDT"
-            }
-            if not self.allowed_crypto_symbols:
-                self.allowed_crypto_symbols = fallback
+            console.log(f"[yellow]Gagal memuat exchangeInfo Binance: {e}[/yellow]")
+            self._apply_fallback_symbols()
 
     def format_price(self, symbol: str, price: float) -> float:
         """Menyesuaikan harga ke tick_size dan presisi desimal resmi bursa."""
@@ -170,10 +220,14 @@ class BinanceFuturesClient:
 
     def get_balance(self) -> Dict[str, float]:
         """Mengambil saldo wallet Futures (USDT)."""
+        if self.is_banned():
+            raise Exception(f"IP dalam cooldown hingga {time.strftime('%H:%M:%S', time.localtime(self.ban_until))}")
         url = f"{self.base_url}/fapi/v2/balance"
         params = self._sign({})
         resp = self.session.get(url, params=params, timeout=10)
+        self.check_response_for_ban(resp)
         data = resp.json()
+        self.check_response_for_ban(data)
         if not isinstance(data, list):
             raise Exception(f"Balance error: {data}")
         
@@ -181,7 +235,7 @@ class BinanceFuturesClient:
         available = 0.0
         unrealized = 0.0
         for item in data:
-            if item.get("asset") == "USDT":
+            if isinstance(item, dict) and item.get("asset") == "USDT":
                 total_wallet = float(item.get("balance", 0.0))
                 available = float(item.get("availableBalance", 0.0))
                 unrealized = float(item.get("crossUnPnl", 0.0))
@@ -194,15 +248,21 @@ class BinanceFuturesClient:
 
     def get_open_positions(self) -> List[Dict[str, Any]]:
         """Mengambil posisi terbuka di akun Binance Futures."""
+        if self.is_banned():
+            return []
         url = f"{self.base_url}/fapi/v2/positionRisk"
         params = self._sign({})
         resp = self.session.get(url, params=params, timeout=10)
+        self.check_response_for_ban(resp)
         data = resp.json()
+        self.check_response_for_ban(data)
         if not isinstance(data, list):
             return []
         
         open_pos = []
         for p in data:
+            if not isinstance(p, dict):
+                continue
             amt = float(p.get("positionAmt", 0.0))
             if abs(amt) > 0:
                 open_pos.append({
@@ -218,45 +278,65 @@ class BinanceFuturesClient:
 
     def ensure_single_asset_mode(self):
         """Memastikan mode Multi-Assets dimatikan agar ISOLATED margin dapat digunakan."""
+        if self.is_banned():
+            return
         try:
             url = f"{self.base_url}/fapi/v1/multiAssetsMargin"
             params = self._sign({})
             resp = self.session.get(url, params=params, timeout=10)
+            self.check_response_for_ban(resp)
             res = resp.json()
-            if res.get("multiAssetsMargin") is True:
+            if isinstance(res, dict) and res.get("multiAssetsMargin") is True:
                 post_params = self._sign({"multiAssetsMargin": "false"})
                 self.session.post(url, params=post_params, timeout=10)
         except Exception:
             pass
 
     def set_margin_type(self, symbol: str, margin_type: str = "ISOLATED"):
+        if self.is_banned():
+            return
         url = f"{self.base_url}/fapi/v1/marginType"
         params = self._sign({"symbol": symbol, "marginType": margin_type})
         try:
-            self.session.post(url, params=params, timeout=10)
+            resp = self.session.post(url, params=params, timeout=10)
+            self.check_response_for_ban(resp)
         except Exception:
             pass
 
     def set_leverage(self, symbol: str, leverage: int = 10):
+        if self.is_banned():
+            return
         url = f"{self.base_url}/fapi/v1/leverage"
         params = self._sign({"symbol": symbol, "leverage": leverage})
         try:
-            self.session.post(url, params=params, timeout=10)
+            resp = self.session.post(url, params=params, timeout=10)
+            self.check_response_for_ban(resp)
         except Exception:
             pass
 
     def fetch_best_bid_ask(self, symbol: str) -> Dict[str, float]:
-        url = f"{self.base_url}/fapi/v1/depth?symbol={symbol}&limit=5"
-        resp = self.session.get(url, timeout=5)
-        data = resp.json()
-        bids = data.get("bids", [])
-        asks = data.get("asks", [])
-        best_bid = float(bids[0][0]) if bids else 0.0
-        best_ask = float(asks[0][0]) if asks else 0.0
-        return {"bid": best_bid, "ask": best_ask}
+        if self.is_banned():
+            return {"bid": 0.0, "ask": 0.0}
+        try:
+            url = f"{self.base_url}/fapi/v1/depth?symbol={symbol}&limit=5"
+            resp = self.session.get(url, timeout=5)
+            self.check_response_for_ban(resp)
+            data = resp.json()
+            self.check_response_for_ban(data)
+            if not isinstance(data, dict):
+                return {"bid": 0.0, "ask": 0.0}
+            bids = data.get("bids", [])
+            asks = data.get("asks", [])
+            best_bid = float(bids[0][0]) if bids and isinstance(bids[0], (list, tuple)) else 0.0
+            best_ask = float(asks[0][0]) if asks and isinstance(asks[0], (list, tuple)) else 0.0
+            return {"bid": best_bid, "ask": best_ask}
+        except Exception:
+            return {"bid": 0.0, "ask": 0.0}
 
     def create_limit_order(self, symbol: str, side: str, qty: float, price: float) -> Dict[str, Any]:
         """Kirim Limit Order Maker-Only (timeInForce=GTX / Post Only)."""
+        if self.is_banned():
+            raise Exception("Tidak dapat mengirim order: IP bursa dalam masa cooldown rate limit.")
         url = f"{self.base_url}/fapi/v1/order"
         params = self._sign({
             "symbol": symbol,
@@ -267,13 +347,17 @@ class BinanceFuturesClient:
             "price": price
         })
         resp = self.session.post(url, params=params, timeout=10)
+        self.check_response_for_ban(resp)
         data = resp.json()
-        if "orderId" not in data:
+        self.check_response_for_ban(data)
+        if not isinstance(data, dict) or "orderId" not in data:
             raise Exception(f"Limit order gagal: {data}")
         return data
 
     def create_market_close_order(self, symbol: str, side: str, qty: float) -> Dict[str, Any]:
         """Tutup posisi seketika dengan Market Order (reduceOnly=true)."""
+        if self.is_banned():
+            raise Exception("Tidak dapat menutup order: IP bursa dalam masa cooldown rate limit.")
         url = f"{self.base_url}/fapi/v1/order"
         params = self._sign({
             "symbol": symbol,
@@ -283,37 +367,80 @@ class BinanceFuturesClient:
             "reduceOnly": "true"
         })
         resp = self.session.post(url, params=params, timeout=10)
-        return resp.json()
+        self.check_response_for_ban(resp)
+        data = resp.json()
+        self.check_response_for_ban(data)
+        return data
 
     def get_order(self, symbol: str, order_id: Any) -> Dict[str, Any]:
+        if self.is_banned():
+            return {}
         url = f"{self.base_url}/fapi/v1/order"
         params = self._sign({"symbol": symbol, "orderId": order_id})
         resp = self.session.get(url, params=params, timeout=10)
-        return resp.json()
+        self.check_response_for_ban(resp)
+        data = resp.json()
+        self.check_response_for_ban(data)
+        return data if isinstance(data, dict) else {}
 
     def cancel_order(self, symbol: str, order_id: Any) -> Dict[str, Any]:
+        if self.is_banned():
+            return {}
         url = f"{self.base_url}/fapi/v1/order"
         params = self._sign({"symbol": symbol, "orderId": order_id})
         resp = self.session.delete(url, params=params, timeout=10)
-        return resp.json()
+        self.check_response_for_ban(resp)
+        data = resp.json()
+        self.check_response_for_ban(data)
+        return data if isinstance(data, dict) else {}
 
     def fetch_price(self, symbol: str) -> float:
-        url = f"{self.base_url}/fapi/v1/ticker/price?symbol={symbol}"
-        resp = self.session.get(url, timeout=5)
-        return float(resp.json().get("price", 0.0))
+        if self.is_banned():
+            return 0.0
+        try:
+            url = f"{self.base_url}/fapi/v1/ticker/price?symbol={symbol}"
+            resp = self.session.get(url, timeout=5)
+            self.check_response_for_ban(resp)
+            data = resp.json()
+            self.check_response_for_ban(data)
+            if isinstance(data, dict):
+                return float(data.get("price", 0.0))
+            return 0.0
+        except Exception:
+            return 0.0
 
     def fetch_top_tickers(self) -> List[Dict[str, Any]]:
-        url = f"{self.base_url}/fapi/v1/ticker/24hr"
-        resp = self.session.get(url, timeout=10)
-        return resp.json()
+        """Mengambil ticker 24 jam untuk seluruh koin."""
+        if self.is_banned():
+            return []
+        try:
+            url = f"{self.base_url}/fapi/v1/ticker/24hr"
+            resp = self.session.get(url, timeout=10)
+            self.check_response_for_ban(resp)
+            data = resp.json()
+            self.check_response_for_ban(data)
+            if isinstance(data, list):
+                return data
+            return []
+        except Exception as e:
+            console.log(f"[yellow]Notice fetch top tickers: {e}[/yellow]")
+            return []
 
     def fetch_klines(self, symbol: str, interval: str = "1m", limit: int = 220) -> Optional[List[List[float]]]:
-        url = f"{self.base_url}/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
-        resp = self.session.get(url, timeout=5)
-        data = resp.json()
-        if not isinstance(data, list):
+        if self.is_banned():
             return None
-        return [
-            [float(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5])]
-            for c in data
-        ]
+        try:
+            url = f"{self.base_url}/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
+            resp = self.session.get(url, timeout=5)
+            self.check_response_for_ban(resp)
+            data = resp.json()
+            self.check_response_for_ban(data)
+            if not isinstance(data, list):
+                return None
+            return [
+                [float(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5])]
+                for c in data
+                if isinstance(c, (list, tuple)) and len(c) >= 6
+            ]
+        except Exception:
+            return None

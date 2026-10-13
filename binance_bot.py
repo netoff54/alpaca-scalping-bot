@@ -57,18 +57,20 @@ class BinanceScalper:
         # Balance cache & Rate limit cooldown
         self._cached_balance: Dict[str, float] = {"total_wallet": 0.0, "available": 0.0, "unrealized_pnl": 0.0}
         self._last_balance_time: float = 0.0
-        self._ban_until: float = 0.0
-        self._last_ban_log_time: float = 0.0
         self.last_error: Optional[str] = None
+
+    @property
+    def _ban_until(self) -> float:
+        return self.client.ban_until
+
+    @_ban_until.setter
+    def _ban_until(self, val: float):
+        self.client.ban_until = val
 
     def get_futures_balance(self, max_age_sec: float = 60.0) -> Dict[str, float]:
         """Mengambil saldo wallet USDⓈ-M Futures dengan caching 60 detik."""
         now = time.time()
-        if now < self._ban_until:
-            if now - self._last_ban_log_time > 120:
-                self._last_ban_log_time = now
-                s_left = int(self._ban_until - now)
-                console.log(f"[yellow]IP server dalam cooldown rate limit ({s_left} detik tersisa)...[/yellow]")
+        if self.client.is_banned():
             return self._cached_balance
 
         if now - self._last_balance_time < max_age_sec and self._cached_balance["total_wallet"] > 0:
@@ -82,19 +84,8 @@ class BinanceScalper:
             return self._cached_balance
         except Exception as e:
             err_msg = str(e)
-            self.last_error = f"Balance error: {err_msg}"
+            self.last_error = f"Balance status: {err_msg}"
             self._last_balance_time = now + 15
-            
-            if "-1003" in err_msg or "IP banned" in err_msg:
-                import re
-                match = re.search(r"IP banned until (\d+)", err_msg)
-                if match:
-                    self._ban_until = float(match.group(1)) / 1000.0
-                else:
-                    self._ban_until = now + 60.0
-                console.log(f"[bold yellow]Rate limit Binance terpicu. Menunda request hingga {time.strftime('%H:%M:%S', time.localtime(self._ban_until))}[/bold yellow]")
-            else:
-                console.log(f"[red]Error mengambil balance Futures: {e}[/red]")
             return self._cached_balance
 
     def sync_exchange_position(self) -> Optional[Dict[str, Any]]:
@@ -159,12 +150,30 @@ class BinanceScalper:
         margin_used = max(min_margin, target_margin)
         return round(margin_used * config.LEVERAGE, 2)
 
+    def _get_fallback_symbols(self) -> List[Dict[str, Any]]:
+        """Daftar koin likuid teratas bawaan jika API publik bursa sedang dalam cooldown."""
+        top_fallback = [
+            "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "ADAUSDT",
+            "AVAXUSDT", "LINKUSDT", "NEARUSDT", "APTUSDT", "TAOUSDT", "DOTUSDT", "FILUSDT",
+            "WLDUSDT", "ARBUSDT", "OPUSDT", "INJUSDT", "FETUSDT", "RENDERUSDT", "TIAUSDT",
+            "SEIUSDT", "ENAUSDT", "PEPEUSDT", "SHIBUSDT", "BONKUSDT", "WIFUSDT", "FLOKIUSDT"
+        ]
+        return [{"symbol": s, "quoteVolume": 1000000000.0} for s in top_fallback]
+
     def _fetch_top_symbols(self) -> List[Dict[str, Any]]:
         """Mengambil Top 50 koin crypto murni langsung dari Binance Futures REST API."""
+        if self.client.is_banned():
+            return self._cached_top_symbols if self._cached_top_symbols else self._get_fallback_symbols()
+
         try:
             data = self.client.fetch_top_tickers()
+            if not isinstance(data, list):
+                return self._cached_top_symbols if self._cached_top_symbols else self._get_fallback_symbols()
+
             filtered = []
             for item in data:
+                if not isinstance(item, dict):
+                    continue
                 sym = item.get("symbol", "")
                 if sym not in self.client.allowed_crypto_symbols:
                     continue
@@ -177,13 +186,18 @@ class BinanceScalper:
                 except Exception:
                     continue
             filtered.sort(key=lambda x: x["quoteVolume"], reverse=True)
-            return filtered[:config.TOP_COINS_LIMIT]
+            res = filtered[:config.TOP_COINS_LIMIT]
+            if res:
+                return res
+            return self._cached_top_symbols if self._cached_top_symbols else self._get_fallback_symbols()
         except Exception as e:
-            console.log(f"[red]Error fetch top tickers: {e}[/red]")
-            return []
+            console.log(f"[yellow]Notice fetch top tickers: {e}[/yellow]")
+            return self._cached_top_symbols if self._cached_top_symbols else self._get_fallback_symbols()
 
     def scan_top_coins(self):
         """Memindai 50 koin likuid secara sekuensial (Super cepat ~1.5s, RAM <30MB)."""
+        if self.client.is_banned():
+            return
         t_start = time.time()
         try:
             now = time.time()
@@ -464,10 +478,21 @@ class BinanceScalper:
         
         while self.is_running:
             try:
-                if time.time() < self._ban_until:
-                    s_left = int(self._ban_until - time.time())
-                    time.sleep(min(30, s_left + 1))
-                    continue
+                if self.client.is_banned():
+                    s_left = int(self.client.ban_until - time.time())
+                    if s_left > 0:
+                        m_left = s_left // 60
+                        sec_left = s_left % 60
+                        now_log = time.time()
+                        if now_log - self.client._last_ban_log_time > 60:
+                            self.client._last_ban_log_time = now_log
+                            console.log(f"[yellow]IP Cooldown Binance aktif ({m_left}m {sec_left}s lagi). Menunggu otomatis tanpa request ke bursa...[/yellow]")
+                        time.sleep(min(30, max(5, s_left + 1)))
+                        continue
+
+                # Muat ulang aturan pasar jika sebelumnya gagal akibat cooldown
+                if len(self.client._symbols_rules) == 0:
+                    self.client.load_markets()
 
                 # 1. Selalu sinkronisasi posisi riil dari Binance
                 self.sync_exchange_position()
