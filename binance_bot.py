@@ -71,8 +71,8 @@ class BinanceScalper:
         except Exception as e:
             console.log(f"[dim]Cek MultiAssetsMargin: {e}[/dim]")
 
-    def get_futures_balance(self, max_age_sec: float = 10.0) -> Dict[str, float]:
-        """Mengambil saldo wallet USDⓈ-M Futures dengan caching dan perlindungan rate limit."""
+    def get_futures_balance(self, max_age_sec: float = 60.0) -> Dict[str, float]:
+        """Mengambil saldo wallet USDⓈ-M Futures dengan caching 60 detik (Sangat aman dari rate limit)."""
         now = time.time()
         # Jika sedang dalam masa jeda rate limit Binance, gunakan cache dan jangan request
         if now < self._ban_until:
