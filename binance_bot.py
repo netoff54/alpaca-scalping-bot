@@ -229,7 +229,7 @@ class BinanceScalper:
                 sym = item["symbol"]
                 q_vol = item["quoteVolume"]
                 try:
-                    time.sleep(0.12)  # Jeda halus 120ms anti-burst rate limit WAF Binance
+                    time.sleep(0.15)  # Jeda halus 150ms anti-burst rate limit WAF Binance
                     ohlcv = self.client.fetch_klines(sym, interval=config.TIMEFRAME, limit=config.CANDLE_LIMIT)
                     if not ohlcv or len(ohlcv) < config.EMA_TREND + 5:
                         continue
@@ -513,10 +513,10 @@ class BinanceScalper:
                 # 1. Selalu sinkronisasi posisi riil dari Binance
                 self.sync_exchange_position()
 
-                # 2. Jika ada posisi aktif, pantau harga secara intensif
+                # 2. Jika ada posisi aktif, pantau harga secara wajar
                 if self.active_position:
                     self.monitor_active_position()
-                    time.sleep(4)
+                    time.sleep(12)  # Jeda 12 detik memangkas 66% request REST
                     continue
                     
                 # 3. Jalankan pemindaian koin Top volume

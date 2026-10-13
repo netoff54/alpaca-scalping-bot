@@ -28,6 +28,7 @@ class BinanceFuturesClient:
         self.allowed_crypto_symbols: Set[str] = set()
         self.ban_until: float = 0.0
         self._last_ban_log_time: float = 0.0
+        self.current_weight_1m: int = 0
         
         # Muat pasar dan filter aturan presisi
         self.load_markets()
@@ -40,6 +41,18 @@ class BinanceFuturesClient:
         """Mendeteksi apakah Binance merespons dengan HTTP 418/429 atau kode -1003 ban."""
         msg = ""
         if isinstance(resp_or_data, requests.Response):
+            used_weight = resp_or_data.headers.get("x-mbx-used-weight-1m")
+            if used_weight:
+                try:
+                    w = int(used_weight)
+                    self.current_weight_1m = w
+                    if w > 1600:
+                        now = time.time()
+                        self.ban_until = max(self.ban_until, now + 15.0)
+                        console.log(f"[bold yellow]Request weight IP Binance tinggi ({w}/2400). Mengistirahatkan koneksi (15s)...[/bold yellow]")
+                except Exception:
+                    pass
+
             if resp_or_data.status_code in (418, 429):
                 msg = resp_or_data.text
         elif isinstance(resp_or_data, dict):
@@ -63,7 +76,7 @@ class BinanceFuturesClient:
                 m_left = s_left // 60
                 sec_left = s_left % 60
                 wib_time = time.strftime('%H:%M:%S', time.gmtime(self.ban_until + 7 * 3600))
-                console.log(f"[bold yellow]Rate limit Binance aktif. Server IP istirahat hingga {wib_time} WIB ({m_left}m {sec_left}s lagi).[/bold yellow]")
+                console.log(f"[bold yellow]Rate limit Binance aktif ({msg[:120]}). Server IP istirahat hingga {wib_time} WIB ({m_left}m {sec_left}s lagi).[/bold yellow]")
 
     def _apply_fallback_symbols(self):
         """Mengaktifkan daftar default 28 koin crypto likuid utama jika bursa sedang dalam cooldown."""
