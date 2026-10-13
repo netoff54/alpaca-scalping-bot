@@ -90,9 +90,9 @@ def index():
 
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health_check():
-    """Health check endpoint resmi untuk Render Cloud Web Service."""
+    """Health check endpoint resmi untuk Render Cloud Web Service (Respon instan <1ms)."""
     try:
-        bal = scalper.get_futures_balance()
+        bal = scalper._cached_balance
         return {
             "status": "healthy",
             "exchange": "Binance Futures",
@@ -126,4 +126,4 @@ def scan_results():
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 10000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")

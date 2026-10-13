@@ -55,9 +55,6 @@ class BinanceScalper:
         self._cached_balance: Dict[str, float] = {"total_wallet": 0.0, "available": 0.0, "unrealized_pnl": 0.0}
         self._last_balance_time: float = 0.0
         self.last_error: Optional[str] = None
-        
-        # Inisialisasi awal
-        self._ensure_single_asset_mode()
 
     def _ensure_single_asset_mode(self):
         """Memastikan mode Multi-Assets dimatikan agar ISOLATED margin dapat digunakan."""
@@ -382,6 +379,10 @@ class BinanceScalper:
         """Loop pemindaian utama yang berjalan secara otonom di background."""
         console.log("[bold green]>>> Binance Scalper Autonomous Loop Dimulai <<<[/bold green]")
         self.is_running = True
+        
+        # Inisialisasi awal di background thread (aman dan tidak memblokir server startup)
+        self._ensure_single_asset_mode()
+        self.get_futures_balance(max_age_sec=0)
         
         while self.is_running:
             try:
