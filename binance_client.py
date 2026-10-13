@@ -104,6 +104,15 @@ class BinanceFuturesClient:
             console.log(f"[bold green]Berhasil memuat aturan presisi untuk {len(allowed)} koin crypto murni Binance Futures.[/bold green]")
         except Exception as e:
             console.log(f"[red]Gagal memuat exchangeInfo Binance: {e}[/red]")
+            # Fallback ke 30 koin crypto utama jika bursa sedang dalam cooldown
+            fallback = {
+                "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "ADAUSDT",
+                "AVAXUSDT", "LINKUSDT", "NEARUSDT", "APTUSDT", "TAOUSDT", "DOTUSDT", "FILUSDT",
+                "WLDUSDT", "ARBUSDT", "OPUSDT", "INJUSDT", "FETUSDT", "RENDERUSDT", "TIAUSDT",
+                "SEIUSDT", "ENAUSDT", "PEPEUSDT", "SHIBUSDT", "BONKUSDT", "WIFUSDT", "FLOKIUSDT"
+            }
+            if not self.allowed_crypto_symbols:
+                self.allowed_crypto_symbols = fallback
 
     def format_price(self, symbol: str, price: float) -> float:
         """Menyesuaikan harga ke tick_size dan presisi desimal resmi bursa."""

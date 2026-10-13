@@ -91,7 +91,7 @@ class BinanceScalper:
                 if match:
                     self._ban_until = float(match.group(1)) / 1000.0
                 else:
-                    self._ban_until = now + 600.0
+                    self._ban_until = now + 60.0
                 console.log(f"[bold yellow]Rate limit Binance terpicu. Menunda request hingga {time.strftime('%H:%M:%S', time.localtime(self._ban_until))}[/bold yellow]")
             else:
                 console.log(f"[red]Error mengambil balance Futures: {e}[/red]")
