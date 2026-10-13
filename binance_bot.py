@@ -299,7 +299,7 @@ class BinanceScalper:
             self.bullish_count = sum(1 for r in results if r["trend"] == "BULLISH")
             self.bearish_count = sum(1 for r in results if r["trend"] == "BEARISH")
             self.active_signals = sorted(signals, key=lambda x: x.get("score", 0), reverse=True)
-            self.watchlist = sorted(results, key=lambda x: abs(x["rsi"] - 55.0))[:8]
+            self.watchlist = sorted(results, key=lambda x: min(abs(x["rsi"] - 30.0), abs(x["rsi"] - 70.0)))[:8]
             
             self.last_scan_duration_sec = round(time.time() - t_start, 2)
             self.last_scan_time = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -548,9 +548,9 @@ class BinanceScalper:
                     if ema9[-2] < ema21[-2] and ema9[-3] >= ema21[-3]:
                         return True, "EMA 9 Death Cross ke bawah EMA 21 pada TF 1m"
 
-                    # Sinyal Reversal 3: Momentum RSI melemah drastis
-                    if rsi < 48.0 and c_close < c_open:
-                        return True, f"Momentum RSI melemah ({rsi:.1f} < 48)"
+                    # Sinyal Reversal 3: RSI mencapai target overbought (>= 68.0) dan mulai berbalik turun
+                    if rsi >= 68.0 and c_close < c_open:
+                        return True, f"RSI jenuh beli overbought ({rsi:.1f} >= 68) & candle berbalik turun"
 
                     # Sinyal Reversal 4: Bearish Engulfing solid
                     if c_close < c_open and c_close < c_prev_close and (c_open - c_close) >= (c_range * 0.65):
@@ -573,9 +573,9 @@ class BinanceScalper:
                     if ema9[-2] > ema21[-2] and ema9[-3] <= ema21[-3]:
                         return True, "EMA 9 Golden Cross ke atas EMA 21 pada TF 1m"
 
-                    # Sinyal Reversal 3: Momentum RSI memantul naik
-                    if rsi > 52.0 and c_close > c_open:
-                        return True, f"Momentum RSI memantul naik ({rsi:.1f} > 52)"
+                    # Sinyal Reversal 3: RSI mencapai target oversold (<= 32.0) dan mulai berbalik naik
+                    if rsi <= 32.0 and c_close > c_open:
+                        return True, f"RSI jenuh jual oversold ({rsi:.1f} <= 32) & candle memantul naik"
 
                     # Sinyal Reversal 4: Bullish Engulfing solid
                     if c_close > c_open and c_close > c_prev_close and (c_close - c_open) >= (c_range * 0.65):

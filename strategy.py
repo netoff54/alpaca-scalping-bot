@@ -58,78 +58,89 @@ def calculate_atr_series(highs: List[float], lows: List[float], closes: List[flo
             atr.append(sum(trs[i - period + 1 : i + 1]) / period)
     return atr
 
-def detect_n_pattern(highs: List[float], lows: List[float], closes: List[float], window: int = 35) -> Dict[str, Any]:
+def detect_candlestick_pattern(
+    opens: List[float], highs: List[float], lows: List[float], closes: List[float]
+) -> Dict[str, Any]:
     """
-    Mendeteksi Formasi Pola N (N-Wave Breakout & Retest):
-    1. Pola N Bullish:
-       - Swing Low L1 -> Swing High H1 (Impulse naik)
-       - Retest ke Higher Low L2 (L2 > L1)
-       - Breakout: Harga menembus atau mendekati H1
-    2. Pola N Bearish (Inverted N):
-       - Swing High H1 -> Swing Low L1 (Impulse turun)
-       - Pullback ke Lower High H2 (H2 < H1)
-       - Breakdown: Harga menembus atau mendekati L1
+    Mendeteksi pola pembalikan candlestick (Reversal Candlestick):
+    - Bullish: Hammer / Pinbar bawah, Bullish Engulfing, Solid Green Bounce.
+    - Bearish: Shooting Star / Pinbar atas, Bearish Engulfing, Solid Red Rejection.
     """
-    if len(closes) < 15:
-        return {"pattern": "NONE", "score_boost": 0.0, "desc": "Data candle kurang"}
+    if len(closes) < 3:
+        return {"pattern": "NONE", "bias": "NEUTRAL", "score_boost": 0.0, "desc": "Data candle kurang"}
 
-    h_slice = highs[-window:]
-    l_slice = lows[-window:]
-    c_slice = closes[-window:]
-    n = len(c_slice)
-    
-    pivot = 2
-    swing_highs = []
-    swing_lows = []
-    
-    for i in range(pivot, n - 1):
-        if all(h_slice[i] >= h_slice[i - j] for j in range(1, pivot + 1)) and \
-           all(h_slice[i] >= h_slice[i + j] for j in range(1, min(pivot + 1, n - i))):
-            swing_highs.append((i, h_slice[i]))
-            
-        if all(l_slice[i] <= l_slice[i - j] for j in range(1, pivot + 1)) and \
-           all(l_slice[i] <= l_slice[i + j] for j in range(1, min(pivot + 1, n - i))):
-            swing_lows.append((i, l_slice[i]))
+    # Candle tertutup terkini (-2) dan sebelumnya (-3)
+    c_open = opens[-2]
+    c_high = highs[-2]
+    c_low = lows[-2]
+    c_close = closes[-2]
+    c_range = c_high - c_low
 
-    curr_close = c_slice[-1]
-    
-    # 1. Cek Pola N Bullish (L1 -> H1 -> L2 (HL))
-    if len(swing_lows) >= 2 and len(swing_highs) >= 1:
-        for l2_idx, l2_val in reversed(swing_lows):
-            for h1_idx, h1_val in reversed(swing_highs):
-                if h1_idx < l2_idx:
-                    for l1_idx, l1_val in reversed(swing_lows):
-                        if l1_idx < h1_idx:
-                            impulse = h1_val - l1_val
-                            retest = h1_val - l2_val
-                            if impulse > 0 and l2_val > l1_val and (0.15 <= retest / impulse <= 0.85):
-                                is_breakout = curr_close >= h1_val * 0.998
-                                return {
-                                    "pattern": "BULLISH_N",
-                                    "is_breakout": is_breakout,
-                                    "score_boost": 20.0 if is_breakout else 10.0,
-                                    "desc": f"Pola N Bullish (L1: {l1_val:.4f} -> H1: {h1_val:.4f} -> HL: {l2_val:.4f})"
-                                }
+    p_open = opens[-3]
+    p_close = closes[-3]
 
-    # 2. Cek Pola N Bearish (H1 -> L1 -> H2 (LH))
-    if len(swing_highs) >= 2 and len(swing_lows) >= 1:
-        for h2_idx, h2_val in reversed(swing_highs):
-            for l1_idx, l1_val in reversed(swing_lows):
-                if l1_idx < h2_idx:
-                    for h1_idx, h1_val in reversed(swing_highs):
-                        if h1_idx < l1_idx:
-                            impulse = h1_val - l1_val
-                            retest = h2_val - l1_val
-                            if impulse > 0 and h2_val < h1_val and (0.15 <= retest / impulse <= 0.85):
-                                is_breakdown = curr_close <= l1_val * 1.002
-                                return {
-                                    "pattern": "BEARISH_N",
-                                    "is_breakout": is_breakdown,
-                                    "score_boost": 20.0 if is_breakdown else 10.0,
-                                    "desc": f"Pola N Bearish (H1: {h1_val:.4f} -> L1: {l1_val:.4f} -> LH: {h2_val:.4f})"
-                                }
+    if c_range <= 0:
+        return {"pattern": "NEUTRAL", "bias": "NEUTRAL", "score_boost": 0.0, "desc": "Candle doji flat"}
 
-    return {"pattern": "NONE", "score_boost": 0.0, "desc": "Netral (Tanpa Pola N)"}
+    body = abs(c_close - c_open)
+    upper_wick = c_high - max(c_open, c_close)
+    lower_wick = min(c_open, c_close) - c_low
+
+    # 1. Bullish Hammer / Pinbar (Lower wick panjang >= 38%, rejection di dasar)
+    if lower_wick >= c_range * 0.38 and upper_wick <= c_range * 0.25 and c_close >= c_open:
+        return {
+            "pattern": "HAMMER",
+            "bias": "BULLISH",
+            "score_boost": 20.0,
+            "desc": f"Bullish Hammer/Pinbar (Lower Wick {(lower_wick/c_range)*100:.0f}%)"
+        }
+
+    # 2. Bullish Engulfing (Candle hijau memakan candle merah sebelumnya)
+    if p_close < p_open and c_close > c_open and c_close >= p_open and body >= c_range * 0.45:
+        return {
+            "pattern": "BULLISH_ENGULFING",
+            "bias": "BULLISH",
+            "score_boost": 20.0,
+            "desc": "Bullish Engulfing solid membalikkan tren"
+        }
+
+    # 3. Solid Bullish Bounce (Green candle solid di area oversold)
+    if c_close > c_open and body >= c_range * 0.50 and upper_wick <= c_range * 0.30:
+        return {
+            "pattern": "BULLISH_BOUNCE",
+            "bias": "BULLISH",
+            "score_boost": 12.0,
+            "desc": "Solid Green Reversal Bounce"
+        }
+
+    # 4. Bearish Shooting Star / Pinbar (Upper wick panjang >= 38%, rejection di puncak)
+    if upper_wick >= c_range * 0.38 and lower_wick <= c_range * 0.25 and c_close <= c_open:
+        return {
+            "pattern": "SHOOTING_STAR",
+            "bias": "BEARISH",
+            "score_boost": 20.0,
+            "desc": f"Bearish Shooting Star (Upper Wick {(upper_wick/c_range)*100:.0f}%)"
+        }
+
+    # 5. Bearish Engulfing (Candle merah memakan candle hijau sebelumnya)
+    if p_close > p_open and c_close < c_open and c_close <= p_open and body >= c_range * 0.45:
+        return {
+            "pattern": "BEARISH_ENGULFING",
+            "bias": "BEARISH",
+            "score_boost": 20.0,
+            "desc": "Bearish Engulfing solid membalikkan tren"
+        }
+
+    # 6. Solid Bearish Rejection (Red candle solid di area overbought)
+    if c_close < c_open and body >= c_range * 0.50 and lower_wick <= c_range * 0.30:
+        return {
+            "pattern": "BEARISH_REJECTION",
+            "bias": "BEARISH",
+            "score_boost": 12.0,
+            "desc": "Solid Red Reversal Rejection"
+        }
+
+    return {"pattern": "NEUTRAL", "bias": "NEUTRAL", "score_boost": 0.0, "desc": "Candle netral"}
 
 def check_signal_from_ohlcv(
     ohlcv: List[List[float]],
@@ -138,14 +149,19 @@ def check_signal_from_ohlcv(
     ls_data: Optional[Dict[str, float]] = None
 ) -> Optional[Dict[str, Any]]:
     """
-    Memeriksa sinyal Triple Confirmation Momentum Scalper (Anti-Noise, Pola N, & Sentimen Arus):
-    1. Trend Regime (EMA 200 pada TF 5m).
-    2. Crossover Trigger (EMA 9 & EMA 21).
-    3. Volume Confirmation: Memastikan volume candle pemicu aktif (bukan dead-volume fakeout).
-    4. Price Action Confirmation: Memastikan candle pemicu hijau/merah solid (bukan doji/rejection wick).
-    5. Formasi Pola N: Memvalidasi struktur N-Wave Breakout & Retest.
-    6. Sentimen Arus Pasar (Long/Short Account Ratio): Memastikan TIDAK melawan arus dominan.
-    7. Stop Loss Adaptif berbasis Volatilitas ATR (ruang gerak sehat 1.2% - 1.8% anti-noise).
+    Strategi Scalping Terpadu RSI 30 Buy & RSI 70 Sell + Candlestick Reversal & EMA Cross:
+    1. RSI Mean-Reversion Trigger:
+       - BUY saat RSI <= config.RSI_BUY_THRESHOLD (Area oversold / pantulan dari 30).
+       - SELL saat RSI >= config.RSI_SELL_THRESHOLD (Area overbought / penolakan dari 70).
+    2. Candlestick Reversal Confirmation:
+       - BUY didukung Hammer / Bullish Engulfing / Solid Green Bounce (bukan candle dump merah).
+       - SELL didukung Shooting Star / Bearish Engulfing / Solid Red Rejection (bukan candle pump hijau).
+    3. EMA Cross / Reclaim Confirmation:
+       - BUY: Harga menembus ke atas EMA 9 (Reclaim) ATAU Golden Cross (EMA 9 cross di atas EMA 21).
+       - SELL: Harga menembus ke bawah EMA 9 (Breakdown) ATAU Death Cross (EMA 9 cross di bawah EMA 21).
+    4. Sentimen Arus Pasar (Long/Short Ratio): Memastikan tidak melawan arus dominan.
+    5. Dynamic Leverage 10x - 20x sesuai skor analisis.
+    6. Risk to Reward 1:2 (SL 1.0%, TP 2.0%) dengan resiko 0.5% portofolio.
     """
     if len(ohlcv) < config.EMA_TREND + 5:
         return None
@@ -178,36 +194,31 @@ def check_signal_from_ohlcv(
     atr_val = atr_series[-2]
     latest_price = closes[-1]
 
-    # 1. Cek Crossover EMA 9 & EMA 21
+    candle_range = curr_high - curr_low
+    upper_wick = curr_high - max(curr_open, curr_close)
+    lower_wick = min(curr_open, curr_close) - curr_low
+
+    # 1. Deteksi Pola Candlestick Reversal
+    candle_info = detect_candlestick_pattern(opens, highs, lows, closes)
+    candle_bias = candle_info.get("bias", "NEUTRAL")
+    candle_pat = candle_info.get("pattern", "NEUTRAL")
+
+    # 2. Cek Crossover & Posisi EMA 9 vs EMA 21
     golden_cross = (c_prev_fast <= c_prev_slow) and (c_curr_fast > c_curr_slow)
     death_cross = (c_prev_fast >= c_prev_slow) and (c_curr_fast < c_curr_slow)
 
-    # 2. Trend Filter (EMA 200 pada TF 5m)
-    is_bullish_trend = curr_close > curr_trend
-    is_bearish_trend = curr_close < curr_trend
+    bullish_ema = golden_cross or (curr_close >= c_curr_fast) or (
+        candle_bias == "BULLISH" and curr_close > curr_open and curr_close > closes[-3]
+    )
+    bearish_ema = death_cross or (curr_close <= c_curr_fast) or (
+        candle_bias == "BEARISH" and curr_close < curr_open and curr_close < closes[-3]
+    )
 
     # 3. Volume Support Filter: Volume candle pemicu wajib aktif
     avg_vol = sum(volumes[-22:-2]) / 20.0 if len(volumes) >= 22 else curr_vol
-    has_volume_support = (curr_vol >= avg_vol * 0.90)
+    has_volume_support = (curr_vol >= avg_vol * 0.85)
 
-    # 4. Price Action Confirmation: Menghindari candle doji dan rejection wick (bull/bear trap)
-    candle_range = curr_high - curr_low
-    is_bullish_action = True
-    is_bearish_action = True
-    if candle_range > 0:
-        upper_wick = curr_high - curr_close
-        is_bullish_action = (curr_close > curr_open) and (upper_wick <= candle_range * 0.45)
-
-        lower_wick = curr_close - curr_low
-        is_bearish_action = (curr_close < curr_open) and (lower_wick <= candle_range * 0.45)
-
-    # 5. Analisis Pola N (N-Wave Breakout)
-    n_info = detect_n_pattern(highs, lows, closes, window=35)
-    n_pattern = n_info.get("pattern", "NONE")
-    is_n_valid_buy = (n_pattern != "BEARISH_N")
-    is_n_valid_sell = (n_pattern != "BULLISH_N")
-
-    # 6. Sentimen Arus Pasar (Long/Short Flow - Tidak Melawan Arus)
+    # 4. Sentimen Arus Pasar (Long/Short Flow)
     ls_info = ls_data or {"long_pct": 50.0, "short_pct": 50.0, "ratio": 1.0}
     ls_ratio = ls_info.get("ratio", 1.0)
     long_pct = ls_info.get("long_pct", 50.0)
@@ -217,40 +228,58 @@ def check_signal_from_ohlcv(
 
     signal_side = None
 
-    # Syarat BUY / LONG
-    if is_bullish_trend and golden_cross and (config.RSI_LONG_MIN <= rsi_val <= config.RSI_LONG_MAX) and \
-       has_volume_support and is_bullish_action and has_ls_support_buy and is_n_valid_buy:
+    # Syarat BUY / LONG:
+    # 1. RSI oversold <= threshold (area 30)
+    # 2. Candlestick reversal bullish ATAU candle hijau solid tanpa upper wick besar
+    # 3. EMA konfirmasi: harga menembus di atas EMA 9 ATAU Golden Cross
+    # 4. Volume aktif dan sentimen L/S tidak melawan arus short ekstrem
+    is_valid_buy_candle = (candle_bias == "BULLISH") or (curr_close > curr_open and upper_wick <= candle_range * 0.35)
+    if (rsi_val <= config.RSI_BUY_THRESHOLD) and is_valid_buy_candle and bullish_ema and \
+       has_volume_support and has_ls_support_buy:
         signal_side = "BUY"
 
-    # Syarat SELL / SHORT
-    elif is_bearish_trend and death_cross and (config.RSI_SHORT_MIN <= rsi_val <= config.RSI_SHORT_MAX) and \
-         has_volume_support and is_bearish_action and has_ls_support_sell and is_n_valid_sell:
+    # Syarat SELL / SHORT:
+    # 1. RSI overbought >= threshold (area 70)
+    # 2. Candlestick reversal bearish ATAU candle merah solid tanpa lower wick besar
+    # 3. EMA konfirmasi: harga breakdown di bawah EMA 9 ATAU Death Cross
+    # 4. Volume aktif dan sentimen L/S tidak melawan arus long ekstrem
+    is_valid_sell_candle = (candle_bias == "BEARISH") or (curr_close < curr_open and lower_wick <= candle_range * 0.35)
+    if (rsi_val >= config.RSI_SELL_THRESHOLD) and is_valid_sell_candle and bearish_ema and \
+       has_volume_support and has_ls_support_sell:
         signal_side = "SELL"
 
     if not signal_side:
         return None
 
-    # 1. Hitung skor kualitas sinyal terlebih dahulu (RSI + Volume + Pola N + Arus Sentimen)
-    vol_ratio = min(1.5, curr_vol / avg_vol) if avg_vol > 0 else 1.0
-    base_score = (100.0 - abs(rsi_val - 55.0)) * (0.8 + 0.2 * vol_ratio)
-    
+    # 1. Hitung skor kualitas sinyal (Kombinasi RSI Ekstrem + Candlestick Reversal + EMA Cross + Volume)
+    base_score = 50.0
     if signal_side == "BUY":
-        if n_pattern == "BULLISH_N":
-            base_score += n_info.get("score_boost", 15.0)
+        # Semakin mendekati atau menembus ke bawah RSI 30, semakin tinggi skor pantulan
+        rsi_boost = max(0.0, (38.0 - rsi_val) * 2.5)
+        base_score += min(25.0, rsi_boost)
+        base_score += candle_info.get("score_boost", 10.0)
+        base_score += 15.0 if golden_cross else 8.0
+        if curr_vol >= avg_vol * 1.15:
+            base_score += 8.0
         if ls_ratio >= 1.05:
-            base_score += 10.0
+            base_score += 7.0
     elif signal_side == "SELL":
-        if n_pattern == "BEARISH_N":
-            base_score += n_info.get("score_boost", 15.0)
+        # Semakin mendekati atau menembus ke atas RSI 70, semakin tinggi skor penolakan
+        rsi_boost = max(0.0, (rsi_val - 62.0) * 2.5)
+        base_score += min(25.0, rsi_boost)
+        base_score += candle_info.get("score_boost", 10.0)
+        base_score += 15.0 if death_cross else 8.0
+        if curr_vol >= avg_vol * 1.15:
+            base_score += 8.0
         if ls_ratio <= 0.95:
-            base_score += 10.0
+            base_score += 7.0
 
     score = min(100.0, round(base_score, 2))
 
     # 2. Dynamic Leverage Disesuaikan dengan Rasio Hasil Analisis (10x s/d 20x)
     dynamic_leverage = config.LEVERAGE
     if config.DYNAMIC_LEVERAGE_ENABLED:
-        if score >= 82 and n_pattern != "NONE":
+        if score >= 82 and candle_pat != "NEUTRAL":
             dynamic_leverage = 20
         elif score >= 72:
             dynamic_leverage = 15
@@ -258,8 +287,8 @@ def check_signal_from_ohlcv(
             dynamic_leverage = 10
 
     # 3. Model Risiko Portofolio 0.5% (Risk-Budget Sizing):
-    # Jika SL = 1.0%, maka kerugian maksimal tepat 0.5% dari saldo portofolio.
-    # Jika TP = 2.0% (RRR 1:2), maka keuntungan maksimal tepat 2x risiko (1.0% dari saldo portofolio).
+    # SL = 1.0%, kerugian maksimal tepat 0.5% dari saldo portofolio.
+    # TP = 2.0% (RRR 1:2), keuntungan tepat 2x risiko (1.0% dari saldo portofolio).
     sl_percent = config.SL_PERCENT  # 1.0%
     tp_percent = sl_percent * config.RR_RATIO  # 2.0% (Risk to Reward 1:2)
     risk_budget_usd = available_capital * config.RISK_PORTFOLIO_PERCENT
@@ -277,10 +306,22 @@ def check_signal_from_ohlcv(
         entry_price = latest_price
         sl_price = entry_price * (1.0 - sl_percent)
         tp_price = entry_price * (1.0 + tp_percent)
+        if golden_cross:
+            ema_status = "Golden Cross (EMA 9 > 21)"
+        elif curr_close >= c_curr_fast:
+            ema_status = "Reclaim EMA 9"
+        else:
+            ema_status = "Oversold Dip Bounce"
     else:
         entry_price = latest_price
         sl_price = entry_price * (1.0 + sl_percent)
         tp_price = entry_price * (1.0 - tp_percent)
+        if death_cross:
+            ema_status = "Death Cross (EMA 9 < 21)"
+        elif curr_close <= c_curr_fast:
+            ema_status = "Breakdown EMA 9"
+        else:
+            ema_status = "Overbought Peak Rejection"
 
     return {
         "side": signal_side,
@@ -299,14 +340,15 @@ def check_signal_from_ohlcv(
         "ema_trend": round(curr_trend, 4),
         "atr": round(atr_val, 4),
         "score": score,
-        "n_pattern": n_pattern,
-        "n_desc": n_info.get("desc", ""),
+        "candlestick_pattern": candle_pat,
+        "ema_status": ema_status,
+        "n_pattern": candle_pat,  # Kompatibilitas field lama
+        "n_desc": f"{candle_info.get('desc', '')} + {ema_status}",
         "ls_ratio": ls_ratio,
         "long_pct": long_pct,
         "short_pct": short_pct
     }
 
 def check_signal(ohlcv: List[List[float]], available_capital: float = 10.0, leverage: int = 10, ls_data: Optional[Dict[str, float]] = None) -> Optional[Dict[str, Any]]:
-    """Fungsi utama pemeriksaan sinyal scalping 5m berbasis list OHLCV native."""
+    """Fungsi utama pemeriksaan sinyal scalping 1m berbasis list OHLCV native."""
     return check_signal_from_ohlcv(ohlcv, available_capital, leverage, ls_data)
-
