@@ -13,8 +13,8 @@ class BotConfig:
     API_SECRET: str = os.getenv("BINANCE_API_SECRET", "")
 
     # --- Market Scanning ---
-    TOP_COINS_LIMIT: int = 200             # Pindai 200 koin volume teratas di Binance Futures
-    SCAN_INTERVAL_SECONDS: int = 45        # Interval siklus pemindaian antar putaran
+    TOP_COINS_LIMIT: int = 50              # Pindai 50 koin paling likuid & volatil di Binance Futures (Aman 100% dari rate limit)
+    SCAN_INTERVAL_SECONDS: int = 60        # Selaras dengan penutupan candle 1m (1 menit)
     TIMEFRAME: str = "1m"                  # Timeframe 1 menit untuk scalping agresif
     CANDLE_LIMIT: int = 220                # 220 candle untuk perhitungan EMA 200 yang presisi
 
