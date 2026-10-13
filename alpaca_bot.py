@@ -187,22 +187,31 @@ class AlpacaScalper:
                         has_position = True
                         qty = float(pos.get("qty", 0))
                         entry_price = float(pos.get("avg_entry_price", 0))
-                        current_price = float(pos.get("current_price", 0))
-                        unrealized_pl = float(pos.get("unrealized_pl", 0))
-                        pl_pct = float(pos.get("unrealized_plpc", 0)) * 100
+                        
+                        # Ambil harga pasar live real-time (Best Bid) agar deteksi TP tidak terkena delay snapshot
+                        best_bid, _ = self.get_best_bid_ask()
+                        current_price = best_bid if best_bid else float(pos.get("current_price", 0))
+                        
+                        # Hitung PnL presisi detik ini
+                        pl_pct = ((current_price - entry_price) / entry_price) * 100
+                        unrealized_pl = qty * (current_price - entry_price)
+
+                        # Cek apakah sudah ada limit sell TP yang sedang antre
+                        open_orders = self.get_alpaca_orders()
+                        has_active_sell = any(o.get("side") == "sell" for o in open_orders)
 
                         # Target TP (+1.0% = +$0.10) & SL (-0.5% = -$0.05)
-                        if pl_pct >= 1.0:
-                            console.print(f"[bold green]TARGET PROFIT TERCAPAI (+{pl_pct:.2f}%)! Mengirim Limit Sell ke Alpaca...[/bold green]")
+                        if pl_pct >= 1.0 and not has_active_sell:
+                            console.print(f"[bold green]TARGET PROFIT TERCAPAI (+{pl_pct:.2f}%)! Mengirim Limit Sell ke Alpaca @ ${current_price:,.2f}...[/bold green]")
                             self.place_limit_sell(qty, current_price)
-                        elif pl_pct <= -0.5:
-                            console.print(f"[bold red]STOP LOSS TERKENA ({pl_pct:.2f}%)! Mengirim Limit Sell proteksi ke Alpaca...[/bold red]")
+                        elif pl_pct <= -0.5 and not has_active_sell:
+                            console.print(f"[bold red]STOP LOSS TERKENA ({pl_pct:.2f}%)! Mengirim Limit Sell proteksi ke Alpaca @ ${current_price:,.2f}...[/bold red]")
                             self.place_limit_sell(qty, current_price)
                         else:
                             console.print(
                                 f"[{datetime.now().strftime('%H:%M:%S')}] [cyan]POSISI AKTIF DI ALPACA:[/cyan] "
                                 f"{qty:.6f} BTC @ ${entry_price:,.2f} | "
-                                f"Harga Sekarang: ${current_price:,.2f} | "
+                                f"Harga Realtime: ${current_price:,.2f} | "
                                 f"PnL: [{'green' if unrealized_pl >= 0 else 'red'}]${unrealized_pl:+.4f} ({pl_pct:+.2f}%)[/]"
                             )
                         break
