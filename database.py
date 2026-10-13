@@ -174,9 +174,13 @@ class NeonDatabase:
                     """)
                     row = cur.fetchone()
                     if row:
-                        return dict(row)
-        except Exception:
-            pass
+                        return {
+                            "total_trades": int(row.get("total_trades") or 0),
+                            "winning_trades": int(row.get("winning_trades") or 0),
+                            "total_pnl_usd": float(row.get("total_pnl_usd") or 0.0)
+                        }
+        except Exception as e:
+            console.log(f"[dim]DB summary error: {e}[/dim]")
         return {"total_trades": 0, "winning_trades": 0, "total_pnl_usd": 0.0}
 
 db = NeonDatabase()

@@ -62,37 +62,44 @@ from database import db
 
 @app.api_route("/", methods=["GET", "HEAD"])
 def index():
-    bal = scalper.get_futures_balance()
-    db_summary = db.get_trade_summary()
-    return {
-        "status": "online",
-        "service": "Binance Futures Scalping Autonomous Bot (Native Engine)",
-        "exchange": "Binance USD(S)-M Futures",
-        "margin_mode": "ISOLATED",
-        "leverage": f"{config.LEVERAGE}x",
-        "order_type": "LIMIT ORDER (Maker Only / GTX)",
-        "portfolio_allocation": f"{config.RISK_PORTFOLIO_PERCENT * 100}% per posisi (Compounding Stabil)",
-        "futures_wallet_usdt": bal["total_wallet"],
-        "available_usdt": bal["available"],
-        "trade_size_notional": scalper.get_compounded_notional(),
-        "database": "Neon Tech PostgreSQL (Schema: binance_scalper)",
-        "db_trade_summary": db_summary,
-        "monitored_top_coins": len(scalper.ranked_pairs),
-        "last_scan_time": scalper.last_scan_time,
-        "last_scan_duration_sec": scalper.last_scan_duration_sec,
-        "market_regime": {
-            "bullish_above_ema200": scalper.bullish_count,
-            "bearish_below_ema200": scalper.bearish_count
-        },
-        "active_signals_count": len(scalper.active_signals),
-        "active_signals": scalper.active_signals[:5],
-        "active_position": scalper.active_position,
-        "active_order": scalper.active_order,
-        "total_trades": scalper.total_trades,
-        "winning_trades": scalper.winning_trades,
-        "total_pnl_usd": round(scalper.total_pnl_usd, 4),
-        "last_error": scalper.last_error
-    }
+    try:
+        bal = scalper.get_futures_balance()
+        try:
+            db_summary = db.get_trade_summary()
+        except Exception:
+            db_summary = {"total_trades": 0, "winning_trades": 0, "total_pnl_usd": 0.0}
+
+        return {
+            "status": "online",
+            "service": "Binance Futures Scalping Autonomous Bot (Native Engine)",
+            "exchange": "Binance USD(S)-M Futures",
+            "margin_mode": "ISOLATED",
+            "leverage": f"{config.LEVERAGE}x",
+            "order_type": "LIMIT ORDER (Maker Only / GTX)",
+            "portfolio_allocation": f"{config.RISK_PORTFOLIO_PERCENT * 100}% per posisi (Compounding Stabil)",
+            "futures_wallet_usdt": bal["total_wallet"],
+            "available_usdt": bal["available"],
+            "trade_size_notional": scalper.get_compounded_notional(),
+            "database": "Neon Tech PostgreSQL (Schema: binance_scalper)",
+            "db_trade_summary": db_summary,
+            "monitored_top_coins": len(scalper.ranked_pairs),
+            "last_scan_time": scalper.last_scan_time,
+            "last_scan_duration_sec": scalper.last_scan_duration_sec,
+            "market_regime": {
+                "bullish_above_ema200": scalper.bullish_count,
+                "bearish_below_ema200": scalper.bearish_count
+            },
+            "active_signals_count": len(scalper.active_signals),
+            "active_signals": scalper.active_signals[:5],
+            "active_position": scalper.active_position,
+            "active_order": scalper.active_order,
+            "total_trades": scalper.total_trades,
+            "winning_trades": scalper.winning_trades,
+            "total_pnl_usd": round(scalper.total_pnl_usd, 4),
+            "last_error": scalper.last_error
+        }
+    except Exception as e:
+        return {"status": "degraded", "error": str(e)}
 
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health_check():
