@@ -299,10 +299,9 @@ class BinanceScalper:
                 
             formatted_price = self.client.format_price(symbol, best_price)
             
-            # 3. Hitung qty sesuai alokasi 0.5% portofolio x Leverage
-            notional = sig["notional"]
-            raw_qty = notional / formatted_price
-            formatted_qty = self.client.format_qty(symbol, raw_qty)
+            # 3. Hitung qty dengan jaminan nilai notional >= $5.00 dan presisi tepat
+            notional = max(5.15, sig["notional"])
+            formatted_qty = self.client.calculate_order_qty(symbol, notional, formatted_price)
             
             if formatted_qty <= 0:
                 console.log(f"[red]Ukuran order terlalu kecil untuk {symbol}: {raw_qty}[/red]")

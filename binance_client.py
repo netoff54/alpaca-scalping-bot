@@ -129,6 +129,36 @@ class BinanceFuturesClient:
         val = math.floor(qty / step) * step
         return float(f"{val:.{prec}f}")
 
+    def calculate_order_qty(self, symbol: str, target_notional: float, price: float) -> float:
+        """
+        Menghitung kuantitas order yang dijamin:
+        1. Memenuhi step_size dan quantityPrecision resmi.
+        2. Nilai notional (qty * price) dijamin >= $5.00 (tidak pernah kena error -4164).
+        3. Tidak di bawah min_qty bursa.
+        """
+        rules = self._symbols_rules.get(symbol, {})
+        step = rules.get("step_size", 1.0)
+        prec = rules.get("qty_precision", 2)
+        min_qty = rules.get("min_qty", step)
+        
+        # Target notional minimal $5.15 untuk buffer aman anti-slippage
+        effective_notional = max(target_notional, 5.15)
+        
+        # Gunakan math.ceil agar pembulatan kelipatan lot size tidak menjatuhkan notional di bawah $5.0
+        raw_qty = effective_notional / price
+        steps_count = math.ceil(raw_qty / step)
+        qty = steps_count * step
+        
+        if qty < min_qty:
+            qty = min_qty
+            
+        # Pengecekan ketat: jika hasil kali qty * price masih < 5.0, naikkan 1 step
+        while (qty * price) < 5.05:
+            qty += step
+            
+        return float(f"{qty:.{prec}f}")
+
+
     def get_balance(self) -> Dict[str, float]:
         """Mengambil saldo wallet Futures (USDT)."""
         url = f"{self.base_url}/fapi/v2/balance"
