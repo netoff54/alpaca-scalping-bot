@@ -3,9 +3,8 @@ import time
 import math
 import asyncio
 import threading
+import gc
 from typing import Dict, Any, List, Optional
-import pandas as pd
-import numpy as np
 import ccxt
 import ccxt.async_support as ccxt_async
 from rich.console import Console
@@ -15,13 +14,22 @@ import strategy
 
 console = Console()
 
+# Daftar aset saham TradFi & komoditas non-crypto di Binance Futures yang memerlukan kontrak khusus (Code -4411)
+TRADFI_EXCLUSIONS = {
+    'SKHY', 'MRNA', 'ARM', 'SOXL', 'SPCX', 'INTW', 'SNDK', 'SQQQ',
+    'NVDA', 'TSLA', 'AAPL', 'AMZN', 'MSFT', 'GOOGL', 'META', 'MU',
+    'AMD', 'COIN', 'PLTR', 'BABA', 'DIS', 'NFLX', 'INTC', 'QCOM',
+    'AVGO', 'TSM', 'NIO', 'BA', 'UBER', 'PYPL', 'ORCL', 'CRM', 'MSTR',
+    'GOLD', 'SILVER', 'OIL', 'BRENT', 'US500', 'US100', 'US30'
+}
+
 class BinanceScalper:
     def __init__(self):
         self.api_key = config.API_KEY
         self.api_secret = config.API_SECRET
         self.is_testnet = config.IS_TESTNET
         
-        # CCXT Client Sinkron (untuk balance, order, dan posisi)
+        # CCXT Client Sinkron untuk eksekusi order & balance
         self.exchange = ccxt.binance({
             'apiKey': self.api_key,
             'secret': self.api_secret,
@@ -32,6 +40,9 @@ class BinanceScalper:
                 'warnOnFetchOpenOrdersWithoutSymbol': False
             }
         })
+        
+        # Client Asinkron tunggal yang digunakan ulang untuk menghemat memori
+        self._async_client: Optional[ccxt_async.binance] = None
         
         # State tracking
         self.is_running = False
@@ -50,6 +61,10 @@ class BinanceScalper:
         self.total_trades: int = 0
         self.winning_trades: int = 0
         self.total_pnl_usd: float = 0.0
+        
+        # Top 50 symbols cache (Refresh setiap 30 menit untuk hemat bandwidth & CPU/RAM)
+        self._cached_top_symbols: List[Dict[str, Any]] = []
+        self._last_top_symbols_refresh: float = 0.0
         
         # Balance cache & Rate limit cooldown
         self._cached_balance: Dict[str, float] = {"total_wallet": 0.0, "available": 0.0, "unrealized_pnl": 0.0}
@@ -72,14 +87,13 @@ class BinanceScalper:
             console.log(f"[dim]Cek MultiAssetsMargin: {e}[/dim]")
 
     def get_futures_balance(self, max_age_sec: float = 60.0) -> Dict[str, float]:
-        """Mengambil saldo wallet USDⓈ-M Futures dengan caching 60 detik (Sangat aman dari rate limit)."""
+        """Mengambil saldo wallet USDⓈ-M Futures dengan caching 60 detik (Aman dari rate limit)."""
         now = time.time()
-        # Jika sedang dalam masa jeda rate limit Binance, gunakan cache dan jangan request
         if now < self._ban_until:
             if now - self._last_ban_log_time > 120:
                 self._last_ban_log_time = now
                 s_left = int(self._ban_until - now)
-                console.log(f"[yellow]IP server dalam masa jeda rate limit Binance ({s_left} detik tersisa). Menunggu cooldown...[/yellow]")
+                console.log(f"[yellow]IP server dalam masa jeda rate limit Binance ({s_left} detik tersisa)...[/yellow]")
             return self._cached_balance
 
         if now - self._last_balance_time < max_age_sec and self._cached_balance["total_wallet"] > 0:
@@ -111,7 +125,6 @@ class BinanceScalper:
             self.last_error = f"Balance error: {err_msg}"
             self._last_balance_time = now + 15
             
-            # Deteksi otomatis pesan IP banned / -1003 dari Binance
             if "-1003" in err_msg or "IP banned" in err_msg:
                 import re
                 match = re.search(r"IP banned until (\d+)", err_msg)
@@ -119,17 +132,67 @@ class BinanceScalper:
                     self._ban_until = float(match.group(1)) / 1000.0
                 else:
                     self._ban_until = now + 600.0
-                console.log(f"[bold yellow]Rate limit Binance terpicu pada IP server. Menunda request hingga {time.strftime('%H:%M:%S', time.localtime(self._ban_until))}[/bold yellow]")
+                console.log(f"[bold yellow]Rate limit Binance terpicu. Menunda request hingga {time.strftime('%H:%M:%S', time.localtime(self._ban_until))}[/bold yellow]")
             else:
                 console.log(f"[red]Error mengambil balance Futures: {e}[/red]")
             return self._cached_balance
 
+    def sync_exchange_position(self) -> Optional[Dict[str, Any]]:
+        """
+        Sinkronisasi otomatis dengan posisi riil di bursa Binance Futures.
+        Jika bot baru restart dan masih ada posisi terbuka, bot akan langsung melanjutkannya.
+        Jika posisi telah tertutup (oleh TP/SL/manual), bot akan mengosongkan state agar bisa scan lagi.
+        """
+        if time.time() < self._ban_until:
+            return self.active_position
+
+        try:
+            positions = self.exchange.fetch_positions()
+            open_positions = [
+                p for p in positions 
+                if p.get('contracts') and abs(float(p['contracts'])) > 0
+            ]
+            
+            if open_positions:
+                pos = open_positions[0]
+                symbol = pos.get('symbol', '')
+                contracts = abs(float(pos.get('contracts', 0)))
+                side = 'buy' if float(pos.get('contracts', 0)) > 0 else 'sell'
+                entry_price = float(pos.get('entryPrice', 0.0))
+                notional = float(pos.get('notional', contracts * entry_price))
+                
+                # Pertahankan SL/TP sebelumnya jika symbol sama, atau kalkulasi ulang jika baru restart
+                if self.active_position and self.active_position.get('symbol') == symbol:
+                    sl_price = self.active_position.get('sl_price', entry_price * (0.995 if side == 'buy' else 1.005))
+                    tp_price = self.active_position.get('tp_price', entry_price * (1.010 if side == 'buy' else 0.990))
+                    opened_at = self.active_position.get('opened_at', time.time())
+                else:
+                    sl_price = entry_price * (1.0 - config.SL_PERCENT) if side == 'buy' else entry_price * (1.0 + config.SL_PERCENT)
+                    tp_price = entry_price * (1.0 + config.TP_PERCENT) if side == 'buy' else entry_price * (1.0 - config.TP_PERCENT)
+                    opened_at = time.time()
+                
+                self.active_position = {
+                    'symbol': symbol,
+                    'side': side,
+                    'entry_price': entry_price,
+                    'qty': contracts,
+                    'sl_price': sl_price,
+                    'tp_price': tp_price,
+                    'opened_at': opened_at,
+                    'notional': notional
+                }
+                return self.active_position
+            else:
+                if self.active_position is not None:
+                    console.log(f"[bold yellow]Posisi {self.active_position.get('symbol')} tidak lagi aktif di Binance (Telah selesai / tertutup).[/bold yellow]")
+                    self.active_position = None
+                return None
+        except Exception as e:
+            console.log(f"[dim]Sync position check: {e}[/dim]")
+            return self.active_position
+
     def get_compounded_notional(self) -> float:
-        """
-        Menghitung ukuran order berikutnya (Compounding 100%).
-        Jika saldo tersedia >= $1, gunakan 100% saldo * leverage.
-        Jika saldo belum ada ($0), gunakan baseline konfigurasi ($10 * leverage = $50 notional).
-        """
+        """Menghitung ukuran order berikutnya (Compounding 100%)."""
         bal = self.get_futures_balance()
         avail = bal["available"]
         if avail >= 1.0:
@@ -148,34 +211,61 @@ class BinanceScalper:
         except Exception as e:
             console.log(f"[dim]Set leverage {symbol}: {e}[/dim]")
 
+    async def _get_or_create_async_client(self) -> ccxt_async.binance:
+        """Menggunakan kembali async client tunggal untuk mencegah memory leak."""
+        if self._async_client is None:
+            self._async_client = ccxt_async.binance({
+                'apiKey': self.api_key,
+                'secret': self.api_secret,
+                'options': {
+                    'defaultType': 'future',
+                    'adjustForTimeDifference': True,
+                    'recvWindow': 60000,
+                    'fetchCurrencies': False
+                }
+            })
+        return self._async_client
+
     async def scan_top_200_async(self):
-        """Memindai 200 koin volume teratas di Binance Futures secara asinkron."""
+        """
+        Memindai koin volume teratas di Binance Futures secara asinkron.
+        Menggunakan cache symbol dan membersihkan memori secara agresif agar RAM < 80MB.
+        """
         t_start = time.time()
-        client = ccxt_async.binance({
-            'apiKey': self.api_key,
-            'secret': self.api_secret,
-            'options': {
-                'defaultType': 'future',
-                'adjustForTimeDifference': True,
-                'recvWindow': 60000,
-                'fetchCurrencies': False
-            }
-        })
+        client = await self._get_or_create_async_client()
         
         try:
-            tickers = await client.fetch_tickers()
-            usdt_tickers = {
-                s: t for s, t in tickers.items()
-                if s.endswith('/USDT:USDT') and t.get('quoteVolume') is not None
-            }
-            sorted_pairs = sorted(usdt_tickers.items(), key=lambda x: x[1]['quoteVolume'], reverse=True)[:config.TOP_COINS_LIMIT]
-            
-            # Ambil saldo satu kali sebelum looping
+            now = time.time()
+            # 1. Perbarui daftar Top 50 koin hanya setiap 30 menit
+            if not self._cached_top_symbols or (now - self._last_top_symbols_refresh > 1800):
+                tickers = await client.fetch_tickers()
+                filtered = []
+                for s, t in tickers.items():
+                    if not s.endswith('/USDT:USDT') or t.get('quoteVolume') is None:
+                        continue
+                    # Abaikan aset saham TradFi yang memicu error -4411
+                    base = s.split('/')[0]
+                    if base in TRADFI_EXCLUSIONS:
+                        continue
+                    filtered.append((s, t['quoteVolume']))
+                
+                # Urutkan berdasarkan volume 24 jam tertinggi
+                filtered.sort(key=lambda x: x[1], reverse=True)
+                self._cached_top_symbols = [{'symbol': s, 'quoteVolume': v} for s, v in filtered[:config.TOP_COINS_LIMIT]]
+                self._last_top_symbols_refresh = now
+                del tickers
+                del filtered
+                gc.collect()
+
+            # 2. Ambil saldo akun satu kali
             bal = self.get_futures_balance()
             cap = bal['available'] if bal['available'] >= 1.0 else config.DEFAULT_CAPITAL
             
-            sem = asyncio.Semaphore(5)
-            async def analyze_pair(rank: int, symbol: str, ticker: Dict[str, Any]):
+            # 3. Analisis pair dengan batasan konkurensi (Semaphore 3) untuk stabilitas memori
+            sem = asyncio.Semaphore(3)
+            async def analyze_pair(rank: int, item: Dict[str, Any]):
+                symbol = item['symbol']
+                q_vol = item['quoteVolume']
                 async with sem:
                     try:
                         ohlcv = await client.fetch_ohlcv(symbol, timeframe=config.TIMEFRAME, limit=config.CANDLE_LIMIT)
@@ -194,27 +284,30 @@ class BinanceScalper:
                         latest_price = closes[-1]
                         is_bullish = closes[-2] > ema_trend
 
-                        result = {
+                        del ohlcv
+                        del closes
+                        del highs
+                        del lows
+
+                        return {
                             'rank': rank,
                             'symbol': symbol,
                             'price': latest_price,
-                            'vol_24h_m': round(ticker['quoteVolume'] / 1_000_000, 2),
+                            'vol_24h_m': round(q_vol / 1_000_000, 2),
                             'trend': 'BULLISH' if is_bullish else 'BEARISH',
                             'rsi': round(rsi_val, 2),
                             'atr': round(atr_val, 4),
                             'signal': sig
                         }
-                        return result
                     except Exception:
                         return None
                         
-            tasks = [analyze_pair(i + 1, s, t) for i, (s, t) in enumerate(sorted_pairs)]
+            tasks = [analyze_pair(i + 1, item) for i, item in enumerate(self._cached_top_symbols)]
             results = await asyncio.gather(*tasks)
             del tasks
-            import gc
             gc.collect()
-            valid = [r for r in results if r is not None]
             
+            valid = [r for r in results if r is not None]
             self.ranked_pairs = valid
             self.bullish_count = sum(1 for r in valid if r['trend'] == 'BULLISH')
             self.bearish_count = sum(1 for r in valid if r['trend'] == 'BEARISH')
@@ -229,43 +322,40 @@ class BinanceScalper:
                     signals.append(sig_data)
                     
             self.active_signals = sorted(signals, key=lambda x: x.get('score', 0), reverse=True)
-            
-            # Watchlist: koin yang mendekati momentum optimal (RSI mendekati 55)
             self.watchlist = sorted(valid, key=lambda x: abs(x['rsi'] - 55.0))[:8]
             
             self.last_scan_duration_sec = round(time.time() - t_start, 2)
             self.last_scan_time = time.strftime("%Y-%m-%d %H:%M:%S")
             
         except Exception as e:
-            console.log(f"[red]Error dalam pemindaian asinkron Top 200: {e}[/red]")
+            console.log(f"[red]Error dalam pemindaian asinkron: {e}[/red]")
         finally:
-            await client.close()
+            gc.collect()
 
     def execute_limit_order(self, sig: Dict[str, Any]) -> bool:
-        """
-        Mengeksekusi Limit Order (Maker only) dengan perlindungan timeout 30 detik.
-        """
+        """Mengeksekusi Limit Order (Maker only) dengan perlindungan timeout 30 detik."""
         symbol = sig['symbol']
         side = "buy" if sig['side'] == "BUY" else "sell"
         target_price = sig['entry_price']
         
+        # Perlindungan TradFi ekstra
+        base = symbol.split('/')[0]
+        if base in TRADFI_EXCLUSIONS:
+            console.log(f"[yellow]Melewati order pada {symbol} karena termasuk TradFi/Saham.[/yellow]")
+            return False
+
         try:
-            # 1. Pastikan Margin ISOLATED dan Leverage
             self.set_margin_and_leverage(symbol)
             
-            # 2. Ambil order book untuk harga terbaik Maker
             ob = self.exchange.fetch_order_book(symbol, limit=5)
             if side == "buy":
-                # Limit buy pada best bid agar bertindak sebagai Maker
                 best_price = ob['bids'][0][0] if ob['bids'] else target_price
             else:
-                # Limit sell pada best ask agar bertindak sebagai Maker
                 best_price = ob['asks'][0][0] if ob['asks'] else target_price
                 
             price_prec = self.exchange.price_to_precision(symbol, best_price)
             price_float = float(price_prec)
             
-            # 3. Hitung qty sesuai precision
             notional = sig['notional']
             raw_qty = notional / price_float
             qty_prec = self.exchange.amount_to_precision(symbol, raw_qty)
@@ -277,7 +367,6 @@ class BinanceScalper:
                 
             console.log(f"[bold cyan]Dispatching Maker Limit Order: {side.upper()} {qty_float} {symbol} @ {price_float}[/bold cyan]")
             
-            # 4. Kirim LIMIT order
             order = self.exchange.create_order(
                 symbol=symbol,
                 type='limit',
@@ -299,7 +388,7 @@ class BinanceScalper:
                 'placed_at': time.time()
             }
             
-            # 5. Loop Pemantauan 30 Detik (Anti-FOMO Auto-Cancel)
+            # Loop Pemantauan 30 Detik (Anti-FOMO Auto-Cancel)
             console.log(f"[yellow]Menunggu limit order terisi (maks 30 detik)...[/yellow]")
             t_start = time.time()
             while time.time() - t_start < config.LIMIT_TIMEOUT_SECONDS:
@@ -321,19 +410,18 @@ class BinanceScalper:
                         }
                         self.active_order = None
                         return True
-                    elif status == 'canceled' or status == 'rejected':
-                        console.log(f"[yellow]Order dibatalkan/ditolak oleh sistem ({status}).[/yellow]")
+                    elif status in ('canceled', 'rejected'):
+                        console.log(f"[yellow]Order dibatalkan/ditolak ({status}).[/yellow]")
                         self.active_order = None
                         return False
                 except Exception as err:
                     console.log(f"[dim]Pengecekan order {order_id}: {err}[/dim]")
                     
-            # Jika belum terisi setelah 30 detik -> AUTO-CANCEL
-            console.log(f"[bold yellow]Limit order tidak terisi dalam 30 detik. Membatalkan order {order_id} (Anti-FOMO)...[/bold yellow]")
+            console.log(f"[bold yellow]Limit order tidak terisi dalam 30 detik. Auto-cancel {order_id} (Anti-FOMO)...[/bold yellow]")
             try:
                 self.exchange.cancel_order(order_id, symbol)
             except Exception as e:
-                console.log(f"[dim]Gagal cancel order {order_id}: {e}[/dim]")
+                console.log(f"[dim]Gagal cancel order: {e}[/dim]")
                 
             self.active_order = None
             return False
@@ -363,9 +451,7 @@ class BinanceScalper:
             pnl_pct = ((current_price - entry_price) / entry_price) if side == 'buy' else ((entry_price - current_price) / entry_price)
             pnl_usd = pnl_pct * pos['notional']
             
-            # Cek TAKE PROFIT (+1.0%)
             hit_tp = (current_price >= tp_price) if side == 'buy' else (current_price <= tp_price)
-            # Cek STOP LOSS (-0.5%)
             hit_sl = (current_price <= sl_price) if side == 'buy' else (current_price >= sl_price)
             
             if hit_tp:
@@ -409,32 +495,36 @@ class BinanceScalper:
         console.log("[bold green]>>> Binance Scalper Autonomous Loop Dimulai <<<[/bold green]")
         self.is_running = True
         
-        # Inisialisasi awal di background thread (aman dan tidak memblokir server startup)
+        # Inisialisasi awal
         self._ensure_single_asset_mode()
         self.get_futures_balance(max_age_sec=0)
+        self.sync_exchange_position()
         
         while self.is_running:
             try:
-                # 0. Jika IP sedang dalam masa jeda rate limit, tunda loop tanpa spamming
+                # 0. Jika IP sedang dalam masa jeda rate limit, tunggu
                 if time.time() < self._ban_until:
                     s_left = int(self._ban_until - time.time())
                     time.sleep(min(30, s_left + 1))
                     continue
 
-                # 1. Jika ada posisi aktif, pantau terlebih dahulu
+                # 1. Selalu sinkronisasi posisi riil dari Binance setiap awal siklus
+                self.sync_exchange_position()
+
+                # 2. Jika ada posisi aktif, pantau harga secara intensif
                 if self.active_position:
                     self.monitor_active_position()
                     time.sleep(3)
                     continue
                     
-                # 2. Jalankan pemindaian Top 200 koin
+                # 3. Jalankan pemindaian koin Top volume
                 asyncio.run(self.scan_top_200_async())
                 
-                # 3. Cek saldo akun
+                # 4. Cek saldo akun
                 bal = self.get_futures_balance()
                 avail_usdt = bal['available']
                 
-                # 4. Jika ada sinyal valid dan saldo tersedia >= syarat order
+                # 5. Jika ada sinyal valid dan saldo tersedia cukup
                 if self.active_signals and not self.active_order and not self.active_position:
                     best_signal = self.active_signals[0]
                     console.log(f"[bold green]Sinyal terbaik terdeteksi:[/bold green] {best_signal['side']} {best_signal['symbol']} (Skor: {best_signal.get('score', 0)})")
@@ -442,7 +532,7 @@ class BinanceScalper:
                     if avail_usdt >= (config.MIN_NOTIONAL / config.LEVERAGE):
                         self.execute_limit_order(best_signal)
                     else:
-                        console.log(f"[yellow]Saldo USDT Futures saat ini: ${avail_usdt:.2f}. Menunggu penambahan saldo/transfer untuk eksekusi otomatis.[/yellow]")
+                        console.log(f"[yellow]Saldo USDT Futures saat ini: ${avail_usdt:.2f}. Menunggu modal untuk eksekusi otomatis.[/yellow]")
                         
                 time.sleep(config.SCAN_INTERVAL_SECONDS)
                 

@@ -111,6 +111,19 @@ def health_check():
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "degraded", "error": str(e)})
 
+@app.get("/positions")
+def positions():
+    """Endpoint untuk memeriksa posisi aktif terkini langsung dari bursa Binance."""
+    live_pos = scalper.sync_exchange_position()
+    return {
+        "has_active_position": live_pos is not None,
+        "active_position": live_pos,
+        "active_order": scalper.active_order,
+        "futures_wallet_usdt": scalper._cached_balance["total_wallet"],
+        "available_usdt": scalper._cached_balance["available"],
+        "unrealized_pnl": scalper._cached_balance["unrealized_pnl"]
+    }
+
 @app.get("/scan-results")
 def scan_results():
     """Endpoint detail hasil pemindaian Top 200 koin Binance Futures."""
@@ -123,6 +136,7 @@ def scan_results():
         "active_signals": scalper.active_signals,
         "top_watchlist": scalper.watchlist
     }
+
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 10000))
