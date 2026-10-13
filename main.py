@@ -84,7 +84,8 @@ def index():
         "active_order": scalper.active_order,
         "total_trades": scalper.total_trades,
         "winning_trades": scalper.winning_trades,
-        "total_pnl_usd": round(scalper.total_pnl_usd, 4)
+        "total_pnl_usd": round(scalper.total_pnl_usd, 4),
+        "last_error": scalper.last_error
     }
 
 @app.api_route("/health", methods=["GET", "HEAD"])
@@ -104,6 +105,7 @@ def health_check():
             "last_scan_time": scalper.last_scan_time,
             "has_active_position": scalper.active_position is not None,
             "active_position": scalper.active_position,
+            "last_error": scalper.last_error,
             "bot_alive": bot_thread.is_alive() if bot_thread else False
         }
     except Exception as e:

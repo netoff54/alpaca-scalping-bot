@@ -51,6 +51,11 @@ class BinanceScalper:
         self.winning_trades: int = 0
         self.total_pnl_usd: float = 0.0
         
+        # Balance cache
+        self._cached_balance: Dict[str, float] = {"total_wallet": 0.0, "available": 0.0, "unrealized_pnl": 0.0}
+        self._last_balance_time: float = 0.0
+        self.last_error: Optional[str] = None
+        
         # Inisialisasi awal
         self._ensure_single_asset_mode()
 
@@ -65,8 +70,12 @@ class BinanceScalper:
         except Exception as e:
             console.log(f"[dim]Cek MultiAssetsMargin: {e}[/dim]")
 
-    def get_futures_balance(self) -> Dict[str, float]:
-        """Mengambil saldo wallet USDⓈ-M Futures."""
+    def get_futures_balance(self, max_age_sec: float = 5.0) -> Dict[str, float]:
+        """Mengambil saldo wallet USDⓈ-M Futures dengan caching 5 detik."""
+        now = time.time()
+        if now - self._last_balance_time < max_age_sec and self._cached_balance["total_wallet"] > 0:
+            return self._cached_balance
+
         try:
             bal = self.exchange.fetch_balance()
             info = bal.get('info', {})
@@ -74,21 +83,23 @@ class BinanceScalper:
             available_balance = float(info.get('availableBalance', 0.0))
             unrealized_pnl = float(info.get('totalUnrealizedProfit', 0.0))
             
-            # Cek spesifik asset USDT jika ada
             for a in info.get('assets', []):
                 if a.get('asset') == 'USDT':
                     available_balance = float(a.get('availableBalance', available_balance))
                     total_wallet = float(a.get('walletBalance', total_wallet))
                     break
                     
-            return {
+            self._cached_balance = {
                 "total_wallet": total_wallet,
                 "available": available_balance,
                 "unrealized_pnl": unrealized_pnl
             }
+            self._last_balance_time = now
+            return self._cached_balance
         except Exception as e:
+            self.last_error = f"Balance error: {str(e)}"
             console.log(f"[red]Error mengambil balance Futures: {e}[/red]")
-            return {"total_wallet": 0.0, "available": 0.0, "unrealized_pnl": 0.0}
+            return self._cached_balance
 
     def get_compounded_notional(self) -> float:
         """
@@ -100,15 +111,13 @@ class BinanceScalper:
         avail = bal["available"]
         if avail >= 1.0:
             return round(avail * config.LEVERAGE, 2)
-        # Jika belum ada saldo di futures, tampilkan potensi notional dari default capital $10
         return round(config.DEFAULT_CAPITAL * config.LEVERAGE, 2)
 
     def set_margin_and_leverage(self, symbol: str):
         """Mengatur margin ke ISOLATED dan leverage sesuai konfigurasi."""
         try:
             self.exchange.set_margin_mode('ISOLATED', symbol)
-        except Exception as e:
-            # Code -4046 artinya sudah ISOLATED, abaikan
+        except Exception:
             pass
             
         try:
@@ -138,6 +147,10 @@ class BinanceScalper:
             }
             sorted_pairs = sorted(usdt_tickers.items(), key=lambda x: x[1]['quoteVolume'], reverse=True)[:config.TOP_COINS_LIMIT]
             
+            # Ambil saldo satu kali sebelum looping
+            bal = self.get_futures_balance()
+            cap = bal['available'] if bal['available'] >= 1.0 else config.DEFAULT_CAPITAL
+            
             sem = asyncio.Semaphore(20)
             async def analyze_pair(rank: int, symbol: str, ticker: Dict[str, Any]):
                 async with sem:
@@ -148,8 +161,6 @@ class BinanceScalper:
                         df = pd.DataFrame(ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
                         df = strategy.prepare_indicators(df)
                         
-                        bal = self.get_futures_balance()
-                        cap = bal['available'] if bal['available'] >= 1.0 else config.DEFAULT_CAPITAL
                         sig = strategy.check_signal(df, available_capital=cap, leverage=config.LEVERAGE)
                         
                         c_curr = df.iloc[-2]
@@ -169,6 +180,8 @@ class BinanceScalper:
                             'signal': sig
                         }
                         return result
+                    except Exception:
+                        return None
                     except Exception:
                         return None
                         
