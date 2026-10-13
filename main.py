@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Alpaca Scalping Autonomous Agent", lifespan=lifespan)
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def index():
     return {
         "status": "online",
@@ -65,7 +65,7 @@ def index():
         "active_order_id": scalper.active_order_id
     }
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health_check():
     """Health check endpoint resmi untuk Render Cloud Web Service."""
     try:
