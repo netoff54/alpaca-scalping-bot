@@ -58,15 +58,94 @@ def calculate_atr_series(highs: List[float], lows: List[float], closes: List[flo
             atr.append(sum(trs[i - period + 1 : i + 1]) / period)
     return atr
 
-def check_signal_from_ohlcv(ohlcv: List[List[float]], available_capital: float = 10.0, leverage: int = 5) -> Optional[Dict[str, Any]]:
+def detect_n_pattern(highs: List[float], lows: List[float], closes: List[float], window: int = 35) -> Dict[str, Any]:
     """
-    Memeriksa sinyal Triple Confirmation Momentum Scalper (Anti-Noise & Anti-Trap):
-    1. Trend Regime (EMA 200).
+    Mendeteksi Formasi Pola N (N-Wave Breakout & Retest):
+    1. Pola N Bullish:
+       - Swing Low L1 -> Swing High H1 (Impulse naik)
+       - Retest ke Higher Low L2 (L2 > L1)
+       - Breakout: Harga menembus atau mendekati H1
+    2. Pola N Bearish (Inverted N):
+       - Swing High H1 -> Swing Low L1 (Impulse turun)
+       - Pullback ke Lower High H2 (H2 < H1)
+       - Breakdown: Harga menembus atau mendekati L1
+    """
+    if len(closes) < 15:
+        return {"pattern": "NONE", "score_boost": 0.0, "desc": "Data candle kurang"}
+
+    h_slice = highs[-window:]
+    l_slice = lows[-window:]
+    c_slice = closes[-window:]
+    n = len(c_slice)
+    
+    pivot = 2
+    swing_highs = []
+    swing_lows = []
+    
+    for i in range(pivot, n - 1):
+        if all(h_slice[i] >= h_slice[i - j] for j in range(1, pivot + 1)) and \
+           all(h_slice[i] >= h_slice[i + j] for j in range(1, min(pivot + 1, n - i))):
+            swing_highs.append((i, h_slice[i]))
+            
+        if all(l_slice[i] <= l_slice[i - j] for j in range(1, pivot + 1)) and \
+           all(l_slice[i] <= l_slice[i + j] for j in range(1, min(pivot + 1, n - i))):
+            swing_lows.append((i, l_slice[i]))
+
+    curr_close = c_slice[-1]
+    
+    # 1. Cek Pola N Bullish (L1 -> H1 -> L2 (HL))
+    if len(swing_lows) >= 2 and len(swing_highs) >= 1:
+        for l2_idx, l2_val in reversed(swing_lows):
+            for h1_idx, h1_val in reversed(swing_highs):
+                if h1_idx < l2_idx:
+                    for l1_idx, l1_val in reversed(swing_lows):
+                        if l1_idx < h1_idx:
+                            impulse = h1_val - l1_val
+                            retest = h1_val - l2_val
+                            if impulse > 0 and l2_val > l1_val and (0.15 <= retest / impulse <= 0.85):
+                                is_breakout = curr_close >= h1_val * 0.998
+                                return {
+                                    "pattern": "BULLISH_N",
+                                    "is_breakout": is_breakout,
+                                    "score_boost": 20.0 if is_breakout else 10.0,
+                                    "desc": f"Pola N Bullish (L1: {l1_val:.4f} -> H1: {h1_val:.4f} -> HL: {l2_val:.4f})"
+                                }
+
+    # 2. Cek Pola N Bearish (H1 -> L1 -> H2 (LH))
+    if len(swing_highs) >= 2 and len(swing_lows) >= 1:
+        for h2_idx, h2_val in reversed(swing_highs):
+            for l1_idx, l1_val in reversed(swing_lows):
+                if l1_idx < h2_idx:
+                    for h1_idx, h1_val in reversed(swing_highs):
+                        if h1_idx < l1_idx:
+                            impulse = h1_val - l1_val
+                            retest = h2_val - l1_val
+                            if impulse > 0 and h2_val < h1_val and (0.15 <= retest / impulse <= 0.85):
+                                is_breakdown = curr_close <= l1_val * 1.002
+                                return {
+                                    "pattern": "BEARISH_N",
+                                    "is_breakout": is_breakdown,
+                                    "score_boost": 20.0 if is_breakdown else 10.0,
+                                    "desc": f"Pola N Bearish (H1: {h1_val:.4f} -> L1: {l1_val:.4f} -> LH: {h2_val:.4f})"
+                                }
+
+    return {"pattern": "NONE", "score_boost": 0.0, "desc": "Netral (Tanpa Pola N)"}
+
+def check_signal_from_ohlcv(
+    ohlcv: List[List[float]],
+    available_capital: float = 10.0,
+    leverage: int = 10,
+    ls_data: Optional[Dict[str, float]] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Memeriksa sinyal Triple Confirmation Momentum Scalper (Anti-Noise, Pola N, & Sentimen Arus):
+    1. Trend Regime (EMA 200 pada TF 5m).
     2. Crossover Trigger (EMA 9 & EMA 21).
     3. Volume Confirmation: Memastikan volume candle pemicu aktif (bukan dead-volume fakeout).
     4. Price Action Confirmation: Memastikan candle pemicu hijau/merah solid (bukan doji/rejection wick).
-    5. RSI Momentum Bersih (hindari zona jenuh pucuk/dasar).
-    6. Stop Loss Adaptif berbasis Volatilitas ATR (ruang gerak sehat 1.2% - 1.8% anti-noise).
+    5. Formasi Pola N: Memvalidasi struktur N-Wave Breakout & Retest.
+    6. Sentimen Arus Pasar (Long/Short Account Ratio): Memastikan TIDAK melawan arus dominan.
+    7. Stop Loss Adaptif berbasis Volatilitas ATR (ruang gerak sehat 1.2% - 1.8% anti-noise).
     """
     if len(ohlcv) < config.EMA_TREND + 5:
         return None
@@ -103,7 +182,7 @@ def check_signal_from_ohlcv(ohlcv: List[List[float]], available_capital: float =
     golden_cross = (c_prev_fast <= c_prev_slow) and (c_curr_fast > c_curr_slow)
     death_cross = (c_prev_fast >= c_prev_slow) and (c_curr_fast < c_curr_slow)
 
-    # 2. Trend Filter (EMA 200)
+    # 2. Trend Filter (EMA 200 pada TF 5m)
     is_bullish_trend = curr_close > curr_trend
     is_bearish_trend = curr_close < curr_trend
 
@@ -116,22 +195,36 @@ def check_signal_from_ohlcv(ohlcv: List[List[float]], available_capital: float =
     is_bullish_action = True
     is_bearish_action = True
     if candle_range > 0:
-        # Untuk BUY: Candle harus hijau (Close > Open) dan tidak memiliki rejection wick atas yang dominan (<= 45%)
         upper_wick = curr_high - curr_close
         is_bullish_action = (curr_close > curr_open) and (upper_wick <= candle_range * 0.45)
 
-        # Untuk SELL: Candle harus merah (Close < Open) dan tidak memiliki rejection wick bawah yang dominan (<= 45%)
         lower_wick = curr_close - curr_low
         is_bearish_action = (curr_close < curr_open) and (lower_wick <= candle_range * 0.45)
+
+    # 5. Analisis Pola N (N-Wave Breakout)
+    n_info = detect_n_pattern(highs, lows, closes, window=35)
+    n_pattern = n_info.get("pattern", "NONE")
+    is_n_valid_buy = (n_pattern != "BEARISH_N")
+    is_n_valid_sell = (n_pattern != "BULLISH_N")
+
+    # 6. Sentimen Arus Pasar (Long/Short Flow - Tidak Melawan Arus)
+    ls_info = ls_data or {"long_pct": 50.0, "short_pct": 50.0, "ratio": 1.0}
+    ls_ratio = ls_info.get("ratio", 1.0)
+    long_pct = ls_info.get("long_pct", 50.0)
+    short_pct = ls_info.get("short_pct", 50.0)
+    has_ls_support_buy = ls_ratio >= config.LS_RATIO_MIN_BUY
+    has_ls_support_sell = ls_ratio <= config.LS_RATIO_MAX_SELL
 
     signal_side = None
 
     # Syarat BUY / LONG
-    if is_bullish_trend and golden_cross and (config.RSI_LONG_MIN <= rsi_val <= config.RSI_LONG_MAX) and has_volume_support and is_bullish_action:
+    if is_bullish_trend and golden_cross and (config.RSI_LONG_MIN <= rsi_val <= config.RSI_LONG_MAX) and \
+       has_volume_support and is_bullish_action and has_ls_support_buy and is_n_valid_buy:
         signal_side = "BUY"
 
     # Syarat SELL / SHORT
-    elif is_bearish_trend and death_cross and (config.RSI_SHORT_MIN <= rsi_val <= config.RSI_SHORT_MAX) and has_volume_support and is_bearish_action:
+    elif is_bearish_trend and death_cross and (config.RSI_SHORT_MIN <= rsi_val <= config.RSI_SHORT_MAX) and \
+         has_volume_support and is_bearish_action and has_ls_support_sell and is_n_valid_sell:
         signal_side = "SELL"
 
     if not signal_side:
@@ -146,7 +239,6 @@ def check_signal_from_ohlcv(ohlcv: List[List[float]], available_capital: float =
     qty = notional / latest_price
 
     # Stop Loss & Take Profit Adaptif Berbasis Volatilitas (ATR)
-    # Memberi ruang gerak sehat (1.2% - 1.8%) di luar batas noise pasar 1m/3m
     atr_pct = (atr_val / curr_close) if curr_close > 0 else 0.008
     sl_percent = max(config.SL_PERCENT, min(0.018, atr_pct * 1.8))
     tp_percent = max(config.TP_PERCENT, sl_percent * config.RR_RATIO)
@@ -160,9 +252,22 @@ def check_signal_from_ohlcv(ohlcv: List[List[float]], available_capital: float =
         sl_price = entry_price * (1.0 + sl_percent)
         tp_price = entry_price * (1.0 - tp_percent)
 
-    # Skor kualitas sinyal (RSI center score + volume multiplier)
+    # Skor kualitas sinyal (RSI + Volume + Pola N + Arus Sentimen)
     vol_ratio = min(1.5, curr_vol / avg_vol) if avg_vol > 0 else 1.0
-    score = (100.0 - abs(rsi_val - 55.0)) * (0.8 + 0.2 * vol_ratio)
+    base_score = (100.0 - abs(rsi_val - 55.0)) * (0.8 + 0.2 * vol_ratio)
+    
+    if signal_side == "BUY":
+        if n_pattern == "BULLISH_N":
+            base_score += n_info.get("score_boost", 15.0)
+        if ls_ratio >= 1.05:
+            base_score += 10.0
+    elif signal_side == "SELL":
+        if n_pattern == "BEARISH_N":
+            base_score += n_info.get("score_boost", 15.0)
+        if ls_ratio <= 0.95:
+            base_score += 10.0
+
+    score = min(100.0, round(base_score, 2))
 
     return {
         "side": signal_side,
@@ -177,13 +282,17 @@ def check_signal_from_ohlcv(ohlcv: List[List[float]], available_capital: float =
         "rsi": round(rsi_val, 2),
         "ema_trend": round(curr_trend, 4),
         "atr": round(atr_val, 4),
-        "score": round(score, 2)
+        "score": score,
+        "n_pattern": n_pattern,
+        "n_desc": n_info.get("desc", ""),
+        "ls_ratio": ls_ratio,
+        "long_pct": long_pct,
+        "short_pct": short_pct
     }
 
-def check_signal(data: Any, available_capital: float = 10.0, leverage: int = 5) -> Optional[Dict[str, Any]]:
+def check_signal(data: Any, available_capital: float = 10.0, leverage: int = 10, ls_data: Optional[Dict[str, float]] = None) -> Optional[Dict[str, Any]]:
     """Wrapper kompatibel untuk list OHLCV maupun DataFrame."""
     if isinstance(data, list):
-        return check_signal_from_ohlcv(data, available_capital, leverage)
-    # Jika data berupa DataFrame
+        return check_signal_from_ohlcv(data, available_capital, leverage, ls_data)
     ohlcv = data[['timestamp', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
-    return check_signal_from_ohlcv(ohlcv, available_capital, leverage)
+    return check_signal_from_ohlcv(ohlcv, available_capital, leverage, ls_data)

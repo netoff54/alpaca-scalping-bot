@@ -238,7 +238,9 @@ class BinanceScalper:
                     if not ohlcv or len(ohlcv) < config.EMA_TREND + 5:
                         continue
                         
-                    sig = strategy.check_signal_from_ohlcv(ohlcv, available_capital=cap, leverage=config.LEVERAGE)
+                    # Ambil data sentimen arus akun Long vs Short global (TF 5m)
+                    ls_data = self.client.fetch_long_short_ratio(sym, period="5m")
+                    sig = strategy.check_signal_from_ohlcv(ohlcv, available_capital=cap, leverage=config.LEVERAGE, ls_data=ls_data)
                     
                     closes = [c[4] for c in ohlcv]
                     highs = [c[2] for c in ohlcv]
@@ -263,6 +265,10 @@ class BinanceScalper:
                         "trend": "BULLISH" if is_bullish else "BEARISH",
                         "rsi": round(rsi_val, 2),
                         "atr": round(atr_val, 4),
+                        "long_pct": ls_data.get("long_pct", 50.0),
+                        "short_pct": ls_data.get("short_pct", 50.0),
+                        "ls_ratio": ls_data.get("ratio", 1.0),
+                        "n_pattern": sig.get("n_pattern") if sig else "NONE",
                         "signal": sig
                     }
                     results.append(coin_data)
@@ -407,8 +413,75 @@ class BinanceScalper:
             self.active_order = None
             return False
 
+    def execute_maker_close(self, symbol: str, side: str, qty: float, target_price: float) -> bool:
+        """
+        Menutup posisi menggunakan Maker Limit Order (timeInForce=GTX / Post Only) agar fee terendah (0.02%).
+        Memantau order hingga 8 detik di posisi harga teratas (top of book).
+        Jika pergerakan pasar cepat tak kunjung terisi, fallback otomatis ke market order agar modal terlindungi.
+        """
+        try:
+            depth = self.client.fetch_best_bid_ask(symbol)
+            rules = self.client._symbols_rules.get(symbol, {})
+            tick = rules.get("tick_size", 0.0001)
+
+            if side == "SELL":
+                best_ask = depth.get("ask", 0.0)
+                limit_price = max(best_ask, target_price) if best_ask > 0 else target_price
+            else:
+                best_bid = depth.get("bid", 0.0)
+                limit_price = min(best_bid, target_price) if best_bid > 0 else target_price
+
+            formatted_price = self.client.format_price(symbol, limit_price)
+            console.log(f"[bold cyan]Mengirim Maker Limit Close: {side} {qty} {symbol} @ {formatted_price} (Post-Only GTX)...[/bold cyan]")
+
+            res = self.client.create_limit_close_order(symbol, side, qty, formatted_price)
+            
+            # Jika ditolak karena crossed (-5022), geser 1 tick agar tetap maker
+            if isinstance(res, dict) and res.get("code") == -5022:
+                if side == "SELL":
+                    formatted_price = self.client.format_price(symbol, formatted_price + tick)
+                else:
+                    formatted_price = self.client.format_price(symbol, formatted_price - tick)
+                res = self.client.create_limit_close_order(symbol, side, qty, formatted_price)
+
+            order_id = res.get("orderId") if isinstance(res, dict) else None
+            if not order_id:
+                console.log(f"[yellow]Limit close gagal, beralih ke market close darurat...[/yellow]")
+                self.client.create_market_close_order(symbol, side, qty)
+                return True
+
+            # Pantau hingga 8 detik agar terisi sebagai Maker
+            t0 = time.time()
+            while time.time() - t0 < 8:
+                time.sleep(1.5)
+                chk = self.client.get_order(symbol, order_id)
+                status = chk.get("status")
+                if status == "FILLED":
+                    console.log(f"[bold green]MAKER LIMIT CLOSE TERISI PENUH! ({symbol} @ {formatted_price}, Fee Terendah Maker)[/bold green]")
+                    return True
+                elif status in ("CANCELED", "REJECTED", "EXPIRED"):
+                    break
+
+            # Jika belum terisi setelah 8 detik, batalkan dan tuntaskan dengan market order
+            console.log(f"[yellow]Maker limit close belum terisi setelah 8s. Menuntaskan dengan market order...[/yellow]")
+            try:
+                self.client.cancel_order(symbol, order_id)
+            except Exception:
+                pass
+            self.client.create_market_close_order(symbol, side, qty)
+            return True
+
+        except Exception as e:
+            console.log(f"[yellow]Notice maker close: {e}, fallback ke market close...[/yellow]")
+            try:
+                self.client.create_market_close_order(symbol, side, qty)
+                return True
+            except Exception as e2:
+                console.log(f"[red]Gagal menutup posisi: {e2}[/red]")
+                return False
+
     def monitor_active_position(self):
-        """Memantau posisi aktif terhadap target Take Profit (+1.0%) dan Stop Loss (-0.5%)."""
+        """Memantau posisi aktif terhadap target Take Profit (+2.0%) dan Stop Loss (-1.2%) dengan Maker Limit Exit."""
         if not self.active_position:
             return
             
@@ -464,7 +537,7 @@ class BinanceScalper:
             if hit_tp:
                 console.log(f"[bold green]TAKE PROFIT TERCAPAI! (+{pnl_pct*100:.2f}%, PnL: +${pnl_usd:.2f}) pada {symbol}[/bold green]")
                 close_side = "SELL" if side == "buy" else "BUY"
-                self.client.create_market_close_order(symbol=symbol, side=close_side, qty=qty)
+                self.execute_maker_close(symbol=symbol, side=close_side, qty=qty, target_price=current_price)
                 
                 trade_record = {
                     "symbol": symbol,
@@ -495,7 +568,7 @@ class BinanceScalper:
                 
                 console.log(f"[bold {color}]{tag}! ({pnl_pct*100:+.2f}%, PnL: ${pnl_usd:+.2f}) pada {symbol}[/bold {color}]")
                 close_side = "SELL" if side == "buy" else "BUY"
-                self.client.create_market_close_order(symbol=symbol, side=close_side, qty=qty)
+                self.execute_maker_close(symbol=symbol, side=close_side, qty=qty, target_price=current_price)
                 
                 trade_record = {
                     "symbol": symbol,

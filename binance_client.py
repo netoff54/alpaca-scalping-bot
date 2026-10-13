@@ -416,6 +416,57 @@ class BinanceFuturesClient:
 
         raise Exception(f"Limit order gagal: {last_err}")
 
+    def create_limit_close_order(self, symbol: str, side: str, qty: float, price: float) -> Dict[str, Any]:
+        """Tutup posisi dengan Limit Order Maker-Only (reduceOnly=true, timeInForce=GTX / Post Only) agar fee terendah."""
+        url = f"{self.base_url}/fapi/v1/order"
+        last_err = None
+
+        for attempt in range(2):
+            now = time.time()
+            if self.is_banned():
+                wait_sec = self.ban_until - now
+                if wait_sec <= 15.0:
+                    console.log(f"[bold yellow]IP cooldown aktif ({wait_sec:.1f}s lagi). Menunggu otomatis sebelum kirim maker close order...[/bold yellow]")
+                    time.sleep(max(0.5, wait_sec + 0.5))
+                else:
+                    raise Exception(f"Tidak dapat menutup order: IP bursa dalam ban resmi ({int(wait_sec)}s lagi).")
+
+            params = self._sign({
+                "symbol": symbol,
+                "side": side.upper(),
+                "type": "LIMIT",
+                "timeInForce": "GTX",
+                "quantity": qty,
+                "price": price,
+                "reduceOnly": "true"
+            })
+            try:
+                resp = self.session.post(url, params=params, timeout=10)
+                self.check_response_for_ban(resp)
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"error": resp.text}
+                self.check_response_for_ban(data)
+
+                if isinstance(data, dict) and "orderId" in data:
+                    return data
+
+                # Jika ditolak karena harga langsung match (code -5022 Post-Only), kembalikan dict khusus
+                if isinstance(data, dict) and data.get("code") == -5022:
+                    return {"code": -5022, "msg": "Post-Only crossed"}
+
+                last_err = data
+            except Exception as e:
+                last_err = str(e)
+
+            if attempt == 0 and self.is_banned() and (self.ban_until - time.time()) <= 15.0:
+                time.sleep(max(1.0, self.ban_until - time.time() + 0.5))
+                continue
+            break
+
+        raise Exception(f"Limit close order gagal: {last_err}")
+
     def create_market_close_order(self, symbol: str, side: str, qty: float) -> Dict[str, Any]:
         """Tutup posisi seketika dengan Market Order (reduceOnly=true). Prioritas Tertinggi."""
         url = f"{self.base_url}/fapi/v1/order"
@@ -505,7 +556,34 @@ class BinanceFuturesClient:
             console.log(f"[yellow]Notice fetch top tickers: {e}[/yellow]")
             return []
 
-    def fetch_klines(self, symbol: str, interval: str = "1m", limit: int = 220) -> Optional[List[List[float]]]:
+    def fetch_long_short_ratio(self, symbol: str, period: str = "5m") -> Dict[str, float]:
+        """
+        Mengambil rasio akun Long vs Short global (Binance Futures Data API).
+        Membaca arah arus sentimen pasar agar tidak melawan arus dominan.
+        """
+        if self.is_banned():
+            return {"long_pct": 50.0, "short_pct": 50.0, "ratio": 1.0}
+        try:
+            url = f"{self.base_url}/futures/data/globalLongShortAccountRatio?symbol={symbol}&period={period}&limit=1"
+            resp = self.session.get(url, timeout=5)
+            self.check_response_for_ban(resp)
+            data = resp.json()
+            self.check_response_for_ban(data)
+            if isinstance(data, list) and len(data) > 0:
+                item = data[-1]
+                long_acc = float(item.get("longAccount", 0.5))
+                short_acc = float(item.get("shortAccount", 0.5))
+                ratio = float(item.get("longShortRatio", 1.0))
+                return {
+                    "long_pct": round(long_acc * 100, 1),
+                    "short_pct": round(short_acc * 100, 1),
+                    "ratio": round(ratio, 4)
+                }
+            return {"long_pct": 50.0, "short_pct": 50.0, "ratio": 1.0}
+        except Exception:
+            return {"long_pct": 50.0, "short_pct": 50.0, "ratio": 1.0}
+
+    def fetch_klines(self, symbol: str, interval: str = "5m", limit: int = 220) -> Optional[List[List[float]]]:
         if self.is_banned() or self.is_scan_throttled():
             return None
         try:
