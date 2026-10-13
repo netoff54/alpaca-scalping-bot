@@ -49,6 +49,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Alpaca Scalping Autonomous Agent", lifespan=lifespan)
 
+@app.get("/outbound-ip")
+def get_outbound_ip():
+    try:
+        res = requests.get("https://api.ipify.org?format=json", timeout=5)
+        return res.json()
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.api_route("/", methods=["GET", "HEAD"])
 def index():
     return {
