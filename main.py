@@ -85,7 +85,7 @@ def index():
             "margin_mode": "ISOLATED",
             "leverage": f"Dinamis 10x - 20x (Sesuai Hasil Analisis)",
             "order_type": "100% LIMIT MAKER ONLY (Masuk & Keluar Post-Only GTX / Fee Terendah)",
-            "strategy_model": "RSI 30 Buy (Dip) & RSI 70 Sell (Top) + Candlestick Reversal & EMA Cross",
+            "strategy_model": "RSI 20-30 Buy & RSI 70-80 Sell + Candlestick Reversal & EMA Cross",
             "sentiment_flow": "Binance Global Long/Short Account Ratio (Anti-Melawan Arus)",
             "risk_model": "0.5% Risiko Portofolio (RRR 1:2) + Fleksibel Reversal Exit (Amankan Profit Lebih Awal)",
             "futures_wallet_usdt": bal["total_wallet"],

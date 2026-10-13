@@ -44,13 +44,15 @@ class BotConfig:
     LS_RATIO_MIN_BUY: float = 0.90         # Syarat Long: Rasio L/S >= 0.90 (Tidak melawan arus dominan short)
     LS_RATIO_MAX_SELL: float = 1.15        # Syarat Short: Rasio L/S <= 1.15 (Tidak melawan arus dominan long)
 
-    # --- Indicator Parameters: RSI 30 BUY & RSI 70 SELL + EMA Cross & Candlestick ---
+    # --- Indicator Parameters: RSI 20-30 BUY & RSI 70-80 SELL + EMA Cross & Candlestick ---
     EMA_TREND: int = 200                   # Filter tren makro
     EMA_FAST: int = 9                      # Trigger cepat EMA 9
     EMA_SLOW: int = 21                     # Trigger konfirmasi EMA 21
     RSI_PERIOD: int = 14                   # Periode RSI 14
-    RSI_BUY_THRESHOLD: float = 35.0        # BUY saat RSI <= 35 (Area oversold / pantulan dari 30)
-    RSI_SELL_THRESHOLD: float = 65.0       # SELL saat RSI >= 65 (Area overbought / penolakan dari 70)
+    RSI_BUY_MIN: float = 20.0              # Batas bawah BUY: RSI >= 20.0
+    RSI_BUY_MAX: float = 30.0              # Batas atas BUY: RSI <= 30.0 (Area oversold 20-30)
+    RSI_SELL_MIN: float = 70.0             # Batas bawah SELL: RSI >= 70.0 (Area overbought 70-80)
+    RSI_SELL_MAX: float = 80.0             # Batas atas SELL: RSI <= 80.0
     ATR_PERIOD: int = 14                   # Volatilitas adaptif
 
     # --- Risk / Reward Ratio 1:2 & Fleksibilitas Pembalikan ---

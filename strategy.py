@@ -229,33 +229,35 @@ def check_signal_from_ohlcv(
     signal_side = None
 
     # Syarat BUY / LONG:
-    # 1. RSI oversold <= threshold (area 30)
+    # 1. RSI oversold di rentang 20 - 30 (config.RSI_BUY_MIN s/d config.RSI_BUY_MAX)
     # 2. Candlestick reversal bullish ATAU candle hijau solid tanpa upper wick besar
-    # 3. EMA konfirmasi: harga menembus di atas EMA 9 ATAU Golden Cross
+    # 3. EMA konfirmasi: harga menembus di atas EMA 9, Golden Cross, atau bounce hammer kuat
     # 4. Volume aktif dan sentimen L/S tidak melawan arus short ekstrem
     is_valid_buy_candle = (candle_bias == "BULLISH") or (curr_close > curr_open and upper_wick <= candle_range * 0.35)
-    if (rsi_val <= config.RSI_BUY_THRESHOLD) and is_valid_buy_candle and bullish_ema and \
+    is_rsi_buy = (config.RSI_BUY_MIN <= rsi_val <= config.RSI_BUY_MAX)
+    if is_rsi_buy and is_valid_buy_candle and bullish_ema and \
        has_volume_support and has_ls_support_buy:
         signal_side = "BUY"
 
     # Syarat SELL / SHORT:
-    # 1. RSI overbought >= threshold (area 70)
+    # 1. RSI overbought di rentang 70 - 80 (config.RSI_SELL_MIN s/d config.RSI_SELL_MAX)
     # 2. Candlestick reversal bearish ATAU candle merah solid tanpa lower wick besar
-    # 3. EMA konfirmasi: harga breakdown di bawah EMA 9 ATAU Death Cross
+    # 3. EMA konfirmasi: harga breakdown di bawah EMA 9, Death Cross, atau rejection shooting star
     # 4. Volume aktif dan sentimen L/S tidak melawan arus long ekstrem
     is_valid_sell_candle = (candle_bias == "BEARISH") or (curr_close < curr_open and lower_wick <= candle_range * 0.35)
-    if (rsi_val >= config.RSI_SELL_THRESHOLD) and is_valid_sell_candle and bearish_ema and \
+    is_rsi_sell = (config.RSI_SELL_MIN <= rsi_val <= config.RSI_SELL_MAX)
+    if is_rsi_sell and is_valid_sell_candle and bearish_ema and \
        has_volume_support and has_ls_support_sell:
         signal_side = "SELL"
 
     if not signal_side:
         return None
 
-    # 1. Hitung skor kualitas sinyal (Kombinasi RSI Ekstrem + Candlestick Reversal + EMA Cross + Volume)
+    # 1. Hitung skor kualitas sinyal (Kombinasi RSI Ekstrem 20-30/70-80 + Candlestick Reversal + EMA Cross + Volume)
     base_score = 50.0
     if signal_side == "BUY":
-        # Semakin mendekati atau menembus ke bawah RSI 30, semakin tinggi skor pantulan
-        rsi_boost = max(0.0, (38.0 - rsi_val) * 2.5)
+        # Rentang RSI 20 - 30: Semakin dalam di rentang 20-30, semakin tinggi potensi pantulan
+        rsi_boost = max(0.0, (config.RSI_BUY_MAX - rsi_val) * 2.5)
         base_score += min(25.0, rsi_boost)
         base_score += candle_info.get("score_boost", 10.0)
         base_score += 15.0 if golden_cross else 8.0
@@ -264,8 +266,8 @@ def check_signal_from_ohlcv(
         if ls_ratio >= 1.05:
             base_score += 7.0
     elif signal_side == "SELL":
-        # Semakin mendekati atau menembus ke atas RSI 70, semakin tinggi skor penolakan
-        rsi_boost = max(0.0, (rsi_val - 62.0) * 2.5)
+        # Rentang RSI 70 - 80: Semakin tinggi di rentang 70-80, semakin tinggi potensi penolakan
+        rsi_boost = max(0.0, (rsi_val - config.RSI_SELL_MIN) * 2.5)
         base_score += min(25.0, rsi_boost)
         base_score += candle_info.get("score_boost", 10.0)
         base_score += 15.0 if death_cross else 8.0

@@ -298,8 +298,13 @@ class BinanceScalper:
             self.ranked_pairs = results
             self.bullish_count = sum(1 for r in results if r["trend"] == "BULLISH")
             self.bearish_count = sum(1 for r in results if r["trend"] == "BEARISH")
-            self.active_signals = sorted(signals, key=lambda x: x.get("score", 0), reverse=True)
-            self.watchlist = sorted(results, key=lambda x: min(abs(x["rsi"] - 30.0), abs(x["rsi"] - 70.0)))[:8]
+            def _rsi_dist(item):
+                r = item.get("rsi", 50.0)
+                d_buy = 0.0 if (config.RSI_BUY_MIN <= r <= config.RSI_BUY_MAX) else (config.RSI_BUY_MIN - r if r < config.RSI_BUY_MIN else r - config.RSI_BUY_MAX)
+                d_sell = 0.0 if (config.RSI_SELL_MIN <= r <= config.RSI_SELL_MAX) else (config.RSI_SELL_MIN - r if r < config.RSI_SELL_MIN else r - config.RSI_SELL_MAX)
+                return min(d_buy, d_sell)
+
+            self.watchlist = sorted(results, key=_rsi_dist)[:8]
             
             self.last_scan_duration_sec = round(time.time() - t_start, 2)
             self.last_scan_time = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -548,9 +553,9 @@ class BinanceScalper:
                     if ema9[-2] < ema21[-2] and ema9[-3] >= ema21[-3]:
                         return True, "EMA 9 Death Cross ke bawah EMA 21 pada TF 1m"
 
-                    # Sinyal Reversal 3: RSI mencapai target overbought (>= 68.0) dan mulai berbalik turun
-                    if rsi >= 68.0 and c_close < c_open:
-                        return True, f"RSI jenuh beli overbought ({rsi:.1f} >= 68) & candle berbalik turun"
+                    # Sinyal Reversal 3: RSI mencapai target overbought (>= 70.0) dan mulai berbalik turun
+                    if rsi >= config.RSI_SELL_MIN and c_close < c_open:
+                        return True, f"RSI jenuh beli overbought ({rsi:.1f} >= {config.RSI_SELL_MIN}) & candle berbalik turun"
 
                     # Sinyal Reversal 4: Bearish Engulfing solid
                     if c_close < c_open and c_close < c_prev_close and (c_open - c_close) >= (c_range * 0.65):
@@ -573,9 +578,9 @@ class BinanceScalper:
                     if ema9[-2] > ema21[-2] and ema9[-3] <= ema21[-3]:
                         return True, "EMA 9 Golden Cross ke atas EMA 21 pada TF 1m"
 
-                    # Sinyal Reversal 3: RSI mencapai target oversold (<= 32.0) dan mulai berbalik naik
-                    if rsi <= 32.0 and c_close > c_open:
-                        return True, f"RSI jenuh jual oversold ({rsi:.1f} <= 32) & candle memantul naik"
+                    # Sinyal Reversal 3: RSI mencapai target oversold (<= 30.0) dan mulai berbalik naik
+                    if rsi <= config.RSI_BUY_MAX and c_close > c_open:
+                        return True, f"RSI jenuh jual oversold ({rsi:.1f} <= {config.RSI_BUY_MAX}) & candle memantul naik"
 
                     # Sinyal Reversal 4: Bullish Engulfing solid
                     if c_close > c_open and c_close > c_prev_close and (c_close - c_open) >= (c_range * 0.65):
