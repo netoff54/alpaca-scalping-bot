@@ -56,7 +56,7 @@ def index():
         "service": "Alpaca Multi-Asset Scalping Autonomous Bot (Modal $10)",
         "mode": "TOP RANKED CRYPTO SCANNER",
         "monitored_top_coins": len(scalper.ranked_pairs),
-        "top_sample": [p[0] for p in scalper.ranked_pairs[:5]] if scalper.ranked_pairs else [],
+        "top_sample": scalper.ranked_pairs[:5] if scalper.ranked_pairs else [],
         "strategy": "Triple Filter (EMA 200 + EMA 9/21 + RSI + ATR)",
         "order_type": "LIMIT ORDER (Maker Only)",
         "current_target": scalper.current_symbol,
