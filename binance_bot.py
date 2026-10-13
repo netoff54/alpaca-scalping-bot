@@ -237,19 +237,28 @@ class BinanceScalper:
                     ohlcv = self.client.fetch_klines(sym, interval=config.TIMEFRAME, limit=config.CANDLE_LIMIT)
                     if not ohlcv or len(ohlcv) < config.EMA_TREND + 5:
                         continue
-                        
+                    closes = [c[4] for c in ohlcv]
+                    highs = [c[2] for c in ohlcv]
+                    lows = [c[3] for c in ohlcv]
+                    latest_price = closes[-1]
+
+                    # 1. Filter koin dengan ukuran lot minimum terlalu besar untuk akun modal mikro (misal BTCUSDT di mana 0.001 BTC = $83+)
+                    rules = self.client._symbols_rules.get(sym, {})
+                    min_q = rules.get("min_qty", 0.0)
+                    if (min_q * latest_price) > config.MAX_ORDER_NOTIONAL:
+                        del ohlcv
+                        del closes
+                        del highs
+                        del lows
+                        continue
+
                     # Ambil data sentimen arus akun Long vs Short global (TF 5m)
                     ls_data = self.client.fetch_long_short_ratio(sym, period="5m")
                     sig = strategy.check_signal_from_ohlcv(ohlcv, available_capital=cap, leverage=config.LEVERAGE, ls_data=ls_data)
                     
-                    closes = [c[4] for c in ohlcv]
-                    highs = [c[2] for c in ohlcv]
-                    lows = [c[3] for c in ohlcv]
-                    
                     ema_trend = strategy.calculate_ema_series(closes, config.EMA_TREND)[-2]
                     rsi_val = strategy.calculate_rsi_series(closes, config.RSI_PERIOD)[-2]
                     atr_val = strategy.calculate_atr_series(highs, lows, closes, config.ATR_PERIOD)[-2]
-                    latest_price = closes[-1]
                     is_bullish = closes[-2] > ema_trend
                     
                     del ohlcv
@@ -349,7 +358,12 @@ class BinanceScalper:
                 console.log(f"[red]Ukuran order terlalu kecil untuk {symbol}[/red]")
                 return False
                 
-            console.log(f"[bold cyan]Dispatching Maker Limit Order (0.5% Portofolio): {side} {formatted_qty} {symbol} @ {formatted_price}[/bold cyan]")
+            effective_notional = formatted_qty * formatted_price
+            if effective_notional > config.MAX_ORDER_NOTIONAL:
+                console.log(f"[bold yellow]🛡️ Filter Ukuran Akun: Minimum order {symbol} bernilai ${effective_notional:.2f} (Margin: ${effective_notional/config.LEVERAGE:.2f}). Melewati agar margin tetap ~$0.50 (Maks Notional: ${config.MAX_ORDER_NOTIONAL:.2f}).[/bold yellow]")
+                return False
+
+            console.log(f"[bold cyan]Dispatching Maker Limit Order (0.5% Portofolio): {side} {formatted_qty} {symbol} @ {formatted_price} (Notional: ${effective_notional:.2f}, Margin: ${effective_notional/config.LEVERAGE:.2f})[/bold cyan]")
             
             order = self.client.create_limit_order(
                 symbol=symbol,
@@ -501,13 +515,13 @@ class BinanceScalper:
             pnl_pct = ((current_price - entry_price) / entry_price) if side == "buy" else ((entry_price - current_price) / entry_price)
             pnl_usd = pnl_pct * pos["notional"]
             
-            # --- 1. Break-Even Protection (+0.6% profit) ---
+            # --- 1. Break-Even Protection (+0.5% profit) ---
             if side == "buy":
                 if pnl_pct >= config.BREAK_EVEN_TRIGGER and pos["sl_price"] < entry_price:
-                    pos["sl_price"] = entry_price * 1.001  # Kunci di Entry + 0.1% (tutup biaya fee)
+                    pos["sl_price"] = entry_price * 1.0005  # Kunci di Entry + 0.05% (tutup biaya fee maker)
                     console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: SL digeser ke {pos['sl_price']:.4f} (Posisi Bebas Risiko)[/bold cyan]")
                 
-                # --- 2. Trailing Stop (+1.0% profit) ---
+                # --- 2. Trailing Stop (+0.9% profit) ---
                 if pnl_pct >= config.TRAILING_STOP_TRIGGER:
                     trailing_target = current_price * (1.0 - config.TRAILING_STOP_DISTANCE)
                     if trailing_target > pos["sl_price"]:
@@ -516,7 +530,7 @@ class BinanceScalper:
                         
             elif side == "sell":
                 if pnl_pct >= config.BREAK_EVEN_TRIGGER and pos["sl_price"] > entry_price:
-                    pos["sl_price"] = entry_price * 0.999
+                    pos["sl_price"] = entry_price * 0.9995
                     console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: SL digeser ke {pos['sl_price']:.4f} (Posisi Bebas Risiko)[/bold cyan]")
                 
                 if pnl_pct >= config.TRAILING_STOP_TRIGGER:

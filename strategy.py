@@ -238,9 +238,8 @@ def check_signal_from_ohlcv(
     notional = margin_required * leverage
     qty = notional / latest_price
 
-    # Stop Loss & Take Profit Adaptif Berbasis Volatilitas (ATR)
-    atr_pct = (atr_val / curr_close) if curr_close > 0 else 0.008
-    sl_percent = max(config.SL_PERCENT, min(0.018, atr_pct * 1.8))
+    # Stop Loss 1.0% & Take Profit Sesuai Instruksi
+    sl_percent = config.SL_PERCENT
     tp_percent = max(config.TP_PERCENT, sl_percent * config.RR_RATIO)
 
     if signal_side == "BUY":

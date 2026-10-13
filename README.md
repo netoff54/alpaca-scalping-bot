@@ -8,20 +8,21 @@ Bot scalping otonom berbasis **Python Native REST API + FastAPI** yang memindai 
 
 1. **100% Limit Maker Order (Masuk & Keluar)**:
    - Order masuk menggunakan Limit Order Post-Only (`timeInForce=GTX`) pada harga terbaik untuk mendapatkan fee Maker terendah (0.02%) tanpa slippage.
-   - Penutupan posisi (TP/SL) juga diprioritaskan menggunakan Limit Maker Exit sebelum beralih ke proteksi pasar darurat.
-2. **Timeframe 5 Menit (TF 5m Anti-Noise)**:
-   - Menghilangkan noise whip-saw 1 menit dengan konfirmasi candle 5m tertutup (`-2`), volume support aktif, dan price action tanpa rejection wick.
-3. **Analisis Pola N (N-Wave Breakout & Retest)**:
-   - Memvalidasi pembentukan swing low/high, Higher Low (Bullish N), atau Lower High (Bearish N) sebelum entry.
-4. **Sentimen Arus Pasar (Anti-Melawan Arus)**:
-   - Mengintegrasikan Binance Futures `globalLongShortAccountRatio`. Bot tidak akan membuka posisi yang melawan arus dominan pasar.
-5. **Manajemen Risiko Adaptif & Compounding**:
-   - Alokasi margin: 0.5% portofolio x 10x leverage (ISOLATED Margin).
-   - Stop Loss adaptif berbasis ATR (1.2% - 1.8%).
-   - Break-Even otomatis mengunci SL di Entry + 0.1% saat profit mencapai +0.6%.
-   - Trailing Stop dinamis mengunci puncak saat profit mencapai +1.0%.
+   - Penutupan posisi (TP/SL) diprioritaskan menggunakan Limit Maker Exit sebelum beralih ke proteksi pasar darurat.
+2. **Timeframe 1 Menit (TF 1m Scalper)**:
+   - Pemindaian candle 1 menit dengan konfirmasi candle tertutup (`-2`), volume support aktif, dan price action tanpa rejection wick.
+3. **Stop Loss 1.0% & Target 1.8% RRR**:
+   - Stop Loss terukur 1.0% dan Take Profit 1.8% (Risk to Reward 1:1.8).
+   - Break-Even otomatis mengunci SL di Entry + 0.05% saat profit mencapai +0.5% (menutup biaya fee).
+   - Trailing Stop dinamis mengunci keuntungan saat profit mencapai +0.9%.
+4. **Proteksi Margin Ketat (~$0.50 per Posisi)**:
+   - Alokasi margin: 0.5% portofolio (atau minimum notional ~$5.00 - $5.50 x 10x leverage = ~$0.50 margin).
+   - Filter `MAX_ORDER_NOTIONAL` ($6.50): Menyaring koin raksasa seperti BTCUSDT yang memiliki ukuran minimum lot tinggi (0.001 BTC = $83+), mencegah penggunaan margin besar ($8+).
+5. **Analisis Pola N & Sentimen Arus Pasar**:
+   - Memvalidasi pembentukan struktur N-Wave Breakout (Bullish N / Bearish N).
+   - Mengintegrasikan Binance Futures `globalLongShortAccountRatio` (anti-melawan arus pasar).
 6. **Pemantauan Posisi Aktif Setiap 5 Detik**:
-   - Loop frekuensi tinggi (5s) langsung memantau harga posisi terbuka, sedangkan pemindaian koin berjalan berkala dengan konsumsi IP weight rendah (<100/2400).
+   - Loop frekuensi tinggi (5s) langsung memantau harga posisi terbuka secara presisi.
 7. **Database Neon Tech PostgreSQL Cloud**:
    - Schema terisolasi `binance_scalper` untuk merekam riwayat trade, riwayat sinyal, dan pertumbuhan saldo portofolio.
 
@@ -29,10 +30,10 @@ Bot scalping otonom berbasis **Python Native REST API + FastAPI** yang memindai 
 
 ## Struktur File Proyek
 
-- [`config.py`](config.py): Konfigurasi terpusat parameter bursa, modal, indikator, TF 5m, dan alokasi risiko.
+- [`config.py`](config.py): Konfigurasi terpusat parameter bursa, modal, indikator, TF 1m, SL 1.0%, dan batas notional $6.50.
 - [`strategy.py`](strategy.py): Algoritma matematis murni EMA, RSI, ATR, Pola N, dan filter sentimen arus.
-- [`binance_client.py`](binance_client.py): Klien REST API Binance Futures Native (Zero CCXT), penanganan presisi lot size & tick size, auto-wait rate limit.
-- [`binance_bot.py`](binance_bot.py): Mesin pemindaian koin, eksekusi limit maker, pemantau posisi aktif 5s, Break-Even & Trailing Stop.
+- [`binance_client.py`](binance_client.py): Klien REST API Binance Futures Native (Zero CCXT), penanganan presisi lot size & tick size.
+- [`binance_bot.py`](binance_bot.py): Mesin pemindaian koin, filter ukuran akun, eksekusi limit maker, pemantau posisi aktif 5s.
 - [`database.py`](database.py): Pengelola koneksi dan audit log Neon Tech PostgreSQL.
 - [`main.py`](main.py): Service FastAPI untuk Render Cloud, keep-alive self-ping 24/7, dan REST API endpoints.
 
