@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 import uvicorn
 
 from binance_bot import BinanceScalper
+from config import config
 
 scalper = BinanceScalper()
 bot_thread = None
