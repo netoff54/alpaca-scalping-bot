@@ -19,7 +19,7 @@ class BotConfig:
     )
 
     # --- Market Scanning ---
-    TOP_COINS_LIMIT: int = 50              # Pindai 50 koin paling likuid & volatil di Binance Futures
+    TOP_COINS_LIMIT: int = 20              # Pindai 20 koin paling likuid & volatil di Binance Futures (Super Aman Rate Limit)
     SCAN_INTERVAL_SECONDS: int = 60        # Selaras dengan penutupan candle 1m (1 menit)
     TIMEFRAME: str = "1m"                  # Timeframe 1 menit untuk scalping agresif
     CANDLE_LIMIT: int = 220                # 220 candle untuk perhitungan EMA 200 yang presisi
