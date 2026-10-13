@@ -9,6 +9,7 @@ from rich.console import Console
 from config import config
 import strategy
 from binance_client import BinanceFuturesClient
+from database import db
 
 console = Console()
 
@@ -51,6 +52,7 @@ class BinanceScalper:
         # Cache Top 50 koin (diperbarui setiap 30 menit)
         self._cached_top_symbols: List[Dict[str, Any]] = []
         self._last_top_symbols_refresh: float = 0.0
+        self._last_wallet_db_snapshot: float = 0.0
         
         # Balance cache & Rate limit cooldown
         self._cached_balance: Dict[str, float] = {"total_wallet": 0.0, "available": 0.0, "unrealized_pnl": 0.0}
@@ -143,12 +145,19 @@ class BinanceScalper:
             return self.active_position
 
     def get_compounded_notional(self) -> float:
-        """Menghitung ukuran order berikutnya (Compounding 100% saldo kas)."""
+        """
+        Menghitung ukuran notional posisi berdasarkan alokasi 0.5% modal kas portofolio x Leverage (10x).
+        Jika portofolio $100 -> modal alokasi $0.5 -> dengan leverage 10x = $5.0 notional.
+        Memastikan notional tidak di bawah batas minimal Binance ($5.0).
+        """
         bal = self.get_futures_balance()
         avail = bal["available"]
-        if avail >= 1.0:
-            return round(avail * config.LEVERAGE, 2)
-        return round(config.DEFAULT_CAPITAL * config.LEVERAGE, 2)
+        base_wallet = avail if avail >= 1.0 else config.DEFAULT_CAPITAL
+        
+        min_margin = config.MIN_NOTIONAL / config.LEVERAGE
+        target_margin = base_wallet * config.RISK_PORTFOLIO_PERCENT
+        margin_used = max(min_margin, target_margin)
+        return round(margin_used * config.LEVERAGE, 2)
 
     def _fetch_top_symbols(self) -> List[Dict[str, Any]]:
         """Mengambil Top 50 koin langsung dari Binance Futures REST API."""
@@ -250,6 +259,20 @@ class BinanceScalper:
             self.last_scan_duration_sec = round(time.time() - t_start, 2)
             self.last_scan_time = time.strftime("%Y-%m-%d %H:%M:%S")
             
+            # Rekam sinyal dan snapshot saldo ke Neon Tech
+            if self.active_signals:
+                db.record_signals(self.active_signals)
+                
+            if now - self._last_wallet_db_snapshot > 300:
+                db.record_wallet_snapshot(
+                    total_wallet=bal["total_wallet"],
+                    available=bal["available"],
+                    unpnl=bal["unrealized_pnl"],
+                    trade_size=self.get_compounded_notional(),
+                    margin_pct=config.RISK_PORTFOLIO_PERCENT * 100
+                )
+                self._last_wallet_db_snapshot = now
+            
         except Exception as e:
             console.log(f"[red]Error dalam pemindaian koin: {e}[/red]")
         finally:
@@ -267,7 +290,7 @@ class BinanceScalper:
             return False
 
         try:
-            # 1. Pastikan ISOLATED margin dan Leverage 5x
+            # 1. Pastikan ISOLATED margin dan Leverage
             self.client.set_margin_type(symbol, "ISOLATED")
             self.client.set_leverage(symbol, config.LEVERAGE)
             
@@ -280,7 +303,7 @@ class BinanceScalper:
                 
             formatted_price = self.client.format_price(symbol, best_price)
             
-            # 3. Hitung qty sesuai lot size
+            # 3. Hitung qty sesuai alokasi 0.5% portofolio x Leverage
             notional = sig["notional"]
             raw_qty = notional / formatted_price
             formatted_qty = self.client.format_qty(symbol, raw_qty)
@@ -289,7 +312,7 @@ class BinanceScalper:
                 console.log(f"[red]Ukuran order terlalu kecil untuk {symbol}: {raw_qty}[/red]")
                 return False
                 
-            console.log(f"[bold cyan]Dispatching Maker Limit Order: {side} {formatted_qty} {symbol} @ {formatted_price}[/bold cyan]")
+            console.log(f"[bold cyan]Dispatching Maker Limit Order (0.5% Portofolio): {side} {formatted_qty} {symbol} @ {formatted_price}[/bold cyan]")
             
             order = self.client.create_limit_order(
                 symbol=symbol,
@@ -382,13 +405,22 @@ class BinanceScalper:
                 close_side = "SELL" if side == "buy" else "BUY"
                 self.client.create_market_close_order(symbol=symbol, side=close_side, qty=qty)
                 
-                self.trade_history.append({
+                trade_record = {
                     "symbol": symbol,
-                    "result": "WIN",
-                    "pnl_pct": round(pnl_pct * 100, 2),
+                    "side": side.upper(),
+                    "entry_price": entry_price,
+                    "exit_price": current_price,
+                    "qty": qty,
+                    "notional": pos["notional"],
+                    "margin_used": pos["notional"] / config.LEVERAGE,
                     "pnl_usd": round(pnl_usd, 4),
+                    "pnl_pct": round(pnl_pct * 100, 2),
+                    "result": "WIN",
                     "closed_at": time.strftime("%Y-%m-%d %H:%M:%S")
-                })
+                }
+                self.trade_history.append(trade_record)
+                db.record_trade(trade_record)
+                
                 self.total_trades += 1
                 self.winning_trades += 1
                 self.total_pnl_usd += pnl_usd
@@ -399,13 +431,22 @@ class BinanceScalper:
                 close_side = "SELL" if side == "buy" else "BUY"
                 self.client.create_market_close_order(symbol=symbol, side=close_side, qty=qty)
                 
-                self.trade_history.append({
+                trade_record = {
                     "symbol": symbol,
-                    "result": "LOSS",
-                    "pnl_pct": round(pnl_pct * 100, 2),
+                    "side": side.upper(),
+                    "entry_price": entry_price,
+                    "exit_price": current_price,
+                    "qty": qty,
+                    "notional": pos["notional"],
+                    "margin_used": pos["notional"] / config.LEVERAGE,
                     "pnl_usd": round(pnl_usd, 4),
+                    "pnl_pct": round(pnl_pct * 100, 2),
+                    "result": "LOSS",
                     "closed_at": time.strftime("%Y-%m-%d %H:%M:%S")
-                })
+                }
+                self.trade_history.append(trade_record)
+                db.record_trade(trade_record)
+                
                 self.total_trades += 1
                 self.total_pnl_usd += pnl_usd
                 self.active_position = None
@@ -415,9 +456,13 @@ class BinanceScalper:
 
     def run_scan_loop(self):
         """Loop pemindaian utama yang berjalan secara otonom di background."""
-        console.log("[bold green]>>> Binance Scalper Autonomous Loop Dimulai (Native Engine) <<<[/bold green]")
+        console.log("[bold green]>>> Binance Scalper Autonomous Loop Dimulai (Native Engine + Neon Tech) <<<[/bold green]")
         self.is_running = True
         
+        # 1. Inisialisasi Database Neon Tech (Schema: binance_scalper)
+        db.init_db()
+        
+        # 2. Inisialisasi Bursa
         self.client.ensure_single_asset_mode()
         self.get_futures_balance(max_age_sec=0)
         self.sync_exchange_position()
@@ -450,10 +495,11 @@ class BinanceScalper:
                     best_signal = self.active_signals[0]
                     console.log(f"[bold green]Sinyal terbaik terdeteksi:[/bold green] {best_signal['side']} {best_signal['symbol']} (Skor: {best_signal.get('score', 0)})")
                     
-                    if avail_usdt >= (config.MIN_NOTIONAL / config.LEVERAGE):
+                    min_req = config.MIN_NOTIONAL / config.LEVERAGE
+                    if avail_usdt >= min_req:
                         self.execute_limit_order(best_signal)
                     else:
-                        console.log(f"[yellow]Saldo USDT Futures saat ini: ${avail_usdt:.2f}. Menunggu modal untuk eksekusi otomatis.[/yellow]")
+                        console.log(f"[yellow]Saldo USDT Futures (${avail_usdt:.2f}) di bawah minimum (${min_req:.2f}). Menunggu modal.[/yellow]")
                         
                 time.sleep(config.SCAN_INTERVAL_SECONDS)
                 

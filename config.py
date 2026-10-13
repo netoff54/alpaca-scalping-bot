@@ -12,23 +12,30 @@ class BotConfig:
     API_KEY: str = os.getenv("BINANCE_API_KEY", "")
     API_SECRET: str = os.getenv("BINANCE_API_SECRET", "")
 
+    # --- Database Neon Tech (PostgreSQL Cloud) ---
+    DATABASE_URL: str = os.getenv(
+        "DATABASE_URL",
+        "postgresql://neondb_owner:npg_9cdnsQ6YefiX@ep-small-butterfly-b4dv7o7m-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require"
+    )
+
     # --- Market Scanning ---
-    TOP_COINS_LIMIT: int = 50              # Pindai 50 koin paling likuid & volatil di Binance Futures (Aman 100% dari rate limit)
+    TOP_COINS_LIMIT: int = 50              # Pindai 50 koin paling likuid & volatil di Binance Futures
     SCAN_INTERVAL_SECONDS: int = 60        # Selaras dengan penutupan candle 1m (1 menit)
     TIMEFRAME: str = "1m"                  # Timeframe 1 menit untuk scalping agresif
     CANDLE_LIMIT: int = 220                # 220 candle untuk perhitungan EMA 200 yang presisi
 
     # --- Account & Risk Management ---
     DEFAULT_CAPITAL: float = 10.0          # Modal dasar $10
-    COMPOUNDING_ENABLED: bool = True       # 100% Saldo Kas Tersedia Digulung (Compounding)
-    LEVERAGE: int = 5                      # Leverage 5x
+    RISK_PORTFOLIO_PERCENT: float = 0.005  # Posisi 0.5% dari total portofolio (Kalo $100 cukup $0.5)
+    COMPOUNDING_ENABLED: bool = True       # Selalu compounding dengan risiko stabil
+    LEVERAGE: int = 10                     # Leverage 10x disesuaikan agar alokasi 0.5% memenuhi minimum bursa
     MARGIN_MODE: str = "ISOLATED"          # WAJIB ISOLATED MARGIN
     ORDER_TYPE: str = "LIMIT"              # WAJIB LIMIT ORDER (Maker Only)
-    MIN_NOTIONAL: float = 5.0              # Nilai notional minimum bursa ($5.0)
+    MIN_NOTIONAL: float = 5.0              # Nilai notional minimum Binance ($5.0)
 
     # --- Limit Order & Anti-FOMO Settings ---
     LIMIT_TIMEOUT_SECONDS: int = 30        # Batalkan limit order jika tidak terisi dalam 30 detik
-    POST_ONLY: bool = True                 # Memastikan hanya dieksekusi sebagai Maker fee
+    POST_ONLY: bool = True                 # Memastikan hanya dieksekusi sebagai Maker fee (GTX)
 
     # --- Indicator Parameters ---
     EMA_TREND: int = 200                   # Filter tren besar (Trend Regime)
@@ -42,8 +49,8 @@ class BotConfig:
     ATR_PERIOD: int = 14                   # Volatilitas adaptif
 
     # --- Risk / Reward Ratio (1:2 RRR) ---
-    SL_PERCENT: float = 0.005              # Stop Loss tetap -0.5% ($0.05 pada modal $10)
-    TP_PERCENT: float = 0.010              # Take Profit tetap +1.0% ($0.10 pada modal $10)
+    SL_PERCENT: float = 0.005              # Stop Loss tetap -0.5%
+    TP_PERCENT: float = 0.010              # Take Profit tetap +1.0%
     RR_RATIO: float = 2.0                  # Risk to Reward 1:2
     MAKER_FEE_RATE: float = 0.0002         # 0.02% maker fee pada Binance Futures
 

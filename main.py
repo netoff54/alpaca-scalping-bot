@@ -58,19 +58,25 @@ def get_outbound_ip():
     except Exception as e:
         return {"error": str(e)}
 
+from database import db
+
 @app.api_route("/", methods=["GET", "HEAD"])
 def index():
     bal = scalper.get_futures_balance()
+    db_summary = db.get_trade_summary()
     return {
         "status": "online",
-        "service": "Binance Futures Top-200 Scalping Autonomous Bot",
+        "service": "Binance Futures Scalping Autonomous Bot (Native Engine)",
         "exchange": "Binance USD(S)-M Futures",
         "margin_mode": "ISOLATED",
-        "order_type": "LIMIT ORDER (Maker Only)",
-        "compounding_mode": "ALWAYS COMPOUNDING (100% Saldo Kas Digulung)",
+        "leverage": f"{config.LEVERAGE}x",
+        "order_type": "LIMIT ORDER (Maker Only / GTX)",
+        "portfolio_allocation": f"{config.RISK_PORTFOLIO_PERCENT * 100}% per posisi (Compounding Stabil)",
         "futures_wallet_usdt": bal["total_wallet"],
         "available_usdt": bal["available"],
-        "compounded_trade_size": scalper.get_compounded_notional(),
+        "trade_size_notional": scalper.get_compounded_notional(),
+        "database": "Neon Tech PostgreSQL (Schema: binance_scalper)",
+        "db_trade_summary": db_summary,
         "monitored_top_coins": len(scalper.ranked_pairs),
         "last_scan_time": scalper.last_scan_time,
         "last_scan_duration_sec": scalper.last_scan_duration_sec,

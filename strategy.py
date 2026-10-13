@@ -109,8 +109,12 @@ def check_signal_from_ohlcv(ohlcv: List[List[float]], available_capital: float =
     if not signal_side:
         return None
 
-    # Perhitungan Notional Posisi & Compounding (100% kas)
-    notional = max(config.MIN_NOTIONAL, available_capital * leverage)
+    # Alokasi margin: 0.5% dari total portofolio (misal jika $100 -> cukup margin $0.5)
+    # Dengan batas minimal agar memenuhi syarat minimum Binance ($5 Notional)
+    min_margin = config.MIN_NOTIONAL / leverage
+    target_margin = available_capital * config.RISK_PORTFOLIO_PERCENT
+    margin_required = max(min_margin, target_margin)
+    notional = margin_required * leverage
     qty = notional / latest_price
 
     # Stop Loss & Take Profit (1:2 Risk to Reward)
