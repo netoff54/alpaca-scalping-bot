@@ -72,7 +72,7 @@ def index():
 
         cooldown_info = {
             "in_cooldown": scalper.client.is_banned(),
-            "resumes_at": time.strftime("%Y-%m-%d %H:%M:%S WIB", time.localtime(scalper.client.ban_until)) if scalper.client.is_banned() else "READY",
+            "resumes_at": time.strftime("%Y-%m-%d %H:%M:%S WIB", time.gmtime(scalper.client.ban_until + 7 * 3600)) if scalper.client.is_banned() else "READY",
             "seconds_left": max(0, int(scalper.client.ban_until - time.time())) if scalper.client.is_banned() else 0
         }
 
@@ -116,7 +116,7 @@ def health_check():
         bal = scalper._cached_balance
         cooldown_info = {
             "in_cooldown": scalper.client.is_banned(),
-            "resumes_at": time.strftime("%Y-%m-%d %H:%M:%S WIB", time.localtime(scalper.client.ban_until)) if scalper.client.is_banned() else "READY",
+            "resumes_at": time.strftime("%Y-%m-%d %H:%M:%S WIB", time.gmtime(scalper.client.ban_until + 7 * 3600)) if scalper.client.is_banned() else "READY",
             "seconds_left": max(0, int(scalper.client.ban_until - time.time())) if scalper.client.is_banned() else 0
         }
         return {

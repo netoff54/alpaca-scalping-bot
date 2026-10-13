@@ -48,21 +48,22 @@ class BinanceFuturesClient:
         elif isinstance(resp_or_data, str):
             msg = resp_or_data
 
-        if "-1003" in msg or "IP banned" in msg or "Way too many requests" in msg:
+        if "-1003" in msg or "IP banned" in msg or "Way too many requests" in msg or "banned until" in msg:
             import re
-            match = re.search(r"IP banned until (\d+)", msg)
+            match = re.search(r"banned until (\d+)", msg)
             now = time.time()
             if match:
                 self.ban_until = float(match.group(1)) / 1000.0
             else:
-                self.ban_until = max(self.ban_until, now + 120.0)
+                self.ban_until = max(self.ban_until, now + 300.0)
             
             if now - self._last_ban_log_time > 60:
                 self._last_ban_log_time = now
                 s_left = int(self.ban_until - now)
                 m_left = s_left // 60
                 sec_left = s_left % 60
-                console.log(f"[bold yellow]Rate limit Binance aktif. Server IP istirahat hingga {time.strftime('%H:%M:%S', time.localtime(self.ban_until))} WIB ({m_left}m {sec_left}s lagi).[/bold yellow]")
+                wib_time = time.strftime('%H:%M:%S', time.gmtime(self.ban_until + 7 * 3600))
+                console.log(f"[bold yellow]Rate limit Binance aktif. Server IP istirahat hingga {wib_time} WIB ({m_left}m {sec_left}s lagi).[/bold yellow]")
 
     def _apply_fallback_symbols(self):
         """Mengaktifkan daftar default 28 koin crypto likuid utama jika bursa sedang dalam cooldown."""
