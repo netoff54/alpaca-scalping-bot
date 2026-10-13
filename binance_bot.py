@@ -174,24 +174,26 @@ class BinanceScalper:
             bal = self.get_futures_balance()
             cap = bal['available'] if bal['available'] >= 1.0 else config.DEFAULT_CAPITAL
             
-            sem = asyncio.Semaphore(20)
+            sem = asyncio.Semaphore(5)
             async def analyze_pair(rank: int, symbol: str, ticker: Dict[str, Any]):
                 async with sem:
                     try:
                         ohlcv = await client.fetch_ohlcv(symbol, timeframe=config.TIMEFRAME, limit=config.CANDLE_LIMIT)
                         if not ohlcv or len(ohlcv) < config.EMA_TREND + 5:
                             return None
-                        df = pd.DataFrame(ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
-                        df = strategy.prepare_indicators(df)
-                        
-                        sig = strategy.check_signal(df, available_capital=cap, leverage=config.LEVERAGE)
-                        
-                        c_curr = df.iloc[-2]
-                        latest_price = float(df['close'].iloc[-1])
-                        is_bullish = c_curr['close'] > c_curr['ema_trend']
-                        rsi_val = float(c_curr['rsi'])
-                        atr_val = float(c_curr['atr']) if not np.isnan(c_curr['atr']) else (latest_price * 0.002)
-                        
+
+                        sig = strategy.check_signal_from_ohlcv(ohlcv, available_capital=cap, leverage=config.LEVERAGE)
+
+                        closes = [c[4] for c in ohlcv]
+                        highs = [c[2] for c in ohlcv]
+                        lows = [c[3] for c in ohlcv]
+
+                        ema_trend = strategy.calculate_ema_series(closes, config.EMA_TREND)[-2]
+                        rsi_val = strategy.calculate_rsi_series(closes, config.RSI_PERIOD)[-2]
+                        atr_val = strategy.calculate_atr_series(highs, lows, closes, config.ATR_PERIOD)[-2]
+                        latest_price = closes[-1]
+                        is_bullish = closes[-2] > ema_trend
+
                         result = {
                             'rank': rank,
                             'symbol': symbol,
@@ -205,11 +207,12 @@ class BinanceScalper:
                         return result
                     except Exception:
                         return None
-                    except Exception:
-                        return None
                         
             tasks = [analyze_pair(i + 1, s, t) for i, (s, t) in enumerate(sorted_pairs)]
             results = await asyncio.gather(*tasks)
+            del tasks
+            import gc
+            gc.collect()
             valid = [r for r in results if r is not None]
             
             self.ranked_pairs = valid
