@@ -60,15 +60,22 @@ def calculate_atr_series(highs: List[float], lows: List[float], closes: List[flo
 
 def check_signal_from_ohlcv(ohlcv: List[List[float]], available_capital: float = 10.0, leverage: int = 5) -> Optional[Dict[str, Any]]:
     """
-    Memeriksa sinyal Triple Filter Momentum Scalper langsung dari data candle OHLCV.
-    Hemat memori 100% (tidak menggunakan Pandas DataFrame).
+    Memeriksa sinyal Triple Confirmation Momentum Scalper (Anti-Noise & Anti-Trap):
+    1. Trend Regime (EMA 200).
+    2. Crossover Trigger (EMA 9 & EMA 21).
+    3. Volume Confirmation: Memastikan volume candle pemicu aktif (bukan dead-volume fakeout).
+    4. Price Action Confirmation: Memastikan candle pemicu hijau/merah solid (bukan doji/rejection wick).
+    5. RSI Momentum Bersih (hindari zona jenuh pucuk/dasar).
+    6. Stop Loss Adaptif berbasis Volatilitas ATR (ruang gerak sehat 1.2% - 1.8% anti-noise).
     """
     if len(ohlcv) < config.EMA_TREND + 5:
         return None
 
+    opens = [c[1] for c in ohlcv]
     highs = [c[2] for c in ohlcv]
     lows = [c[3] for c in ohlcv]
     closes = [c[4] for c in ohlcv]
+    volumes = [c[5] for c in ohlcv]
 
     ema_trend = calculate_ema_series(closes, config.EMA_TREND)
     ema_fast = calculate_ema_series(closes, config.EMA_FAST)
@@ -82,8 +89,12 @@ def check_signal_from_ohlcv(ohlcv: List[List[float]], available_capital: float =
     c_curr_fast = ema_fast[-2]
     c_curr_slow = ema_slow[-2]
 
+    curr_open = opens[-2]
+    curr_high = highs[-2]
+    curr_low = lows[-2]
     curr_close = closes[-2]
     curr_trend = ema_trend[-2]
+    curr_vol = volumes[-2]
     rsi_val = rsi_series[-2]
     atr_val = atr_series[-2]
     latest_price = closes[-1]
@@ -96,14 +107,31 @@ def check_signal_from_ohlcv(ohlcv: List[List[float]], available_capital: float =
     is_bullish_trend = curr_close > curr_trend
     is_bearish_trend = curr_close < curr_trend
 
+    # 3. Volume Support Filter: Volume candle pemicu wajib aktif
+    avg_vol = sum(volumes[-22:-2]) / 20.0 if len(volumes) >= 22 else curr_vol
+    has_volume_support = (curr_vol >= avg_vol * 0.90)
+
+    # 4. Price Action Confirmation: Menghindari candle doji dan rejection wick (bull/bear trap)
+    candle_range = curr_high - curr_low
+    is_bullish_action = True
+    is_bearish_action = True
+    if candle_range > 0:
+        # Untuk BUY: Candle harus hijau (Close > Open) dan tidak memiliki rejection wick atas yang dominan (<= 45%)
+        upper_wick = curr_high - curr_close
+        is_bullish_action = (curr_close > curr_open) and (upper_wick <= candle_range * 0.45)
+
+        # Untuk SELL: Candle harus merah (Close < Open) dan tidak memiliki rejection wick bawah yang dominan (<= 45%)
+        lower_wick = curr_close - curr_low
+        is_bearish_action = (curr_close < curr_open) and (lower_wick <= candle_range * 0.45)
+
     signal_side = None
 
     # Syarat BUY / LONG
-    if is_bullish_trend and golden_cross and (config.RSI_LONG_MIN <= rsi_val <= config.RSI_LONG_MAX):
+    if is_bullish_trend and golden_cross and (config.RSI_LONG_MIN <= rsi_val <= config.RSI_LONG_MAX) and has_volume_support and is_bullish_action:
         signal_side = "BUY"
 
     # Syarat SELL / SHORT
-    elif is_bearish_trend and death_cross and (config.RSI_SHORT_MIN <= rsi_val <= config.RSI_SHORT_MAX):
+    elif is_bearish_trend and death_cross and (config.RSI_SHORT_MIN <= rsi_val <= config.RSI_SHORT_MAX) and has_volume_support and is_bearish_action:
         signal_side = "SELL"
 
     if not signal_side:
@@ -117,9 +145,11 @@ def check_signal_from_ohlcv(ohlcv: List[List[float]], available_capital: float =
     notional = margin_required * leverage
     qty = notional / latest_price
 
-    # Stop Loss & Take Profit (1:2 Risk to Reward)
-    sl_percent = config.SL_PERCENT  # 0.5% (0.005)
-    tp_percent = config.TP_PERCENT  # 1.0% (0.010)
+    # Stop Loss & Take Profit Adaptif Berbasis Volatilitas (ATR)
+    # Memberi ruang gerak sehat (1.2% - 1.8%) di luar batas noise pasar 1m/3m
+    atr_pct = (atr_val / curr_close) if curr_close > 0 else 0.008
+    sl_percent = max(config.SL_PERCENT, min(0.018, atr_pct * 1.8))
+    tp_percent = max(config.TP_PERCENT, sl_percent * config.RR_RATIO)
 
     if signal_side == "BUY":
         entry_price = latest_price
@@ -130,7 +160,9 @@ def check_signal_from_ohlcv(ohlcv: List[List[float]], available_capital: float =
         sl_price = entry_price * (1.0 + sl_percent)
         tp_price = entry_price * (1.0 - tp_percent)
 
-    score = 100.0 - abs(rsi_val - 55.0)
+    # Skor kualitas sinyal (RSI center score + volume multiplier)
+    vol_ratio = min(1.5, curr_vol / avg_vol) if avg_vol > 0 else 1.0
+    score = (100.0 - abs(rsi_val - 55.0)) * (0.8 + 0.2 * vol_ratio)
 
     return {
         "side": signal_side,
@@ -140,8 +172,8 @@ def check_signal_from_ohlcv(ohlcv: List[List[float]], available_capital: float =
         "qty": qty,
         "notional": notional,
         "margin_required": notional / leverage,
-        "sl_percent": sl_percent * 100,
-        "tp_percent": tp_percent * 100,
+        "sl_percent": round(sl_percent * 100, 2),
+        "tp_percent": round(tp_percent * 100, 2),
         "rsi": round(rsi_val, 2),
         "ema_trend": round(curr_trend, 4),
         "atr": round(atr_val, 4),

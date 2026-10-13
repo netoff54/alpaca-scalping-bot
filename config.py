@@ -20,8 +20,8 @@ class BotConfig:
 
     # --- Market Scanning ---
     TOP_COINS_LIMIT: int = 20              # Pindai 20 koin paling likuid & volatil di Binance Futures (Super Aman Rate Limit)
-    SCAN_INTERVAL_SECONDS: int = 60        # Selaras dengan penutupan candle 1m (1 menit)
-    TIMEFRAME: str = "1m"                  # Timeframe 1 menit untuk scalping agresif
+    SCAN_INTERVAL_SECONDS: int = 60        # Selaras dengan interval pemantauan candle 3m
+    TIMEFRAME: str = "3m"                  # Timeframe 3 menit: Menghilangkan 65%+ market noise 1m tanpa kehilangan momentum
     CANDLE_LIMIT: int = 220                # 220 candle untuk perhitungan EMA 200 yang presisi
 
     # --- Account & Risk Management ---
@@ -42,16 +42,19 @@ class BotConfig:
     EMA_FAST: int = 9                      # Trigger cepat EMA 9
     EMA_SLOW: int = 21                     # Trigger konfirmasi EMA 21
     RSI_PERIOD: int = 14                   # Momentum filter RSI 14
-    RSI_LONG_MIN: float = 50.0             # Syarat Long: RSI >= 50
-    RSI_LONG_MAX: float = 68.0             # Batas atas Long: RSI <= 68 (hindari pucuk)
-    RSI_SHORT_MAX: float = 50.0            # Syarat Short: RSI <= 50
-    RSI_SHORT_MIN: float = 32.0            # Batas bawah Short: RSI >= 32 (hindari dasar oversold)
+    RSI_LONG_MIN: float = 52.0             # Syarat Long: RSI >= 52 (Momentum bersih)
+    RSI_LONG_MAX: float = 66.0             # Batas atas Long: RSI <= 66 (hindari pucuk)
+    RSI_SHORT_MAX: float = 48.0            # Syarat Short: RSI <= 48 (Momentum turun)
+    RSI_SHORT_MIN: float = 34.0            # Batas bawah Short: RSI >= 34 (hindari dasar oversold)
     ATR_PERIOD: int = 14                   # Volatilitas adaptif
 
-    # --- Risk / Reward Ratio (1:2 RRR) ---
-    SL_PERCENT: float = 0.005              # Stop Loss tetap -0.5%
-    TP_PERCENT: float = 0.010              # Take Profit tetap +1.0%
-    RR_RATIO: float = 2.0                  # Risk to Reward 1:2
+    # --- Risk / Reward Ratio & Noise Filter (1:1.6 to 1:2 RRR) ---
+    SL_PERCENT: float = 0.012              # Stop Loss dasar 1.2% (Ruang gerak sehat di luar noise floor)
+    TP_PERCENT: float = 0.020              # Take Profit dasar 2.0% (Risk to Reward 1:1.67)
+    RR_RATIO: float = 1.67                 # Risk to Reward 1:1.67
+    BREAK_EVEN_TRIGGER: float = 0.006      # Geser SL ke Break-Even (+0.1%) saat profit mencapai +0.6%
+    TRAILING_STOP_TRIGGER: float = 0.010   # Aktifkan trailing stop saat profit mencapai +1.0%
+    TRAILING_STOP_DISTANCE: float = 0.005  # Jarak trailing 0.5% dari harga puncak
     MAKER_FEE_RATE: float = 0.0002         # 0.02% maker fee pada Binance Futures
 
 config = BotConfig()

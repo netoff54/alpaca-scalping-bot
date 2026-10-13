@@ -119,8 +119,8 @@ class BinanceScalper:
                 
                 # Pertahankan SL/TP target
                 if self.active_position and self.active_position.get("symbol") == symbol:
-                    sl_price = self.active_position.get("sl_price", entry_price * (0.995 if side == "buy" else 1.005))
-                    tp_price = self.active_position.get("tp_price", entry_price * (1.010 if side == "buy" else 0.990))
+                    sl_price = self.active_position.get("sl_price", entry_price * (1.0 - config.SL_PERCENT if side == "buy" else 1.0 + config.SL_PERCENT))
+                    tp_price = self.active_position.get("tp_price", entry_price * (1.0 + config.TP_PERCENT if side == "buy" else 1.0 - config.TP_PERCENT))
                     opened_at = self.active_position.get("opened_at", time.time())
                 else:
                     sl_price = entry_price * (1.0 - config.SL_PERCENT) if side == "buy" else entry_price * (1.0 + config.SL_PERCENT)
@@ -428,10 +428,38 @@ class BinanceScalper:
             pnl_pct = ((current_price - entry_price) / entry_price) if side == "buy" else ((entry_price - current_price) / entry_price)
             pnl_usd = pnl_pct * pos["notional"]
             
+            # --- 1. Break-Even Protection (+0.6% profit) ---
+            if side == "buy":
+                if pnl_pct >= config.BREAK_EVEN_TRIGGER and pos["sl_price"] < entry_price:
+                    pos["sl_price"] = entry_price * 1.001  # Kunci di Entry + 0.1% (tutup biaya fee)
+                    console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: SL digeser ke {pos['sl_price']:.4f} (Posisi Bebas Risiko)[/bold cyan]")
+                
+                # --- 2. Trailing Stop (+1.0% profit) ---
+                if pnl_pct >= config.TRAILING_STOP_TRIGGER:
+                    trailing_target = current_price * (1.0 - config.TRAILING_STOP_DISTANCE)
+                    if trailing_target > pos["sl_price"]:
+                        pos["sl_price"] = trailing_target
+                        console.log(f"[bold green]📈 TRAILING STOP NAIK pada {symbol}: SL dikunci di {trailing_target:.4f}[/bold green]")
+                        
+            elif side == "sell":
+                if pnl_pct >= config.BREAK_EVEN_TRIGGER and pos["sl_price"] > entry_price:
+                    pos["sl_price"] = entry_price * 0.999
+                    console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: SL digeser ke {pos['sl_price']:.4f} (Posisi Bebas Risiko)[/bold cyan]")
+                
+                if pnl_pct >= config.TRAILING_STOP_TRIGGER:
+                    trailing_target = current_price * (1.0 + config.TRAILING_STOP_DISTANCE)
+                    if trailing_target < pos["sl_price"]:
+                        pos["sl_price"] = trailing_target
+                        console.log(f"[bold green]📈 TRAILING STOP TURUN pada {symbol}: SL dikunci di {trailing_target:.4f}[/bold green]")
+
+            # Perbarui nilai SL/TP terkini
+            sl_price = pos["sl_price"]
+            tp_price = pos["tp_price"]
+
             hit_tp = (current_price >= tp_price) if side == "buy" else (current_price <= tp_price)
             hit_sl = (current_price <= sl_price) if side == "buy" else (current_price >= sl_price)
             
-            console.log(f"[dim]Pemantauan 5s: {symbol} @ {current_price} | PnL: {pnl_pct*100:+.2f}% (${pnl_usd:+.2f}) | TP: {tp_price} | SL: {sl_price}[/dim]")
+            console.log(f"[dim]Pemantauan 5s: {symbol} @ {current_price} | PnL: {pnl_pct*100:+.2f}% (${pnl_usd:+.2f}) | TP: {tp_price:.4f} | SL: {sl_price:.4f}[/dim]")
             
             if hit_tp:
                 console.log(f"[bold green]TAKE PROFIT TERCAPAI! (+{pnl_pct*100:.2f}%, PnL: +${pnl_usd:.2f}) pada {symbol}[/bold green]")
@@ -460,7 +488,12 @@ class BinanceScalper:
                 self.active_position = None
                 
             elif hit_sl:
-                console.log(f"[bold red]STOP LOSS TERPICU! ({pnl_pct*100:.2f}%, PnL: ${pnl_usd:.2f}) pada {symbol}[/bold red]")
+                is_be_or_profit = pnl_usd >= 0.0
+                tag = "BREAK-EVEN / TRAILING EXIT" if is_be_or_profit else "STOP LOSS TERPICU"
+                res = "WIN" if is_be_or_profit else "LOSS"
+                color = "green" if is_be_or_profit else "red"
+                
+                console.log(f"[bold {color}]{tag}! ({pnl_pct*100:+.2f}%, PnL: ${pnl_usd:+.2f}) pada {symbol}[/bold {color}]")
                 close_side = "SELL" if side == "buy" else "BUY"
                 self.client.create_market_close_order(symbol=symbol, side=close_side, qty=qty)
                 
@@ -474,13 +507,15 @@ class BinanceScalper:
                     "margin_used": pos["notional"] / config.LEVERAGE,
                     "pnl_usd": round(pnl_usd, 4),
                     "pnl_pct": round(pnl_pct * 100, 2),
-                    "result": "LOSS",
+                    "result": res,
                     "closed_at": time.strftime("%Y-%m-%d %H:%M:%S")
                 }
                 self.trade_history.append(trade_record)
                 db.record_trade(trade_record)
                 
                 self.total_trades += 1
+                if is_be_or_profit:
+                    self.winning_trades += 1
                 self.total_pnl_usd += pnl_usd
                 self.active_position = None
                 
