@@ -20,7 +20,7 @@ def keep_alive_ping_loop():
     Mencegah Render Free Tier melakukan 'Spin Down' / Shutdown karena inaktivitas 15 menit.
     """
     time.sleep(20)  # Beri waktu uvicorn startup
-    base_url = os.getenv("RENDER_EXTERNAL_URL", "https://alpaca-scalping-bot.onrender.com").rstrip('/')
+    base_url = os.getenv("RENDER_EXTERNAL_URL", "https://binance-scalper-tmkm.onrender.com").rstrip('/')
     ping_url = f"{base_url}/health"
     print(f">>> [Keep-Alive Ping] Diaktifkan! Memantau {ping_url} setiap 4 menit agar Render tetap ON 24/7.")
 
