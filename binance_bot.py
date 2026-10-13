@@ -3,7 +3,7 @@ import time
 import math
 import threading
 import gc
-from typing import Dict, Any, List, Optional, Set
+from typing import Dict, Any, List, Optional, Set, Tuple
 from rich.console import Console
 
 from config import config
@@ -59,6 +59,7 @@ class BinanceScalper:
         self._last_balance_time: float = 0.0
         self._last_sync_position_time: float = 0.0
         self._configured_symbols: Set[str] = set()
+        self._last_reversal_check_time: float = 0.0
         self.last_error: Optional[str] = None
 
     @property
@@ -150,18 +151,19 @@ class BinanceScalper:
 
     def get_compounded_notional(self) -> float:
         """
-        Menghitung ukuran notional posisi berdasarkan alokasi 0.5% modal kas portofolio x Leverage (10x).
-        Jika portofolio $100 -> modal alokasi $0.5 -> dengan leverage 10x = $5.0 notional.
-        Memastikan notional tidak di bawah batas minimal Binance ($5.0).
+        Menghitung ukuran notional posisi berdasarkan model Risk-Budget 0.5% portofolio.
+        Jika SL = 1.0%, kerugian maksimal saat SL tepat 0.5% dari saldo kas portofolio.
         """
         bal = self.get_futures_balance()
         avail = bal["available"]
         base_wallet = avail if avail >= 1.0 else config.DEFAULT_CAPITAL
         
-        min_margin = config.MIN_NOTIONAL / config.LEVERAGE
-        target_margin = base_wallet * config.RISK_PORTFOLIO_PERCENT
-        margin_used = max(min_margin, target_margin)
-        return round(margin_used * config.LEVERAGE, 2)
+        risk_budget = base_wallet * config.RISK_PORTFOLIO_PERCENT
+        ideal_notional = risk_budget / config.SL_PERCENT
+        notional = max(config.MIN_NOTIONAL + 0.15, ideal_notional)
+        if base_wallet < 20.0:
+            notional = min(notional, config.MAX_ORDER_NOTIONAL)
+        return round(notional, 2)
 
     def _get_fallback_symbols(self) -> List[Dict[str, Any]]:
         """Daftar koin likuid teratas bawaan jika API publik bursa sedang dalam cooldown."""
@@ -333,11 +335,11 @@ class BinanceScalper:
             return False
 
         try:
-            # 1. Pastikan ISOLATED margin dan Leverage (cukup sekali per simbol)
-            if symbol not in self._configured_symbols:
-                self.client.set_margin_type(symbol, "ISOLATED")
-                self.client.set_leverage(symbol, config.LEVERAGE)
-                self._configured_symbols.add(symbol)
+            # 1. Pastikan ISOLATED margin dan Dynamic Leverage sesuai analisis
+            dynamic_leverage = sig.get("dynamic_leverage", config.LEVERAGE)
+            self.client.set_margin_type(symbol, "ISOLATED")
+            self.client.set_leverage(symbol, dynamic_leverage)
+            self._configured_symbols.add(symbol)
             
             # 2. Ambil best bid/ask untuk harga Maker
             depth = self.client.fetch_best_bid_ask(symbol)
@@ -359,11 +361,12 @@ class BinanceScalper:
                 return False
                 
             effective_notional = formatted_qty * formatted_price
+            margin_used = effective_notional / dynamic_leverage
             if effective_notional > config.MAX_ORDER_NOTIONAL:
-                console.log(f"[bold yellow]🛡️ Filter Ukuran Akun: Minimum order {symbol} bernilai ${effective_notional:.2f} (Margin: ${effective_notional/config.LEVERAGE:.2f}). Melewati agar margin tetap ~$0.50 (Maks Notional: ${config.MAX_ORDER_NOTIONAL:.2f}).[/bold yellow]")
+                console.log(f"[bold yellow]🛡️ Filter Ukuran Akun: Minimum order {symbol} bernilai ${effective_notional:.2f} (Margin: ${margin_used:.2f}). Melewati agar margin tetap ~$0.25 - $0.50 (Maks Notional: ${config.MAX_ORDER_NOTIONAL:.2f}).[/bold yellow]")
                 return False
 
-            console.log(f"[bold cyan]Dispatching Maker Limit Order (0.5% Portofolio): {side} {formatted_qty} {symbol} @ {formatted_price} (Notional: ${effective_notional:.2f}, Margin: ${effective_notional/config.LEVERAGE:.2f})[/bold cyan]")
+            console.log(f"[bold cyan]Dispatching Maker Limit Order (Risk: ${sig.get('risk_usd', 0.05):.3f}, Leverage: {dynamic_leverage}x): {side} {formatted_qty} {symbol} @ {formatted_price} (Notional: ${effective_notional:.2f}, Margin: ${margin_used:.2f})[/bold cyan]")
             
             order = self.client.create_limit_order(
                 symbol=symbol,
@@ -381,6 +384,9 @@ class BinanceScalper:
                 "qty": formatted_qty,
                 "sl_price": sig["sl_price"],
                 "tp_price": sig["tp_price"],
+                "leverage": dynamic_leverage,
+                "risk_usd": sig.get("risk_usd", 0.05),
+                "reward_usd": sig.get("reward_usd", 0.10),
                 "placed_at": time.time()
             }
             
@@ -401,6 +407,9 @@ class BinanceScalper:
                             "qty": formatted_qty,
                             "sl_price": sig["sl_price"],
                             "tp_price": sig["tp_price"],
+                            "leverage": dynamic_leverage,
+                            "risk_usd": sig.get("risk_usd", 0.05),
+                            "reward_usd": sig.get("reward_usd", 0.10),
                             "opened_at": time.time(),
                             "notional": formatted_qty * formatted_price
                         }
@@ -494,8 +503,95 @@ class BinanceScalper:
                 console.log(f"[red]Gagal menutup posisi: {e2}[/red]")
                 return False
 
+    def check_market_reversal(self, symbol: str, side: str, pnl_pct: float) -> Tuple[bool, str]:
+        """
+        Mendeteksi pembalikan arah candlestick & indikator secara fleksibel:
+        1. Jika posisi dalam kondisi PROFIT (>= +0.3%):
+           - Muncul candle penolakan / reversal wick (shooting star / hammer)
+           - EMA 9 memotong balik EMA 21
+           - RSI kehilangan momentum (<48 untuk buy / >52 untuk sell)
+           -> Segera Take Profit lebih awal! Jangan kaku menunggu full TP atau terseret balik ke SL.
+        2. Jika posisi dalam kondisi MINUS / BREAK-EVEN:
+           - Candlestick breakdown dan konfirmasi pembalikan arah di bawah EMA 21
+           -> Cut loss kecil lebih awal sebelum menyentuh SL penuh (-1.0%).
+        """
+        try:
+            ohlcv = self.client.fetch_klines(symbol, interval="1m", limit=30)
+            if not ohlcv or len(ohlcv) < 22:
+                return False, ""
+
+            closes = [c[4] for c in ohlcv]
+            opens = [c[1] for c in ohlcv]
+            highs = [c[2] for c in ohlcv]
+            lows = [c[3] for c in ohlcv]
+
+            c_prev_close = closes[-3]
+            c_open = opens[-2]
+            c_close = closes[-2]
+            c_high = highs[-2]
+            c_low = lows[-2]
+            c_range = c_high - c_low
+
+            ema9 = strategy.calculate_ema_series(closes, 9)
+            ema21 = strategy.calculate_ema_series(closes, 21)
+            rsi = strategy.calculate_rsi_series(closes, 14)[-2]
+
+            # 1. Analisis untuk posisi BUY (Long)
+            if side == "buy":
+                # A. KONDISI PROFIT (>= +0.3%): Amankan profit jika ada tanda pembalikan turun
+                if pnl_pct >= config.REVERSAL_PROFIT_TRIGGER:
+                    # Sinyal Reversal 1: Upper rejection wick pada puncak (Shooting star / Bull trap)
+                    if c_range > 0 and (c_high - max(c_open, c_close)) >= (c_range * 0.45) and c_close < c_open:
+                        return True, f"Candle Rejection di puncak (Upper Wick {((c_high - c_open)/c_range)*100:.0f}%)"
+                    
+                    # Sinyal Reversal 2: EMA 9 memotong ke bawah EMA 21 (Death Cross 1m)
+                    if ema9[-2] < ema21[-2] and ema9[-3] >= ema21[-3]:
+                        return True, "EMA 9 Death Cross ke bawah EMA 21 pada TF 1m"
+
+                    # Sinyal Reversal 3: Momentum RSI melemah drastis
+                    if rsi < 48.0 and c_close < c_open:
+                        return True, f"Momentum RSI melemah ({rsi:.1f} < 48)"
+
+                    # Sinyal Reversal 4: Bearish Engulfing solid
+                    if c_close < c_open and c_close < c_prev_close and (c_open - c_close) >= (c_range * 0.65):
+                        return True, "Candle Bearish Engulfing solid membalikkan tren"
+
+                # B. KONDISI MINUS: Cut loss dini jika terjadi pembalikan tren terkonfirmasi
+                elif pnl_pct < -0.002:
+                    if ema9[-2] < ema21[-2] and c_close < ema21[-2] and c_close < c_open:
+                        return True, "Breakdown terkonfirmasi di bawah EMA 21 (Cut loss dini sebelum SL 1%)"
+
+            # 2. Analisis untuk posisi SELL (Short)
+            elif side == "sell":
+                # A. KONDISI PROFIT (>= +0.3%): Amankan profit jika ada tanda pembalikan naik
+                if pnl_pct >= config.REVERSAL_PROFIT_TRIGGER:
+                    # Sinyal Reversal 1: Lower rejection wick di dasar (Hammer / Buyer absorption)
+                    if c_range > 0 and (min(c_open, c_close) - c_low) >= (c_range * 0.45) and c_close > c_open:
+                        return True, f"Candle Rejection di dasar (Lower Wick {((c_close - c_low)/c_range)*100:.0f}%)"
+                    
+                    # Sinyal Reversal 2: EMA 9 memotong ke atas EMA 21 (Golden Cross 1m)
+                    if ema9[-2] > ema21[-2] and ema9[-3] <= ema21[-3]:
+                        return True, "EMA 9 Golden Cross ke atas EMA 21 pada TF 1m"
+
+                    # Sinyal Reversal 3: Momentum RSI memantul naik
+                    if rsi > 52.0 and c_close > c_open:
+                        return True, f"Momentum RSI memantul naik ({rsi:.1f} > 52)"
+
+                    # Sinyal Reversal 4: Bullish Engulfing solid
+                    if c_close > c_open and c_close > c_prev_close and (c_close - c_open) >= (c_range * 0.65):
+                        return True, "Candle Bullish Engulfing solid membalikkan tren"
+
+                # B. KONDISI MINUS: Cut loss dini jika terjadi breakout ke atas
+                elif pnl_pct < -0.002:
+                    if ema9[-2] > ema21[-2] and c_close > ema21[-2] and c_close > c_open:
+                        return True, "Breakout terkonfirmasi di atas EMA 21 (Cut loss dini sebelum SL 1%)"
+
+            return False, ""
+        except Exception:
+            return False, ""
+
     def monitor_active_position(self):
-        """Memantau posisi aktif terhadap target Take Profit (+2.0%) dan Stop Loss (-1.2%) dengan Maker Limit Exit."""
+        """Memantau posisi aktif terhadap target Take Profit (+2.0%) dan Stop Loss (-1.0%) dengan Maker Limit Exit & Fleksibel Reversal."""
         if not self.active_position:
             return
             
@@ -506,6 +602,7 @@ class BinanceScalper:
         qty = pos["qty"]
         sl_price = pos["sl_price"]
         tp_price = pos["tp_price"]
+        pos_leverage = pos.get("leverage", config.LEVERAGE)
         
         try:
             current_price = self.client.fetch_price(symbol)
@@ -514,6 +611,41 @@ class BinanceScalper:
                 
             pnl_pct = ((current_price - entry_price) / entry_price) if side == "buy" else ((entry_price - current_price) / entry_price)
             pnl_usd = pnl_pct * pos["notional"]
+
+            # --- 0. Cek Pembalikan Arah Fleksibel (Jangan Kaku: Amankan Profit Lebih Awal / Cut Loss Dini) ---
+            now = time.time()
+            if config.ENABLE_FLEXIBLE_EXIT and (now - self._last_reversal_check_time >= 10.0):
+                self._last_reversal_check_time = now
+                is_reversal, rev_reason = self.check_market_reversal(symbol, side, pnl_pct)
+                if is_reversal:
+                    is_win = pnl_usd >= 0
+                    tag = "AMANKAN PROFIT FLEKSIBEL" if is_win else "EARLY CUT LOSS (CEGAH SL PENUH)"
+                    color = "bold green" if is_win else "bold yellow"
+                    console.log(f"[{color}]⚡ {tag}: {rev_reason} ({pnl_pct*100:+.2f}%, ${pnl_usd:+.2f}) pada {symbol}[/{color}]")
+                    close_side = "SELL" if side == "buy" else "BUY"
+                    self.execute_maker_close(symbol=symbol, side=close_side, qty=qty, target_price=current_price)
+                    
+                    trade_record = {
+                        "symbol": symbol,
+                        "side": side.upper(),
+                        "entry_price": entry_price,
+                        "exit_price": current_price,
+                        "qty": qty,
+                        "notional": pos["notional"],
+                        "margin_used": pos["notional"] / pos_leverage,
+                        "pnl_usd": round(pnl_usd, 4),
+                        "pnl_pct": round(pnl_pct * 100, 2),
+                        "result": "WIN" if is_win else "LOSS",
+                        "closed_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    self.trade_history.append(trade_record)
+                    db.record_trade(trade_record)
+                    self.total_trades += 1
+                    if is_win:
+                        self.winning_trades += 1
+                    self.total_pnl_usd += pnl_usd
+                    self.active_position = None
+                    return
             
             # --- 1. Break-Even Protection (+0.5% profit) ---
             if side == "buy":
@@ -560,7 +692,7 @@ class BinanceScalper:
                     "exit_price": current_price,
                     "qty": qty,
                     "notional": pos["notional"],
-                    "margin_used": pos["notional"] / config.LEVERAGE,
+                    "margin_used": pos["notional"] / pos_leverage,
                     "pnl_usd": round(pnl_usd, 4),
                     "pnl_pct": round(pnl_pct * 100, 2),
                     "result": "WIN",
@@ -591,7 +723,7 @@ class BinanceScalper:
                     "exit_price": current_price,
                     "qty": qty,
                     "notional": pos["notional"],
-                    "margin_used": pos["notional"] / config.LEVERAGE,
+                    "margin_used": pos["notional"] / pos_leverage,
                     "pnl_usd": round(pnl_usd, 4),
                     "pnl_pct": round(pnl_pct * 100, 2),
                     "result": res,

@@ -230,28 +230,7 @@ def check_signal_from_ohlcv(
     if not signal_side:
         return None
 
-    # Alokasi margin: 0.5% dari total portofolio (misal jika $100 -> cukup margin $0.5)
-    # Dengan batas minimal agar memenuhi syarat minimum Binance ($5 Notional)
-    min_margin = config.MIN_NOTIONAL / leverage
-    target_margin = available_capital * config.RISK_PORTFOLIO_PERCENT
-    margin_required = max(min_margin, target_margin)
-    notional = margin_required * leverage
-    qty = notional / latest_price
-
-    # Stop Loss 1.0% & Take Profit Sesuai Instruksi
-    sl_percent = config.SL_PERCENT
-    tp_percent = max(config.TP_PERCENT, sl_percent * config.RR_RATIO)
-
-    if signal_side == "BUY":
-        entry_price = latest_price
-        sl_price = entry_price * (1.0 - sl_percent)
-        tp_price = entry_price * (1.0 + tp_percent)
-    else:
-        entry_price = latest_price
-        sl_price = entry_price * (1.0 + sl_percent)
-        tp_price = entry_price * (1.0 - tp_percent)
-
-    # Skor kualitas sinyal (RSI + Volume + Pola N + Arus Sentimen)
+    # 1. Hitung skor kualitas sinyal terlebih dahulu (RSI + Volume + Pola N + Arus Sentimen)
     vol_ratio = min(1.5, curr_vol / avg_vol) if avg_vol > 0 else 1.0
     base_score = (100.0 - abs(rsi_val - 55.0)) * (0.8 + 0.2 * vol_ratio)
     
@@ -268,6 +247,41 @@ def check_signal_from_ohlcv(
 
     score = min(100.0, round(base_score, 2))
 
+    # 2. Dynamic Leverage Disesuaikan dengan Rasio Hasil Analisis (10x s/d 20x)
+    dynamic_leverage = config.LEVERAGE
+    if config.DYNAMIC_LEVERAGE_ENABLED:
+        if score >= 82 and n_pattern != "NONE":
+            dynamic_leverage = 20
+        elif score >= 72:
+            dynamic_leverage = 15
+        else:
+            dynamic_leverage = 10
+
+    # 3. Model Risiko Portofolio 0.5% (Risk-Budget Sizing):
+    # Jika SL = 1.0%, maka kerugian maksimal tepat 0.5% dari saldo portofolio.
+    # Jika TP = 2.0% (RRR 1:2), maka keuntungan maksimal tepat 2x risiko (1.0% dari saldo portofolio).
+    sl_percent = config.SL_PERCENT  # 1.0%
+    tp_percent = sl_percent * config.RR_RATIO  # 2.0% (Risk to Reward 1:2)
+    risk_budget_usd = available_capital * config.RISK_PORTFOLIO_PERCENT
+    ideal_notional = risk_budget_usd / sl_percent
+
+    # Pastikan memenuhi batas minimum notional Binance ($5.0) dan batas aman ($5.15)
+    notional = max(config.MIN_NOTIONAL + 0.15, ideal_notional)
+    if available_capital < 20.0:
+        notional = min(notional, config.MAX_ORDER_NOTIONAL)
+
+    margin_required = notional / dynamic_leverage
+    qty = notional / latest_price
+
+    if signal_side == "BUY":
+        entry_price = latest_price
+        sl_price = entry_price * (1.0 - sl_percent)
+        tp_price = entry_price * (1.0 + tp_percent)
+    else:
+        entry_price = latest_price
+        sl_price = entry_price * (1.0 + sl_percent)
+        tp_price = entry_price * (1.0 - tp_percent)
+
     return {
         "side": signal_side,
         "entry_price": entry_price,
@@ -275,7 +289,10 @@ def check_signal_from_ohlcv(
         "tp_price": tp_price,
         "qty": qty,
         "notional": notional,
-        "margin_required": notional / leverage,
+        "dynamic_leverage": dynamic_leverage,
+        "margin_required": round(margin_required, 4),
+        "risk_usd": round(notional * sl_percent, 4),
+        "reward_usd": round(notional * tp_percent, 4),
         "sl_percent": round(sl_percent * 100, 2),
         "tp_percent": round(tp_percent * 100, 2),
         "rsi": round(rsi_val, 2),

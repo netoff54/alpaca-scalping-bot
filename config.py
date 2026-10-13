@@ -24,16 +24,17 @@ class BotConfig:
     TIMEFRAME: str = "1m"                  # Timeframe 1 menit sesuai instruksi
     CANDLE_LIMIT: int = 220                # 220 candle untuk perhitungan EMA 200 yang presisi
 
-    # --- Account & Risk Management ---
+    # --- Account & Risk-Budget Management (0.5% Risiko Portofolio) ---
     DEFAULT_CAPITAL: float = 10.0          # Modal dasar $10
-    RISK_PORTFOLIO_PERCENT: float = 0.005  # Posisi 0.5% dari total portofolio (Kalo $100 cukup $0.5)
-    COMPOUNDING_ENABLED: bool = True       # Selalu compounding dengan risiko stabil
-    LEVERAGE: int = 10                     # Leverage 10x
+    RISK_PORTFOLIO_PERCENT: float = 0.005  # Resikokan 0.5% dari total portofolio (misal jika $100 -> resiko tepat $0.50)
+    COMPOUNDING_ENABLED: bool = True       # Compounding dinamis berdasarkan saldo
+    LEVERAGE: int = 10                     # Leverage basis (disesuaikan dinamis 10x - 20x sesuai analisis)
+    DYNAMIC_LEVERAGE_ENABLED: bool = True  # Aktifkan penyesuaian leverage dinamis (10x - 20x) berdasarkan skor sinyal
     MARGIN_MODE: str = "ISOLATED"          # WAJIB ISOLATED MARGIN
     ORDER_TYPE: str = "LIMIT"              # WAJIB LIMIT ORDER (Maker Only - Fee Rendah)
     CLOSE_ORDER_TYPE: str = "LIMIT"        # WAJIB LIMIT ORDER KELUAR (Maker Close - Post Only GTX)
     MIN_NOTIONAL: float = 5.0              # Nilai notional minimum Binance ($5.0)
-    MAX_ORDER_NOTIONAL: float = 6.50       # Batas maksimal notional agar margin tetap ~$0.50 (Mencegah koin raksasa seperti BTC yang memakan margin $8)
+    MAX_ORDER_NOTIONAL: float = 6.50       # Batas maksimal notional untuk akun modal mikro agar margin tetap ~$0.25 - $0.50
 
     # --- Limit Order & Anti-FOMO Settings ---
     LIMIT_TIMEOUT_SECONDS: int = 30        # Batalkan limit order jika tidak terisi dalam 30 detik
@@ -44,21 +45,23 @@ class BotConfig:
     LS_RATIO_MAX_SELL: float = 1.15        # Syarat Short: Rasio L/S <= 1.15 (Tidak melawan arus dominan long)
     USE_N_PATTERN: bool = True             # Aktifkan validasi Pola N (Impulse -> Pullback -> Breakout)
 
-    # --- Indicator Parameters ---
+    # --- Indicator Parameters (Anti-Pucuk & Anti-Dasar) ---
     EMA_TREND: int = 200                   # Filter tren besar (Trend Regime)
     EMA_FAST: int = 9                      # Trigger cepat EMA 9
     EMA_SLOW: int = 21                     # Trigger konfirmasi EMA 21
     RSI_PERIOD: int = 14                   # Momentum filter RSI 14
     RSI_LONG_MIN: float = 52.0             # Syarat Long: RSI >= 52 (Momentum bersih)
-    RSI_LONG_MAX: float = 66.0             # Batas atas Long: RSI <= 66 (hindari pucuk)
+    RSI_LONG_MAX: float = 62.0             # Batas atas Long: RSI <= 62 (Ketat: hindari beli di pucuk)
     RSI_SHORT_MAX: float = 48.0            # Syarat Short: RSI <= 48 (Momentum turun)
-    RSI_SHORT_MIN: float = 34.0            # Batas bawah Short: RSI >= 34 (hindari dasar oversold)
+    RSI_SHORT_MIN: float = 38.0            # Batas bawah Short: RSI >= 38 (Ketat: hindari jual di dasar oversold)
     ATR_PERIOD: int = 14                   # Volatilitas adaptif
 
-    # --- Risk / Reward Ratio 1:2 (Stop Loss 1.0% / Take Profit 2.0%) ---
-    SL_PERCENT: float = 0.010              # Stop Loss tepat 1.0%
-    TP_PERCENT: float = 0.020              # Take Profit tepat 2.0% (Risk to Reward 1:2)
+    # --- Risk / Reward Ratio 1:2 & Fleksibilitas Pembalikan ---
+    SL_PERCENT: float = 0.010              # Stop Loss dasar tepat 1.0% (Resiko 0.5% portofolio)
+    TP_PERCENT: float = 0.020              # Take Profit penuh tepat 2.0% (Risk to Reward 1:2 -> Cuan 2x resiko)
     RR_RATIO: float = 2.00                 # Risk to Reward 1:2
+    ENABLE_FLEXIBLE_EXIT: bool = True      # Keluar fleksibel jika candlestick & indikator membalik arah
+    REVERSAL_PROFIT_TRIGGER: float = 0.003 # Amankan profit jika ada pembalikan saat profit >= +0.3%
     BREAK_EVEN_TRIGGER: float = 0.006      # Geser SL ke Break-Even (+0.05%) saat profit mencapai +0.6%
     TRAILING_STOP_TRIGGER: float = 0.012   # Aktifkan trailing stop saat profit mencapai +1.2%
     TRAILING_STOP_DISTANCE: float = 0.005  # Jarak trailing 0.5% dari harga puncak
