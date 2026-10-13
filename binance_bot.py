@@ -57,6 +57,8 @@ class BinanceScalper:
         # Balance cache & Rate limit cooldown
         self._cached_balance: Dict[str, float] = {"total_wallet": 0.0, "available": 0.0, "unrealized_pnl": 0.0}
         self._last_balance_time: float = 0.0
+        self._last_sync_position_time: float = 0.0
+        self._configured_symbols: Set[str] = set()
         self.last_error: Optional[str] = None
 
     @property
@@ -88,15 +90,25 @@ class BinanceScalper:
             self._last_balance_time = now + 15
             return self._cached_balance
 
-    def sync_exchange_position(self) -> Optional[Dict[str, Any]]:
+    def sync_exchange_position(self, force: bool = False) -> Optional[Dict[str, Any]]:
         """
         Sinkronisasi otomatis dengan posisi terbuka langsung dari Binance.
+        Dibatasi minimal 20 detik agar tidak membebani signed authenticated endpoint.
         """
-        if time.time() < self._ban_until:
+        now = time.time()
+        if self.client.is_banned():
+            return self.active_position
+
+        # Throttling 20 detik jika posisi sudah tercatat
+        if not force and (now - self._last_sync_position_time < 20.0) and self.active_position is not None:
             return self.active_position
 
         try:
+            self._last_sync_position_time = now
             open_pos = self.client.get_open_positions()
+            if self.client.is_banned():
+                return self.active_position
+
             if open_pos:
                 pos = open_pos[0]
                 symbol = pos.get("symbol", "")
@@ -127,7 +139,8 @@ class BinanceScalper:
                 }
                 return self.active_position
             else:
-                if self.active_position is not None:
+                # Pastikan tidak dalam cooldown sebelum menyatakan posisi telah tertutup
+                if not self.client.is_banned() and self.active_position is not None:
                     console.log(f"[bold yellow]Posisi {self.active_position.get('symbol')} telah selesai/tertutup di Binance.[/bold yellow]")
                     self.active_position = None
                 return None
@@ -216,6 +229,7 @@ class BinanceScalper:
                 sym = item["symbol"]
                 q_vol = item["quoteVolume"]
                 try:
+                    time.sleep(0.12)  # Jeda halus 120ms anti-burst rate limit WAF Binance
                     ohlcv = self.client.fetch_klines(sym, interval=config.TIMEFRAME, limit=config.CANDLE_LIMIT)
                     if not ohlcv or len(ohlcv) < config.EMA_TREND + 5:
                         continue
@@ -300,9 +314,11 @@ class BinanceScalper:
             return False
 
         try:
-            # 1. Pastikan ISOLATED margin dan Leverage
-            self.client.set_margin_type(symbol, "ISOLATED")
-            self.client.set_leverage(symbol, config.LEVERAGE)
+            # 1. Pastikan ISOLATED margin dan Leverage (cukup sekali per simbol)
+            if symbol not in self._configured_symbols:
+                self.client.set_margin_type(symbol, "ISOLATED")
+                self.client.set_leverage(symbol, config.LEVERAGE)
+                self._configured_symbols.add(symbol)
             
             # 2. Ambil best bid/ask untuk harga Maker
             depth = self.client.fetch_best_bid_ask(symbol)
@@ -500,7 +516,7 @@ class BinanceScalper:
                 # 2. Jika ada posisi aktif, pantau harga secara intensif
                 if self.active_position:
                     self.monitor_active_position()
-                    time.sleep(3)
+                    time.sleep(4)
                     continue
                     
                 # 3. Jalankan pemindaian koin Top volume
