@@ -1,48 +1,50 @@
 import os
 from dataclasses import dataclass
+from dotenv import load_dotenv
+
+load_dotenv()
 
 @dataclass
 class BotConfig:
     # --- Exchange Settings ---
-    EXCHANGE_ID: str = "binance"          # "binance" atau "bybit"
-    IS_TESTNET: bool = True               # Selalu tes di TESTNET dulu sebelum live
-    API_KEY: str = os.getenv("API_KEY", "")
-    API_SECRET: str = os.getenv("API_SECRET", "")
+    EXCHANGE_ID: str = "binance"
+    IS_TESTNET: bool = False
+    API_KEY: str = os.getenv("BINANCE_API_KEY", "")
+    API_SECRET: str = os.getenv("BINANCE_API_SECRET", "")
 
-    # --- Trading Pair & Timeframe ---
-    SYMBOL: str = "BTC/USDT:USDT"          # Futures perpetual contract
-    TIMEFRAME: str = "1m"                  # 1m atau 3m untuk scalping
-    CANDLE_LIMIT: int = 250                # Minimal 200+ candle untuk EMA 200
+    # --- Market Scanning ---
+    TOP_COINS_LIMIT: int = 200             # Pindai 200 koin volume teratas di Binance Futures
+    SCAN_INTERVAL_SECONDS: int = 45        # Interval siklus pemindaian antar putaran
+    TIMEFRAME: str = "1m"                  # Timeframe 1 menit untuk scalping agresif
+    CANDLE_LIMIT: int = 220                # 220 candle untuk perhitungan EMA 200 yang presisi
 
     # --- Account & Risk Management ---
-    TOTAL_CAPITAL: float = 10.0            # Modal awal $10
-    RISK_PER_TRADE_PERCENT: float = 0.005  # 0.5% dari modal ($0.05)
+    DEFAULT_CAPITAL: float = 10.0          # Modal dasar $10
+    COMPOUNDING_ENABLED: bool = True       # 100% Saldo Kas Tersedia Digulung (Compounding)
     LEVERAGE: int = 5                      # Leverage 5x
-    MARGIN_MODE: str = "ISOLATED"          # WAJIB ISOLATED (melindungi sisa saldo)
-    ORDER_TYPE: str = "LIMIT"              # WAJIB LIMIT ORDER (Maker fee rendah)
+    MARGIN_MODE: str = "ISOLATED"          # WAJIB ISOLATED MARGIN
+    ORDER_TYPE: str = "LIMIT"              # WAJIB LIMIT ORDER (Maker Only)
+    MIN_NOTIONAL: float = 5.0              # Nilai notional minimum bursa ($5.0)
 
-    # --- Position Sizing ---
-    # Batas minimum order bursa adalah $5 notional
-    MIN_NOTIONAL: float = 5.0              # Nilai posisi minimum bursa ($5)
-    
-    # --- Limit Order Settings ---
+    # --- Limit Order & Anti-FOMO Settings ---
     LIMIT_TIMEOUT_SECONDS: int = 30        # Batalkan limit order jika tidak terisi dalam 30 detik
-    POST_ONLY: bool = True                 # Memastikan hanya dieksekusi sebagai Maker
+    POST_ONLY: bool = True                 # Memastikan hanya dieksekusi sebagai Maker fee
 
     # --- Indicator Parameters ---
-    EMA_TREND: int = 200                   # Filter tren besar
-    EMA_FAST: int = 9                      # Trigger cepat
-    EMA_SLOW: int = 21                     # Trigger konfirmasi
-    RSI_PERIOD: int = 14                   # Filter momentum
-    RSI_LONG_MIN: float = 50.0             # Syarat Long: RSI > 50
-    RSI_LONG_MAX: float = 68.0             # Cegah Long di pucuk overbought
-    RSI_SHORT_MAX: float = 50.0            # Syarat Short: RSI < 50
-    RSI_SHORT_MIN: float = 32.0            # Cegah Short di dasar oversold
+    EMA_TREND: int = 200                   # Filter tren besar (Trend Regime)
+    EMA_FAST: int = 9                      # Trigger cepat EMA 9
+    EMA_SLOW: int = 21                     # Trigger konfirmasi EMA 21
+    RSI_PERIOD: int = 14                   # Momentum filter RSI 14
+    RSI_LONG_MIN: float = 50.0             # Syarat Long: RSI >= 50
+    RSI_LONG_MAX: float = 68.0             # Batas atas Long: RSI <= 68 (hindari pucuk)
+    RSI_SHORT_MAX: float = 50.0            # Syarat Short: RSI <= 50
+    RSI_SHORT_MIN: float = 32.0            # Batas bawah Short: RSI >= 32 (hindari dasar oversold)
     ATR_PERIOD: int = 14                   # Volatilitas adaptif
 
-    # --- Risk / Reward Settings ---
-    ATR_SL_MULTIPLIER: float = 1.5         # Jarak Stop Loss = 1.5 * ATR
-    RR_RATIO: float = 2.0                  # Risk to Reward 1:2 (TP = 2 * SL)
-    MAKER_FEE_RATE: float = 0.0002         # 0.02% maker fee
+    # --- Risk / Reward Ratio (1:2 RRR) ---
+    SL_PERCENT: float = 0.005              # Stop Loss tetap -0.5% ($0.05 pada modal $10)
+    TP_PERCENT: float = 0.010              # Take Profit tetap +1.0% ($0.10 pada modal $10)
+    RR_RATIO: float = 2.0                  # Risk to Reward 1:2
+    MAKER_FEE_RATE: float = 0.0002         # 0.02% maker fee pada Binance Futures
 
 config = BotConfig()

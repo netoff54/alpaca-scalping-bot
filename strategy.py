@@ -13,7 +13,6 @@ def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
 
-    # Perhitungan smoothed RSI
     rs = gain / loss.replace(0, np.nan)
     rsi = 100 - (100 / (1 + rs))
     return rsi.fillna(50)
@@ -42,30 +41,30 @@ def prepare_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df['atr'] = calculate_atr(df, config.ATR_PERIOD)
     return df
 
-def check_signal(df: pd.DataFrame) -> Optional[Dict[str, Any]]:
+def check_signal(df: pd.DataFrame, available_capital: float = 10.0, leverage: int = 5) -> Optional[Dict[str, Any]]:
     """
     Memeriksa sinyal scalping berdasarkan closed candle terakhir (-2).
-    Menggunakan candle tertutup untuk mencegah repaint / sinyal palsu di candle aktif (-1).
+    Menggunakan candle tertutup untuk mencegah repaint pada candle aktif (-1).
     """
-    if len(df) < config.EMA_TREND + 10:
+    if len(df) < config.EMA_TREND + 5:
         return None
 
-    # Menggunakan bar tertutup terakhir (-2) dan bar sebelumnya (-3)
+    # Bar tertutup (-2) dan bar sebelumnya (-3)
     c_prev = df.iloc[-3]
     c_curr = df.iloc[-2]
-    latest_price = df['close'].iloc[-1]
+    latest_price = float(df['close'].iloc[-1])
 
-    # Cek Crossover EMA 9 & EMA 21
+    # 1. Cek Crossover EMA 9 & EMA 21
     golden_cross = (c_prev['ema_fast'] <= c_prev['ema_slow']) and (c_curr['ema_fast'] > c_curr['ema_slow'])
     death_cross = (c_prev['ema_fast'] >= c_prev['ema_slow']) and (c_curr['ema_fast'] < c_curr['ema_slow'])
 
-    # Trend Filter (EMA 200)
+    # 2. Trend Filter (EMA 200)
     is_bullish_trend = c_curr['close'] > c_curr['ema_trend']
     is_bearish_trend = c_curr['close'] < c_curr['ema_trend']
 
-    # RSI Filter
-    rsi_val = c_curr['rsi']
-    atr_val = c_curr['atr'] if not np.isnan(c_curr['atr']) else (latest_price * 0.002)
+    # 3. RSI Filter (Momentum Window)
+    rsi_val = float(c_curr['rsi'])
+    atr_val = float(c_curr['atr']) if not np.isnan(c_curr['atr']) else (latest_price * 0.002)
 
     signal_side = None
 
@@ -80,35 +79,27 @@ def check_signal(df: pd.DataFrame) -> Optional[Dict[str, Any]]:
     if not signal_side:
         return None
 
-    # Perhitungan Manajemen Risiko $10:
-    # Modal $10, Risiko per trade 0.5% = $0.05
-    max_loss_usd = config.TOTAL_CAPITAL * config.RISK_PER_TRADE_PERCENT  # $0.05
-    position_notional = config.MIN_NOTIONAL                               # $5.0
+    # Perhitungan Notional Posisi & Compounding
+    # Jika modal > $0, gunakan 100% modal * leverage
+    # Nilai notional minimum dibatasi oleh MIN_NOTIONAL ($5.0)
+    notional = max(config.MIN_NOTIONAL, available_capital * leverage)
+    qty = notional / latest_price
 
-    # Pada posisi $5, loss $0.05 setara dengan pergerakan harga 1.0%
-    max_sl_percent = max_loss_usd / position_notional                     # 0.01 (1%)
-
-    # Dynamic ATR Stop Loss
-    atr_sl_dist = atr_val * config.ATR_SL_MULTIPLIER
-    atr_sl_percent = atr_sl_dist / latest_price
-
-    # Batasi Stop Loss agar kerugian TIDAK PERNAH melebihi $0.05 (1%)
-    effective_sl_percent = min(atr_sl_percent, max_sl_percent)
-    effective_sl_dist = latest_price * effective_sl_percent
-
-    tp_dist = effective_sl_dist * config.RR_RATIO
+    # Stop Loss & Take Profit (1:2 Risk to Reward)
+    sl_percent = config.SL_PERCENT  # 0.5% (0.005)
+    tp_percent = config.TP_PERCENT  # 1.0% (0.010)
 
     if signal_side == "BUY":
         entry_price = latest_price
-        sl_price = entry_price - effective_sl_dist
-        tp_price = entry_price + tp_dist
+        sl_price = entry_price * (1.0 - sl_percent)
+        tp_price = entry_price * (1.0 + tp_percent)
     else:
         entry_price = latest_price
-        sl_price = entry_price + effective_sl_dist
-        tp_price = entry_price - tp_dist
+        sl_price = entry_price * (1.0 + sl_percent)
+        tp_price = entry_price * (1.0 - tp_percent)
 
-    # Ukuran koin (qty) untuk posisi $5 notional
-    qty = round(position_notional / entry_price, 6)
+    # Signal Score berdasarkan kedekatan momentum optimal
+    score = 100.0 - abs(rsi_val - 55.0)
 
     return {
         "side": signal_side,
@@ -116,11 +107,12 @@ def check_signal(df: pd.DataFrame) -> Optional[Dict[str, Any]]:
         "sl_price": sl_price,
         "tp_price": tp_price,
         "qty": qty,
-        "notional": position_notional,
-        "margin_required": position_notional / config.LEVERAGE,  # $5 / 5 = $1 margin (terisolasi)
-        "max_risk_usd": max_loss_usd,                            # $0.05 (0.5% modal)
-        "target_profit_usd": max_loss_usd * config.RR_RATIO,     # $0.10 (1.0% modal)
+        "notional": notional,
+        "margin_required": notional / leverage,
+        "sl_percent": sl_percent * 100,
+        "tp_percent": tp_percent * 100,
         "rsi": round(rsi_val, 2),
-        "ema_trend": round(c_curr['ema_trend'], 2),
-        "atr": round(atr_val, 2)
+        "ema_trend": round(float(c_curr['ema_trend']), 4),
+        "atr": round(atr_val, 4),
+        "score": round(score, 2)
     }

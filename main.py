@@ -8,9 +8,9 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 import uvicorn
 
-from alpaca_bot import AlpacaScalper
+from binance_bot import BinanceScalper
 
-scalper = AlpacaScalper()
+scalper = BinanceScalper()
 bot_thread = None
 ping_thread = None
 
@@ -22,15 +22,15 @@ def keep_alive_ping_loop():
     time.sleep(20)  # Beri waktu uvicorn startup
     base_url = os.getenv("RENDER_EXTERNAL_URL", "https://alpaca-scalping-bot.onrender.com").rstrip('/')
     ping_url = f"{base_url}/health"
-    print(f">>> [Keep-Alive Ping] Diaktifkan! Memantau {ping_url} setiap 4 menit agar Render tidak pernah shutdown.")
+    print(f">>> [Keep-Alive Ping] Diaktifkan! Memantau {ping_url} setiap 4 menit agar Render tetap ON 24/7.")
 
     while True:
         try:
             time.sleep(240)  # Ping setiap 4 menit (240 detik < batas 15 menit Render)
             res = requests.get(ping_url, timeout=15)
-            print(f">>> [Keep-Alive Ping] Sukses (HTTP {res.status_code}) -> Render tetap ON 24/7.")
+            print(f">>> [Keep-Alive Ping] Sukses (HTTP {res.status_code}) -> Render Container Aktif 24/7.")
         except Exception as err:
-            print(f">>> [Keep-Alive Ping] Peringatan: {err}")
+            print(f">>> [Keep-Alive Ping] Status: {err}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -38,19 +38,20 @@ async def lifespan(app: FastAPI):
     # 1. Jalankan bot scalping di background thread
     bot_thread = threading.Thread(target=scalper.run, daemon=True)
     bot_thread.start()
-    print(">>> Alpaca Scalping Autonomous Loop dimulai di background <<<")
+    print(">>> Binance Futures Top-200 Scalping Loop dimulai di background <<<")
 
     # 2. Jalankan keep-alive self-ping untuk mencegah shutdown Render
     ping_thread = threading.Thread(target=keep_alive_ping_loop, daemon=True)
     ping_thread.start()
 
     yield
-    print(">>> Menghentikan service Alpaca Scalper <<<")
+    print(">>> Menghentikan service Binance Scalper <<<")
 
-app = FastAPI(title="Alpaca Scalping Autonomous Agent", lifespan=lifespan)
+app = FastAPI(title="Binance Futures Top-200 Scalping Autonomous Agent", lifespan=lifespan)
 
 @app.get("/outbound-ip")
 def get_outbound_ip():
+    """Mengambil outbound IP container Render."""
     try:
         res = requests.get("https://api.ipify.org?format=json", timeout=5)
         return res.json()
@@ -59,41 +60,67 @@ def get_outbound_ip():
 
 @app.api_route("/", methods=["GET", "HEAD"])
 def index():
+    bal = scalper.get_futures_balance()
     return {
         "status": "online",
-        "service": "Alpaca Multi-Asset Scalping Autonomous Bot (Modal $10)",
-        "mode": "TOP RANKED CRYPTO SCANNER",
-        "compounding_mode": "ALWAYS COMPOUNDING (100% Saldo Kas Digulung)",
-        "current_cash_notional": scalper.get_compounded_notional(),
-        "monitored_top_coins": len(scalper.ranked_pairs),
-        "top_sample": scalper.ranked_pairs[:5] if scalper.ranked_pairs else [],
-        "strategy": "Triple Filter (EMA 200 + EMA 9/21 + RSI + ATR)",
+        "service": "Binance Futures Top-200 Scalping Autonomous Bot",
+        "exchange": "Binance USD(S)-M Futures",
+        "margin_mode": "ISOLATED",
         "order_type": "LIMIT ORDER (Maker Only)",
-        "current_target": scalper.current_symbol,
-        "active_order_id": scalper.active_order_id
+        "compounding_mode": "ALWAYS COMPOUNDING (100% Saldo Kas Digulung)",
+        "futures_wallet_usdt": bal["total_wallet"],
+        "available_usdt": bal["available"],
+        "compounded_trade_size": scalper.get_compounded_notional(),
+        "monitored_top_coins": len(scalper.ranked_pairs),
+        "last_scan_time": scalper.last_scan_time,
+        "last_scan_duration_sec": scalper.last_scan_duration_sec,
+        "market_regime": {
+            "bullish_above_ema200": scalper.bullish_count,
+            "bearish_below_ema200": scalper.bearish_count
+        },
+        "active_signals_count": len(scalper.active_signals),
+        "active_signals": scalper.active_signals[:5],
+        "active_position": scalper.active_position,
+        "active_order": scalper.active_order,
+        "total_trades": scalper.total_trades,
+        "winning_trades": scalper.winning_trades,
+        "total_pnl_usd": round(scalper.total_pnl_usd, 4)
     }
 
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health_check():
     """Health check endpoint resmi untuk Render Cloud Web Service."""
     try:
-        acc = scalper.verify_account()
-        positions = scalper.get_alpaca_positions()
+        bal = scalper.get_futures_balance()
         return {
             "status": "healthy",
+            "exchange": "Binance Futures",
             "compounding": "ACTIVE",
-            "account_status": acc.get("status"),
-            "portfolio_value": acc.get("portfolio_value"),
-            "cash": acc.get("cash"),
+            "futures_wallet_usdt": bal["total_wallet"],
+            "available_usdt": bal["available"],
+            "unrealized_pnl": bal["unrealized_pnl"],
             "compounded_trade_size": scalper.get_compounded_notional(),
-            "buying_power": acc.get("buying_power"),
-            "open_positions": len(positions),
-            "positions_detail": positions,
             "monitored_top_coins": len(scalper.ranked_pairs),
+            "last_scan_time": scalper.last_scan_time,
+            "has_active_position": scalper.active_position is not None,
+            "active_position": scalper.active_position,
             "bot_alive": bot_thread.is_alive() if bot_thread else False
         }
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "degraded", "error": str(e)})
+
+@app.get("/scan-results")
+def scan_results():
+    """Endpoint detail hasil pemindaian Top 200 koin Binance Futures."""
+    return {
+        "last_scan_time": scalper.last_scan_time,
+        "last_scan_duration_sec": scalper.last_scan_duration_sec,
+        "total_coins_scanned": len(scalper.ranked_pairs),
+        "bullish_count": scalper.bullish_count,
+        "bearish_count": scalper.bearish_count,
+        "active_signals": scalper.active_signals,
+        "top_watchlist": scalper.watchlist
+    }
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 10000))
