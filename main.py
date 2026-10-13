@@ -55,6 +55,8 @@ def index():
         "status": "online",
         "service": "Alpaca Multi-Asset Scalping Autonomous Bot (Modal $10)",
         "mode": "TOP RANKED CRYPTO SCANNER",
+        "compounding_mode": "ALWAYS COMPOUNDING (100% Saldo Kas Digulung)",
+        "current_cash_notional": scalper.get_compounded_notional(),
         "monitored_top_coins": len(scalper.ranked_pairs),
         "top_sample": scalper.ranked_pairs[:5] if scalper.ranked_pairs else [],
         "strategy": "Triple Filter (EMA 200 + EMA 9/21 + RSI + ATR)",
@@ -71,9 +73,11 @@ def health_check():
         positions = scalper.get_alpaca_positions()
         return {
             "status": "healthy",
+            "compounding": "ACTIVE",
             "account_status": acc.get("status"),
             "portfolio_value": acc.get("portfolio_value"),
             "cash": acc.get("cash"),
+            "compounded_trade_size": scalper.get_compounded_notional(),
             "buying_power": acc.get("buying_power"),
             "open_positions": len(positions),
             "positions_detail": positions,

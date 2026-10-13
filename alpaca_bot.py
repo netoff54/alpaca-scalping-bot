@@ -145,19 +145,37 @@ class AlpacaScalper:
         except Exception as e:
             return pd.DataFrame()
 
-    def calculate_order_qty(self, price: float, notional: float = 10.05) -> str:
-        """Menghitung kuantitas order sesuai presisi harga untuk memenuhi minimal $10.00."""
+    def get_compounded_notional(self) -> float:
+        """Mengambil seluruh saldo kas yang tersedia untuk compounding otomatis (min $10.00)."""
+        try:
+            account = self.verify_account()
+            cash = float(account.get("cash", 10.0))
+            return max(10.00, round(cash, 2))
+        except Exception:
+            return 10.00
+
+    def calculate_order_qty(self, price: float, notional: float) -> str:
+        """Menghitung kuantitas order sesuai presisi harga untuk compounding (min $10.00)."""
         raw_qty = notional / price
         if price > 1000:
-            return f"{math.ceil(raw_qty * 1e7) / 1e7:.7f}"
+            qty_val = round(raw_qty, 7)
+            if qty_val * price < 10.00:
+                qty_val += 1e-7
+            return f"{qty_val:.7f}"
         elif price > 10:
-            return f"{math.ceil(raw_qty * 1e4) / 1e4:.4f}"
+            qty_val = round(raw_qty, 4)
+            if qty_val * price < 10.00:
+                qty_val += 1e-4
+            return f"{qty_val:.4f}"
         elif price > 1:
-            return f"{math.ceil(raw_qty * 1e2) / 1e2:.2f}"
+            qty_val = round(raw_qty, 2)
+            if qty_val * price < 10.00:
+                qty_val += 0.01
+            return f"{qty_val:.2f}"
         else:
             return str(int(math.ceil(raw_qty)))
 
-    def place_limit_buy(self, symbol: str, price: float, notional: float = 10.05) -> dict:
+    def place_limit_buy(self, symbol: str, price: float, notional: float = 10.0) -> dict:
         qty_str = self.calculate_order_qty(price, notional)
         payload = {
             "symbol": symbol,
@@ -289,12 +307,15 @@ class AlpacaScalper:
                             best_bid, _ = self.get_best_bid_ask(sym)
                             limit_p = best_bid if best_bid else latest_price
 
-                            console.print(f"[cyan]Mengirim LIMIT BUY ORDER $10 untuk {sym} @ ${limit_p:,.2f}...[/cyan]")
-                            order = self.place_limit_buy(sym, price=limit_p, notional=10.05)
+                            # Compounding Dinamis: Gunakan 100% saldo kas yang terkumpul (bunga berbunga)
+                            notional_compound = self.get_compounded_notional()
+                            console.print(f"[bold cyan]COMPOUNDING AKTIF: Menggunakan seluruh saldo kas ${notional_compound:.2f} untuk {sym} @ ${limit_p:,.2f}...[/bold cyan]")
+
+                            order = self.place_limit_buy(sym, price=limit_p, notional=notional_compound)
                             self.active_order_id = order.get("id")
                             self.order_placed_time = time.time()
                             self.current_symbol = sym
-                            console.print(f"[bold green]LIMIT ORDER MASUK KE ALPACA![/bold green] ID: {self.active_order_id}\n")
+                            console.print(f"[bold green]LIMIT ORDER MASUK KE ALPACA (COMPOUNDING ${notional_compound:.2f})![/bold green] ID: {self.active_order_id}\n")
                             break
 
                     except Exception:
