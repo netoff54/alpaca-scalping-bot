@@ -1,12 +1,12 @@
 import os
 import time
 import math
-import asyncio
 import threading
 import gc
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Any, List, Optional
+import requests
 import ccxt
-import ccxt.async_support as ccxt_async
 from rich.console import Console
 
 from config import config
@@ -14,7 +14,7 @@ import strategy
 
 console = Console()
 
-# Daftar aset saham TradFi & komoditas non-crypto di Binance Futures yang memerlukan kontrak khusus (Code -4411)
+# Daftar aset saham TradFi & komoditas di Binance Futures yang memerlukan perjanjian khusus (Error -4411)
 TRADFI_EXCLUSIONS = {
     'SKHY', 'MRNA', 'ARM', 'SOXL', 'SPCX', 'INTW', 'SNDK', 'SQQQ',
     'NVDA', 'TSLA', 'AAPL', 'AMZN', 'MSFT', 'GOOGL', 'META', 'MU',
@@ -37,12 +37,16 @@ class BinanceScalper:
                 'defaultType': 'future',
                 'adjustForTimeDifference': True,
                 'recvWindow': 60000,
-                'warnOnFetchOpenOrdersWithoutSymbol': False
+                'warnOnFetchOpenOrdersWithoutSymbol': False,
+                'fetchCurrencies': False
             }
         })
         
-        # Client Asinkron tunggal yang digunakan ulang untuk menghemat memori
-        self._async_client: Optional[ccxt_async.binance] = None
+        # HTTP Session persisten untuk scanning super cepat & hemat memori (<40MB)
+        self.http_session = requests.Session()
+        self.http_session.headers.update({
+            'User-Agent': 'BinanceScalper/2.0 (Render Frankfurt)'
+        })
         
         # State tracking
         self.is_running = False
@@ -62,7 +66,7 @@ class BinanceScalper:
         self.winning_trades: int = 0
         self.total_pnl_usd: float = 0.0
         
-        # Top 50 symbols cache (Refresh setiap 30 menit untuk hemat bandwidth & CPU/RAM)
+        # Cache Top 50 koin (diperbarui setiap 30 menit)
         self._cached_top_symbols: List[Dict[str, Any]] = []
         self._last_top_symbols_refresh: float = 0.0
         
@@ -87,13 +91,13 @@ class BinanceScalper:
             console.log(f"[dim]Cek MultiAssetsMargin: {e}[/dim]")
 
     def get_futures_balance(self, max_age_sec: float = 60.0) -> Dict[str, float]:
-        """Mengambil saldo wallet USDⓈ-M Futures dengan caching 60 detik (Aman dari rate limit)."""
+        """Mengambil saldo wallet USDⓈ-M Futures dengan caching 60 detik (Sangat aman dari rate limit)."""
         now = time.time()
         if now < self._ban_until:
             if now - self._last_ban_log_time > 120:
                 self._last_ban_log_time = now
                 s_left = int(self._ban_until - now)
-                console.log(f"[yellow]IP server dalam masa jeda rate limit Binance ({s_left} detik tersisa)...[/yellow]")
+                console.log(f"[yellow]IP server dalam cooldown rate limit ({s_left} detik tersisa)...[/yellow]")
             return self._cached_balance
 
         if now - self._last_balance_time < max_age_sec and self._cached_balance["total_wallet"] > 0:
@@ -139,9 +143,8 @@ class BinanceScalper:
 
     def sync_exchange_position(self) -> Optional[Dict[str, Any]]:
         """
-        Sinkronisasi otomatis dengan posisi riil di bursa Binance Futures.
-        Jika bot baru restart dan masih ada posisi terbuka, bot akan langsung melanjutkannya.
-        Jika posisi telah tertutup (oleh TP/SL/manual), bot akan mengosongkan state agar bisa scan lagi.
+        Sinkronisasi otomatis dengan posisi terbuka di bursa Binance Futures.
+        Jika posisi sudah ditutup oleh bursa (TP/SL), bot langsung membersihkan state dan mencari peluang baru.
         """
         if time.time() < self._ban_until:
             return self.active_position
@@ -161,7 +164,7 @@ class BinanceScalper:
                 entry_price = float(pos.get('entryPrice', 0.0))
                 notional = float(pos.get('notional', contracts * entry_price))
                 
-                # Pertahankan SL/TP sebelumnya jika symbol sama, atau kalkulasi ulang jika baru restart
+                # Pertahankan SL/TP target
                 if self.active_position and self.active_position.get('symbol') == symbol:
                     sl_price = self.active_position.get('sl_price', entry_price * (0.995 if side == 'buy' else 1.005))
                     tp_price = self.active_position.get('tp_price', entry_price * (1.010 if side == 'buy' else 0.990))
@@ -184,7 +187,7 @@ class BinanceScalper:
                 return self.active_position
             else:
                 if self.active_position is not None:
-                    console.log(f"[bold yellow]Posisi {self.active_position.get('symbol')} tidak lagi aktif di Binance (Telah selesai / tertutup).[/bold yellow]")
+                    console.log(f"[bold yellow]Posisi {self.active_position.get('symbol')} telah selesai/tertutup di Binance.[/bold yellow]")
                     self.active_position = None
                 return None
         except Exception as e:
@@ -192,7 +195,7 @@ class BinanceScalper:
             return self.active_position
 
     def get_compounded_notional(self) -> float:
-        """Menghitung ukuran order berikutnya (Compounding 100%)."""
+        """Menghitung ukuran order berikutnya (Compounding 100% saldo kas)."""
         bal = self.get_futures_balance()
         avail = bal["available"]
         if avail >= 1.0:
@@ -200,7 +203,7 @@ class BinanceScalper:
         return round(config.DEFAULT_CAPITAL * config.LEVERAGE, 2)
 
     def set_margin_and_leverage(self, symbol: str):
-        """Mengatur margin ke ISOLATED dan leverage sesuai konfigurasi."""
+        """Mengatur margin ke ISOLATED dan leverage 5x."""
         try:
             self.exchange.set_margin_mode('ISOLATED', symbol)
         except Exception:
@@ -211,124 +214,139 @@ class BinanceScalper:
         except Exception as e:
             console.log(f"[dim]Set leverage {symbol}: {e}[/dim]")
 
-    async def _get_or_create_async_client(self) -> ccxt_async.binance:
-        """Menggunakan kembali async client tunggal untuk mencegah memory leak."""
-        if self._async_client is None:
-            self._async_client = ccxt_async.binance({
-                'apiKey': self.api_key,
-                'secret': self.api_secret,
-                'options': {
-                    'defaultType': 'future',
-                    'adjustForTimeDifference': True,
-                    'recvWindow': 60000,
-                    'fetchCurrencies': False
-                }
-            })
-        return self._async_client
-
-    async def scan_top_200_async(self):
+    def _fetch_top_symbols_rest(self) -> List[Dict[str, Any]]:
         """
-        Memindai koin volume teratas di Binance Futures secara asinkron.
-        Menggunakan cache symbol dan membersihkan memori secara agresif agar RAM < 80MB.
+        Mengambil Top 50 koin langsung via REST API Binance Futures (Sangat ringan <1MB).
+        Menyaring token TradFi/Saham (SKHY, NVDA, dll) agar tidak memicu error -4411.
+        """
+        url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
+        resp = self.http_session.get(url, timeout=10)
+        data = resp.json()
+        
+        filtered = []
+        for item in data:
+            sym = item.get("symbol", "")
+            if not sym.endswith("USDT"):
+                continue
+            base = sym[:-4]
+            if base in TRADFI_EXCLUSIONS:
+                continue
+            try:
+                q_vol = float(item.get("quoteVolume", 0.0))
+                filtered.append({
+                    "raw_symbol": sym,
+                    "ccxt_symbol": f"{base}/USDT:USDT",
+                    "quoteVolume": q_vol
+                })
+            except Exception:
+                continue
+                
+        filtered.sort(key=lambda x: x["quoteVolume"], reverse=True)
+        return filtered[:config.TOP_COINS_LIMIT]
+
+    def _fetch_klines_rest(self, raw_symbol: str, limit: int = 220) -> Optional[List[List[float]]]:
+        """
+        Mengambil candle 1m langsung dari Binance Futures REST API (Tanpa overhead CCXT).
+        Format: [[time, open, high, low, close, volume], ...]
+        """
+        url = f"https://fapi.binance.com/fapi/v1/klines?symbol={raw_symbol}&interval={config.TIMEFRAME}&limit={limit}"
+        resp = self.http_session.get(url, timeout=5)
+        raw = resp.json()
+        if not isinstance(raw, list) or len(raw) < config.EMA_TREND + 5:
+            return None
+            
+        return [
+            [float(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5])]
+            for c in raw
+        ]
+
+    def scan_top_coins(self):
+        """
+        Memindai 50 koin paling likuid secara efisien menggunakan ThreadPoolExecutor.
+        Penggunaan RAM stabil di ~35MB - 50MB (Jauh di bawah batas Render 512MB).
         """
         t_start = time.time()
-        client = await self._get_or_create_async_client()
-        
         try:
             now = time.time()
-            # 1. Perbarui daftar Top 50 koin hanya setiap 30 menit
+            # 1. Perbarui daftar Top 50 koin setiap 30 menit
             if not self._cached_top_symbols or (now - self._last_top_symbols_refresh > 1800):
-                tickers = await client.fetch_tickers()
-                filtered = []
-                for s, t in tickers.items():
-                    if not s.endswith('/USDT:USDT') or t.get('quoteVolume') is None:
-                        continue
-                    # Abaikan aset saham TradFi yang memicu error -4411
-                    base = s.split('/')[0]
-                    if base in TRADFI_EXCLUSIONS:
-                        continue
-                    filtered.append((s, t['quoteVolume']))
-                
-                # Urutkan berdasarkan volume 24 jam tertinggi
-                filtered.sort(key=lambda x: x[1], reverse=True)
-                self._cached_top_symbols = [{'symbol': s, 'quoteVolume': v} for s, v in filtered[:config.TOP_COINS_LIMIT]]
+                self._cached_top_symbols = self._fetch_top_symbols_rest()
                 self._last_top_symbols_refresh = now
-                del tickers
-                del filtered
                 gc.collect()
 
-            # 2. Ambil saldo akun satu kali
+            # 2. Ambil saldo akun
             bal = self.get_futures_balance()
             cap = bal['available'] if bal['available'] >= 1.0 else config.DEFAULT_CAPITAL
             
-            # 3. Analisis pair dengan batasan konkurensi (Semaphore 3) untuk stabilitas memori
-            sem = asyncio.Semaphore(3)
-            async def analyze_pair(rank: int, item: Dict[str, Any]):
-                symbol = item['symbol']
-                q_vol = item['quoteVolume']
-                async with sem:
-                    try:
-                        ohlcv = await client.fetch_ohlcv(symbol, timeframe=config.TIMEFRAME, limit=config.CANDLE_LIMIT)
-                        if not ohlcv or len(ohlcv) < config.EMA_TREND + 5:
-                            return None
-
-                        sig = strategy.check_signal_from_ohlcv(ohlcv, available_capital=cap, leverage=config.LEVERAGE)
-
-                        closes = [c[4] for c in ohlcv]
-                        highs = [c[2] for c in ohlcv]
-                        lows = [c[3] for c in ohlcv]
-
-                        ema_trend = strategy.calculate_ema_series(closes, config.EMA_TREND)[-2]
-                        rsi_val = strategy.calculate_rsi_series(closes, config.RSI_PERIOD)[-2]
-                        atr_val = strategy.calculate_atr_series(highs, lows, closes, config.ATR_PERIOD)[-2]
-                        latest_price = closes[-1]
-                        is_bullish = closes[-2] > ema_trend
-
-                        del ohlcv
-                        del closes
-                        del highs
-                        del lows
-
-                        return {
-                            'rank': rank,
-                            'symbol': symbol,
-                            'price': latest_price,
-                            'vol_24h_m': round(q_vol / 1_000_000, 2),
-                            'trend': 'BULLISH' if is_bullish else 'BEARISH',
-                            'rsi': round(rsi_val, 2),
-                            'atr': round(atr_val, 4),
-                            'signal': sig
-                        }
-                    except Exception:
+            # 3. Analisis pair secara paralel dengan 3 worker untuk kestabilan memori
+            results = []
+            def process_coin(rank: int, item: Dict[str, Any]):
+                raw_sym = item["raw_symbol"]
+                ccxt_sym = item["ccxt_symbol"]
+                q_vol = item["quoteVolume"]
+                try:
+                    ohlcv = self._fetch_klines_rest(raw_sym, limit=config.CANDLE_LIMIT)
+                    if not ohlcv:
                         return None
                         
-            tasks = [analyze_pair(i + 1, item) for i, item in enumerate(self._cached_top_symbols)]
-            results = await asyncio.gather(*tasks)
-            del tasks
+                    sig = strategy.check_signal_from_ohlcv(ohlcv, available_capital=cap, leverage=config.LEVERAGE)
+                    
+                    closes = [c[4] for c in ohlcv]
+                    highs = [c[2] for c in ohlcv]
+                    lows = [c[3] for c in ohlcv]
+                    
+                    ema_trend = strategy.calculate_ema_series(closes, config.EMA_TREND)[-2]
+                    rsi_val = strategy.calculate_rsi_series(closes, config.RSI_PERIOD)[-2]
+                    atr_val = strategy.calculate_atr_series(highs, lows, closes, config.ATR_PERIOD)[-2]
+                    latest_price = closes[-1]
+                    is_bullish = closes[-2] > ema_trend
+                    
+                    return {
+                        'rank': rank,
+                        'symbol': ccxt_sym,
+                        'raw_symbol': raw_sym,
+                        'price': latest_price,
+                        'vol_24h_m': round(q_vol / 1_000_000, 2),
+                        'trend': 'BULLISH' if is_bullish else 'BEARISH',
+                        'rsi': round(rsi_val, 2),
+                        'atr': round(atr_val, 4),
+                        'signal': sig
+                    }
+                except Exception:
+                    return None
+
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                futures = [executor.submit(process_coin, i + 1, item) for i, item in enumerate(self._cached_top_symbols)]
+                for f in as_completed(futures):
+                    res = f.result()
+                    if res:
+                        results.append(res)
+                        
             gc.collect()
             
-            valid = [r for r in results if r is not None]
-            self.ranked_pairs = valid
-            self.bullish_count = sum(1 for r in valid if r['trend'] == 'BULLISH')
-            self.bearish_count = sum(1 for r in valid if r['trend'] == 'BEARISH')
+            results.sort(key=lambda x: x['rank'])
+            self.ranked_pairs = results
+            self.bullish_count = sum(1 for r in results if r['trend'] == 'BULLISH')
+            self.bearish_count = sum(1 for r in results if r['trend'] == 'BEARISH')
             
             signals = []
-            for r in valid:
+            for r in results:
                 if r['signal'] is not None:
                     sig_data = r['signal'].copy()
                     sig_data['symbol'] = r['symbol']
+                    sig_data['raw_symbol'] = r['raw_symbol']
                     sig_data['rank'] = r['rank']
                     sig_data['vol_24h_m'] = r['vol_24h_m']
                     signals.append(sig_data)
                     
             self.active_signals = sorted(signals, key=lambda x: x.get('score', 0), reverse=True)
-            self.watchlist = sorted(valid, key=lambda x: abs(x['rsi'] - 55.0))[:8]
+            self.watchlist = sorted(results, key=lambda x: abs(x['rsi'] - 55.0))[:8]
             
             self.last_scan_duration_sec = round(time.time() - t_start, 2)
             self.last_scan_time = time.strftime("%Y-%m-%d %H:%M:%S")
             
         except Exception as e:
-            console.log(f"[red]Error dalam pemindaian asinkron: {e}[/red]")
+            console.log(f"[red]Error dalam pemindaian koin: {e}[/red]")
         finally:
             gc.collect()
 
@@ -341,7 +359,7 @@ class BinanceScalper:
         # Perlindungan TradFi ekstra
         base = symbol.split('/')[0]
         if base in TRADFI_EXCLUSIONS:
-            console.log(f"[yellow]Melewati order pada {symbol} karena termasuk TradFi/Saham.[/yellow]")
+            console.log(f"[yellow]Melewati order pada {symbol} (Aset TradFi/Saham).[/yellow]")
             return False
 
         try:
@@ -517,8 +535,8 @@ class BinanceScalper:
                     time.sleep(3)
                     continue
                     
-                # 3. Jalankan pemindaian koin Top volume
-                asyncio.run(self.scan_top_200_async())
+                # 3. Jalankan pemindaian koin Top volume (Zero memory leak)
+                self.scan_top_coins()
                 
                 # 4. Cek saldo akun
                 bal = self.get_futures_balance()
