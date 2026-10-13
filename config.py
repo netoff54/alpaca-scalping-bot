@@ -55,13 +55,13 @@ class BotConfig:
     RSI_SHORT_MIN: float = 34.0            # Batas bawah Short: RSI >= 34 (hindari dasar oversold)
     ATR_PERIOD: int = 14                   # Volatilitas adaptif
 
-    # --- Risk / Reward Ratio (Stop Loss 1.0%) ---
-    SL_PERCENT: float = 0.010              # Stop Loss tepat 1.0% (Sesuai instruksi)
-    TP_PERCENT: float = 0.018              # Take Profit 1.8% (Risk to Reward 1:1.8)
-    RR_RATIO: float = 1.80                 # Risk to Reward 1:1.8
-    BREAK_EVEN_TRIGGER: float = 0.005      # Geser SL ke Break-Even (+0.05%) saat profit mencapai +0.5%
-    TRAILING_STOP_TRIGGER: float = 0.009   # Aktifkan trailing stop saat profit mencapai +0.9%
-    TRAILING_STOP_DISTANCE: float = 0.004  # Jarak trailing 0.4% dari harga puncak
+    # --- Risk / Reward Ratio 1:2 (Stop Loss 1.0% / Take Profit 2.0%) ---
+    SL_PERCENT: float = 0.010              # Stop Loss tepat 1.0%
+    TP_PERCENT: float = 0.020              # Take Profit tepat 2.0% (Risk to Reward 1:2)
+    RR_RATIO: float = 2.00                 # Risk to Reward 1:2
+    BREAK_EVEN_TRIGGER: float = 0.006      # Geser SL ke Break-Even (+0.05%) saat profit mencapai +0.6%
+    TRAILING_STOP_TRIGGER: float = 0.012   # Aktifkan trailing stop saat profit mencapai +1.2%
+    TRAILING_STOP_DISTANCE: float = 0.005  # Jarak trailing 0.5% dari harga puncak
     MAKER_FEE_RATE: float = 0.0002         # 0.02% maker fee pada Binance Futures
 
 config = BotConfig()

@@ -11,10 +11,10 @@ Bot scalping otonom berbasis **Python Native REST API + FastAPI** yang memindai 
    - Penutupan posisi (TP/SL) diprioritaskan menggunakan Limit Maker Exit sebelum beralih ke proteksi pasar darurat.
 2. **Timeframe 1 Menit (TF 1m Scalper)**:
    - Pemindaian candle 1 menit dengan konfirmasi candle tertutup (`-2`), volume support aktif, dan price action tanpa rejection wick.
-3. **Stop Loss 1.0% & Target 1.8% RRR**:
-   - Stop Loss terukur 1.0% dan Take Profit 1.8% (Risk to Reward 1:1.8).
-   - Break-Even otomatis mengunci SL di Entry + 0.05% saat profit mencapai +0.5% (menutup biaya fee).
-   - Trailing Stop dinamis mengunci keuntungan saat profit mencapai +0.9%.
+3. **Stop Loss 1.0% & Take Profit 2.0% (Risk to Reward 1:2)**:
+   - Stop Loss tepat 1.0% dan Take Profit 2.0% (Risk to Reward 1:2).
+   - Break-Even otomatis mengunci SL di Entry + 0.05% saat profit mencapai +0.6% (menutup biaya fee).
+   - Trailing Stop dinamis mengunci keuntungan saat profit mencapai +1.2% (jarak 0.5% dari puncak).
 4. **Proteksi Margin Ketat (~$0.50 per Posisi)**:
    - Alokasi margin: 0.5% portofolio (atau minimum notional ~$5.00 - $5.50 x 10x leverage = ~$0.50 margin).
    - Filter `MAX_ORDER_NOTIONAL` ($6.50): Menyaring koin raksasa seperti BTCUSDT yang memiliki ukuran minimum lot tinggi (0.001 BTC = $83+), mencegah penggunaan margin besar ($8+).
