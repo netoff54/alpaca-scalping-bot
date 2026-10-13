@@ -1,5 +1,7 @@
 import os
 import sys
+import time
+import requests
 import threading
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -10,16 +12,39 @@ from alpaca_bot import AlpacaScalper
 
 scalper = AlpacaScalper()
 bot_thread = None
+ping_thread = None
+
+def keep_alive_ping_loop():
+    """
+    Loop otomatis untuk ping endpoint /health sendiri setiap 4 menit.
+    Mencegah Render Free Tier melakukan 'Spin Down' / Shutdown karena inaktivitas 15 menit.
+    """
+    time.sleep(20)  # Beri waktu uvicorn startup
+    base_url = os.getenv("RENDER_EXTERNAL_URL", "https://alpaca-scalping-bot.onrender.com").rstrip('/')
+    ping_url = f"{base_url}/health"
+    print(f">>> [Keep-Alive Ping] Diaktifkan! Memantau {ping_url} setiap 4 menit agar Render tidak pernah shutdown.")
+
+    while True:
+        try:
+            time.sleep(240)  # Ping setiap 4 menit (240 detik < batas 15 menit Render)
+            res = requests.get(ping_url, timeout=15)
+            print(f">>> [Keep-Alive Ping] Sukses (HTTP {res.status_code}) -> Render tetap ON 24/7.")
+        except Exception as err:
+            print(f">>> [Keep-Alive Ping] Peringatan: {err}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Jalankan bot scalping di background thread
-    global bot_thread
+    global bot_thread, ping_thread
+    # 1. Jalankan bot scalping di background thread
     bot_thread = threading.Thread(target=scalper.run, daemon=True)
     bot_thread.start()
     print(">>> Alpaca Scalping Autonomous Loop dimulai di background <<<")
+
+    # 2. Jalankan keep-alive self-ping untuk mencegah shutdown Render
+    ping_thread = threading.Thread(target=keep_alive_ping_loop, daemon=True)
+    ping_thread.start()
+
     yield
-    # Shutdown
     print(">>> Menghentikan service Alpaca Scalper <<<")
 
 app = FastAPI(title="Alpaca Scalping Autonomous Agent", lifespan=lifespan)
