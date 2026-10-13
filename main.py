@@ -53,10 +53,13 @@ app = FastAPI(title="Alpaca Scalping Autonomous Agent", lifespan=lifespan)
 def index():
     return {
         "status": "online",
-        "service": "Alpaca Scalping Autonomous Bot (Modal $10)",
+        "service": "Alpaca Multi-Asset Scalping Autonomous Bot (Modal $10)",
+        "mode": "TOP RANKED CRYPTO SCANNER",
+        "monitored_top_coins": len(scalper.ranked_pairs),
+        "top_sample": [p[0] for p in scalper.ranked_pairs[:5]] if scalper.ranked_pairs else [],
         "strategy": "Triple Filter (EMA 200 + EMA 9/21 + RSI + ATR)",
         "order_type": "LIMIT ORDER (Maker Only)",
-        "symbol": scalper.symbol,
+        "current_target": scalper.current_symbol,
         "active_order_id": scalper.active_order_id
     }
 
@@ -74,6 +77,7 @@ def health_check():
             "buying_power": acc.get("buying_power"),
             "open_positions": len(positions),
             "positions_detail": positions,
+            "monitored_top_coins": len(scalper.ranked_pairs),
             "bot_alive": bot_thread.is_alive() if bot_thread else False
         }
     except Exception as e:
