@@ -208,8 +208,8 @@ class BinanceScalper:
             return self._cached_top_symbols if self._cached_top_symbols else self._get_fallback_symbols()
 
     def scan_top_coins(self):
-        """Memindai 50 koin likuid secara sekuensial (Super cepat ~1.5s, RAM <30MB)."""
-        if self.client.is_banned():
+        """Memindai 20 koin likuid secara sekuensial (Super cepat ~1.5s, RAM <30MB)."""
+        if self.client.is_banned() or self.client.is_scan_throttled():
             return
         t_start = time.time()
         try:
@@ -226,10 +226,14 @@ class BinanceScalper:
             signals = []
             
             for rank, item in enumerate(self._cached_top_symbols, 1):
+                if self.client.is_banned() or self.client.is_scan_throttled():
+                    break
                 sym = item["symbol"]
                 q_vol = item["quoteVolume"]
                 try:
-                    time.sleep(0.20)  # Jeda halus 200ms anti-burst rate limit WAF Binance
+                    # Jeda adaptif: 200ms normal, atau 1000ms jika weight bursa tinggi (>2200)
+                    spacing = 1.0 if self.client.current_weight_1m >= 2200 else 0.20
+                    time.sleep(spacing)
                     ohlcv = self.client.fetch_klines(sym, interval=config.TIMEFRAME, limit=config.CANDLE_LIMIT)
                     if not ohlcv or len(ohlcv) < config.EMA_TREND + 5:
                         continue
@@ -323,18 +327,20 @@ class BinanceScalper:
             # 2. Ambil best bid/ask untuk harga Maker
             depth = self.client.fetch_best_bid_ask(symbol)
             if side == "BUY":
-                best_price = depth["bid"] if depth["bid"] > 0 else target_price
+                best_price = depth["bid"] if depth.get("bid", 0.0) > 0 else target_price
             else:
-                best_price = depth["ask"] if depth["ask"] > 0 else target_price
+                best_price = depth["ask"] if depth.get("ask", 0.0) > 0 else target_price
                 
             formatted_price = self.client.format_price(symbol, best_price)
+            if formatted_price <= 0:
+                formatted_price = self.client.format_price(symbol, target_price)
             
             # 3. Hitung qty dengan jaminan nilai notional >= $5.00 dan presisi tepat
-            notional = max(5.15, sig["notional"])
+            notional = max(5.15, sig.get("notional", 5.15))
             formatted_qty = self.client.calculate_order_qty(symbol, notional, formatted_price)
             
             if formatted_qty <= 0:
-                console.log(f"[red]Ukuran order terlalu kecil untuk {symbol}: {raw_qty}[/red]")
+                console.log(f"[red]Ukuran order terlalu kecil untuk {symbol}[/red]")
                 return False
                 
             console.log(f"[bold cyan]Dispatching Maker Limit Order (0.5% Portofolio): {side} {formatted_qty} {symbol} @ {formatted_price}[/bold cyan]")
@@ -425,6 +431,8 @@ class BinanceScalper:
             hit_tp = (current_price >= tp_price) if side == "buy" else (current_price <= tp_price)
             hit_sl = (current_price <= sl_price) if side == "buy" else (current_price >= sl_price)
             
+            console.log(f"[dim]Pemantauan 5s: {symbol} @ {current_price} | PnL: {pnl_pct*100:+.2f}% (${pnl_usd:+.2f}) | TP: {tp_price} | SL: {sl_price}[/dim]")
+            
             if hit_tp:
                 console.log(f"[bold green]TAKE PROFIT TERCAPAI! (+{pnl_pct*100:.2f}%, PnL: +${pnl_usd:.2f}) pada {symbol}[/bold green]")
                 close_side = "SELL" if side == "buy" else "BUY"
@@ -503,7 +511,10 @@ class BinanceScalper:
                         if now_log - self.client._last_ban_log_time > 60:
                             self.client._last_ban_log_time = now_log
                             console.log(f"[yellow]IP Cooldown Binance aktif ({m_left}m {sec_left}s lagi). Menunggu otomatis tanpa request ke bursa...[/yellow]")
-                        time.sleep(min(30, max(5, s_left + 1)))
+                        if self.active_position:
+                            time.sleep(min(5, max(1, s_left)))
+                        else:
+                            time.sleep(min(30, max(5, s_left + 1)))
                         continue
 
                 # Muat ulang aturan pasar jika sebelumnya gagal akibat cooldown
@@ -537,7 +548,10 @@ class BinanceScalper:
                     else:
                         console.log(f"[yellow]Saldo USDT Futures (${avail_usdt:.2f}) di bawah minimum (${min_req:.2f}). Menunggu modal.[/yellow]")
                         
-                time.sleep(config.SCAN_INTERVAL_SECONDS)
+                if self.active_position:
+                    time.sleep(5)  # Langsung monitor 5s jika posisi baru saja terisi
+                else:
+                    time.sleep(config.SCAN_INTERVAL_SECONDS)
                 
             except Exception as e:
                 console.log(f"[red]Error di siklus bot scalper: {e}[/red]")
