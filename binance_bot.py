@@ -51,13 +51,17 @@ class BinanceScalper:
         self.winning_trades: int = 0
         self.total_pnl_usd: float = 0.0
         
-        # Balance cache
+        # Balance cache & Rate limit cooldown
         self._cached_balance: Dict[str, float] = {"total_wallet": 0.0, "available": 0.0, "unrealized_pnl": 0.0}
         self._last_balance_time: float = 0.0
+        self._ban_until: float = 0.0
+        self._last_ban_log_time: float = 0.0
         self.last_error: Optional[str] = None
 
     def _ensure_single_asset_mode(self):
         """Memastikan mode Multi-Assets dimatikan agar ISOLATED margin dapat digunakan."""
+        if time.time() < self._ban_until:
+            return
         try:
             res = self.exchange.fapiPrivateGetMultiAssetsMargin()
             if res.get('multiAssetsMargin') is True:
@@ -67,9 +71,17 @@ class BinanceScalper:
         except Exception as e:
             console.log(f"[dim]Cek MultiAssetsMargin: {e}[/dim]")
 
-    def get_futures_balance(self, max_age_sec: float = 5.0) -> Dict[str, float]:
-        """Mengambil saldo wallet USDⓈ-M Futures dengan caching 5 detik."""
+    def get_futures_balance(self, max_age_sec: float = 10.0) -> Dict[str, float]:
+        """Mengambil saldo wallet USDⓈ-M Futures dengan caching dan perlindungan rate limit."""
         now = time.time()
+        # Jika sedang dalam masa jeda rate limit Binance, gunakan cache dan jangan request
+        if now < self._ban_until:
+            if now - self._last_ban_log_time > 120:
+                self._last_ban_log_time = now
+                s_left = int(self._ban_until - now)
+                console.log(f"[yellow]IP server dalam masa jeda rate limit Binance ({s_left} detik tersisa). Menunggu cooldown...[/yellow]")
+            return self._cached_balance
+
         if now - self._last_balance_time < max_age_sec and self._cached_balance["total_wallet"] > 0:
             return self._cached_balance
 
@@ -92,10 +104,24 @@ class BinanceScalper:
                 "unrealized_pnl": unrealized_pnl
             }
             self._last_balance_time = now
+            self.last_error = None
             return self._cached_balance
         except Exception as e:
-            self.last_error = f"Balance error: {str(e)}"
-            console.log(f"[red]Error mengambil balance Futures: {e}[/red]")
+            err_msg = str(e)
+            self.last_error = f"Balance error: {err_msg}"
+            self._last_balance_time = now + 15
+            
+            # Deteksi otomatis pesan IP banned / -1003 dari Binance
+            if "-1003" in err_msg or "IP banned" in err_msg:
+                import re
+                match = re.search(r"IP banned until (\d+)", err_msg)
+                if match:
+                    self._ban_until = float(match.group(1)) / 1000.0
+                else:
+                    self._ban_until = now + 600.0
+                console.log(f"[bold yellow]Rate limit Binance terpicu pada IP server. Menunda request hingga {time.strftime('%H:%M:%S', time.localtime(self._ban_until))}[/bold yellow]")
+            else:
+                console.log(f"[red]Error mengambil balance Futures: {e}[/red]")
             return self._cached_balance
 
     def get_compounded_notional(self) -> float:
@@ -386,6 +412,12 @@ class BinanceScalper:
         
         while self.is_running:
             try:
+                # 0. Jika IP sedang dalam masa jeda rate limit, tunda loop tanpa spamming
+                if time.time() < self._ban_until:
+                    s_left = int(self._ban_until - time.time())
+                    time.sleep(min(30, s_left + 1))
+                    continue
+
                 # 1. Jika ada posisi aktif, pantau terlebih dahulu
                 if self.active_position:
                     self.monitor_active_position()
