@@ -1,5 +1,5 @@
 import math
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List
 from config import config
 
 def calculate_ema_series(values: List[float], period: int) -> List[float]:
@@ -290,9 +290,7 @@ def check_signal_from_ohlcv(
         "short_pct": short_pct
     }
 
-def check_signal(data: Any, available_capital: float = 10.0, leverage: int = 10, ls_data: Optional[Dict[str, float]] = None) -> Optional[Dict[str, Any]]:
-    """Wrapper kompatibel untuk list OHLCV maupun DataFrame."""
-    if isinstance(data, list):
-        return check_signal_from_ohlcv(data, available_capital, leverage, ls_data)
-    ohlcv = data[['timestamp', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
+def check_signal(ohlcv: List[List[float]], available_capital: float = 10.0, leverage: int = 10, ls_data: Optional[Dict[str, float]] = None) -> Optional[Dict[str, Any]]:
+    """Fungsi utama pemeriksaan sinyal scalping 5m berbasis list OHLCV native."""
     return check_signal_from_ohlcv(ohlcv, available_capital, leverage, ls_data)
+

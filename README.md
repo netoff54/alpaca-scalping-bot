@@ -1,39 +1,47 @@
-# Binance Futures Top-200 Scalping Autonomous Bot (Modal Compounding $10+)
+# Binance Futures Autonomous Scalper (Native Engine + Neon Tech)
 
-Bot scalping otonom berbasis **Python + CCXT + FastAPI** yang secara otomatis memindai **200 Koin / Token Teratas** di **Binance USDⓈ-M Futures** berdasarkan volume perdagangan 24 jam dan mengeksekusi strategi **Triple Filter Momentum** pada timeframe 1 menit (1m).
+Bot scalping otonom berbasis **Python Native REST API + FastAPI** yang memindai koin teratas di **Binance USDⓈ-M Futures**, tervalidasi dengan **Pola N (Breakout & Retest)**, **Sentimen Arus Long/Short Global**, dan dieksekusi 100% menggunakan **Maker Limit Order** (Post-Only GTX / fee terendah).
 
 ---
 
 ## Fitur Utama & Disiplin Risiko
 
-1. **Always LIMIT ORDER (Maker Only)**:
-   - Order masuk menggunakan Limit Order pada *Best Bid* (Buy) atau *Best Ask* (Sell) untuk mendapatkan tarif fee terendah (*Maker rebate/0.02% fee*) dan menghindari *slippage*.
-2. **Anti-FOMO Auto-Cancel (30 Detik)**:
-   - Limit order yang belum terisi dalam 30 detik otomatis dibatalkan oleh bot untuk mencegah tertinggal momentum atau terseret pergerakan berlawanan.
-3. **Always ISOLATED Margin**:
-   - Akun diatur ke Single-Asset mode dengan margin `ISOLATED` (5x leverage), memastikan sisa saldo wallet USDⓈ-M terlindungi penuh jika terjadi volatilitas ekstrim.
-4. **Always Compounding (100% Saldo Digulung)**:
-   - Bot menggunakan 100% saldo kas kasir yang tersedia (`availableBalance`) di dompet Futures untuk ukuran trade berikutnya secara dinamis.
-5. **Strategi Triple Filter Momentum**:
-   - **Filter Tren (EMA 200)**: Hanya Buy saat harga di atas EMA 200; hanya Sell saat harga di bawah EMA 200.
-   - **Trigger (EMA 9 & 21)**: Golden Cross untuk Buy, Death Cross untuk Sell pada bar tertutup (-2) untuk mencegah repaint.
-   - **Filter Momentum (RSI 14)**: Buy pada RSI 50–68; Sell pada RSI 32–50 (zona momentum ekspansi sehat).
-   - **Exit Target (1:2 Risk to Reward)**: Stop Loss -0.5% dan Take Profit +1.0%.
+1. **100% Limit Maker Order (Masuk & Keluar)**:
+   - Order masuk menggunakan Limit Order Post-Only (`timeInForce=GTX`) pada harga terbaik untuk mendapatkan fee Maker terendah (0.02%) tanpa slippage.
+   - Penutupan posisi (TP/SL) juga diprioritaskan menggunakan Limit Maker Exit sebelum beralih ke proteksi pasar darurat.
+2. **Timeframe 5 Menit (TF 5m Anti-Noise)**:
+   - Menghilangkan noise whip-saw 1 menit dengan konfirmasi candle 5m tertutup (`-2`), volume support aktif, dan price action tanpa rejection wick.
+3. **Analisis Pola N (N-Wave Breakout & Retest)**:
+   - Memvalidasi pembentukan swing low/high, Higher Low (Bullish N), atau Lower High (Bearish N) sebelum entry.
+4. **Sentimen Arus Pasar (Anti-Melawan Arus)**:
+   - Mengintegrasikan Binance Futures `globalLongShortAccountRatio`. Bot tidak akan membuka posisi yang melawan arus dominan pasar.
+5. **Manajemen Risiko Adaptif & Compounding**:
+   - Alokasi margin: 0.5% portofolio x 10x leverage (ISOLATED Margin).
+   - Stop Loss adaptif berbasis ATR (1.2% - 1.8%).
+   - Break-Even otomatis mengunci SL di Entry + 0.1% saat profit mencapai +0.6%.
+   - Trailing Stop dinamis mengunci puncak saat profit mencapai +1.0%.
+6. **Pemantauan Posisi Aktif Setiap 5 Detik**:
+   - Loop frekuensi tinggi (5s) langsung memantau harga posisi terbuka, sedangkan pemindaian koin berjalan berkala dengan konsumsi IP weight rendah (<100/2400).
+7. **Database Neon Tech PostgreSQL Cloud**:
+   - Schema terisolasi `binance_scalper` untuk merekam riwayat trade, riwayat sinyal, dan pertumbuhan saldo portofolio.
 
 ---
 
-## Struktur File
+## Struktur File Proyek
 
-- [`config.py`](file:///d:/bot%20trading/config.py): Konfigurasi terpusat parameter bursa, modal, indikator, dan timeframe.
-- [`strategy.py`](file:///d:/bot%20trading/strategy.py): Algoritma matematis EMA, RSI, ATR, deteksi sinyal bar tertutup, dan SL/TP 1:2 RRR.
-- [`binance_bot.py`](file:///d:/bot%20trading/binance_bot.py): Mesin pemindaian 200 koin volume teratas di Binance Futures secara asinkron, eksekusi Maker limit order, auto-cancel 30 detik, dan pemantau posisi.
-- [`main.py`](file:///d:/bot%20trading/main.py): Service FastAPI untuk deploy di Render Cloud, keep-alive self-ping 24/7, dan REST endpoints.
+- [`config.py`](config.py): Konfigurasi terpusat parameter bursa, modal, indikator, TF 5m, dan alokasi risiko.
+- [`strategy.py`](strategy.py): Algoritma matematis murni EMA, RSI, ATR, Pola N, dan filter sentimen arus.
+- [`binance_client.py`](binance_client.py): Klien REST API Binance Futures Native (Zero CCXT), penanganan presisi lot size & tick size, auto-wait rate limit.
+- [`binance_bot.py`](binance_bot.py): Mesin pemindaian koin, eksekusi limit maker, pemantau posisi aktif 5s, Break-Even & Trailing Stop.
+- [`database.py`](database.py): Pengelola koneksi dan audit log Neon Tech PostgreSQL.
+- [`main.py`](main.py): Service FastAPI untuk Render Cloud, keep-alive self-ping 24/7, dan REST API endpoints.
 
 ---
 
 ## REST Endpoints
 
-- `GET /` : Dashboard ringkasan bot, status saldo Binance Futures, koin yang dipantau, dan sinyal aktif.
-- `GET /health` : Endpoint health check resmi Render Cloud.
-- `GET /scan-results` : Detail analisis 200 koin teratas (Market Regime, sinyal Long/Short, dan Watchlist).
-- `GET /outbound-ip` : Cek IP keluar kontainer cloud Render.
+- `GET /` : Dashboard ringkasan bot, saldo, koin dipantau, dan status rate limit.
+- `GET /health` : Health check resmi Render Cloud (respon instan <1ms).
+- `GET /positions` : Detail posisi aktif yang tersinkronisasi langsung dari Binance.
+- `GET /scan-results` : Hasil pemindaian koin, analisis market regime, dan sinyal.
+- `GET /outbound-ip` : Cek IP publik container Render.
