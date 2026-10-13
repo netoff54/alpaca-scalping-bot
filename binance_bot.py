@@ -513,10 +513,10 @@ class BinanceScalper:
                 # 1. Selalu sinkronisasi posisi riil dari Binance
                 self.sync_exchange_position()
 
-                # 2. Jika ada posisi aktif, pantau harga secara wajar
+                # 2. Jika ada posisi aktif, pantau harga setiap 5 detik
                 if self.active_position:
                     self.monitor_active_position()
-                    time.sleep(20)  # Jeda 20 detik memangkas >80% request REST
+                    time.sleep(5)  # Cek harga posisi aktif setiap 5 detik sesuai permintaan
                     continue
                     
                 # 3. Jalankan pemindaian koin Top volume

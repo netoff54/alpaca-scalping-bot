@@ -40,16 +40,16 @@ class BinanceFuturesClient:
     def check_response_for_ban(self, resp_or_data: Any):
         """Mendeteksi apakah Binance merespons dengan HTTP 418/429 atau kode -1003 ban."""
         msg = ""
+        now = time.time()
         if isinstance(resp_or_data, requests.Response):
             used_weight = resp_or_data.headers.get("x-mbx-used-weight-1m")
             if used_weight:
                 try:
                     w = int(used_weight)
                     self.current_weight_1m = w
-                    if w > 1600:
-                        now = time.time()
-                        self.ban_until = max(self.ban_until, now + 15.0)
-                        console.log(f"[bold yellow]Request weight IP Binance tinggi ({w}/2400). Mengistirahatkan koneksi (15s)...[/bold yellow]")
+                    if w >= 2000:
+                        self.ban_until = max(self.ban_until, now + 10.0)
+                        console.log(f"[bold yellow]Preemptive throttle: Request weight IP tinggi ({w}/2400). Jeda 10s...[/bold yellow]")
                 except Exception:
                     pass
 
@@ -61,22 +61,25 @@ class BinanceFuturesClient:
         elif isinstance(resp_or_data, str):
             msg = resp_or_data
 
-        if "-1003" in msg or "IP banned" in msg or "Way too many requests" in msg or "banned until" in msg:
+        if "-1003" in msg or "IP banned" in msg or "Way too many requests" in msg or "banned until" in msg or "Too many requests" in msg:
             import re
             match = re.search(r"banned until (\d+)", msg)
-            now = time.time()
             if match:
+                # Ban resmi dari bursa dengan timestamp
                 self.ban_until = float(match.group(1)) / 1000.0
+                if now - self._last_ban_log_time > 60:
+                    self._last_ban_log_time = now
+                    s_left = int(self.ban_until - now)
+                    m_left = s_left // 60
+                    sec_left = s_left % 60
+                    wib_time = time.strftime('%H:%M:%S', time.gmtime(self.ban_until + 7 * 3600))
+                    console.log(f"[bold yellow]Rate limit Binance aktif ({msg[:100]}). Server IP istirahat hingga {wib_time} WIB ({m_left}m {sec_left}s lagi).[/bold yellow]")
             else:
-                self.ban_until = max(self.ban_until, now + 300.0)
-            
-            if now - self._last_ban_log_time > 60:
-                self._last_ban_log_time = now
-                s_left = int(self.ban_until - now)
-                m_left = s_left // 60
-                sec_left = s_left % 60
-                wib_time = time.strftime('%H:%M:%S', time.gmtime(self.ban_until + 7 * 3600))
-                console.log(f"[bold yellow]Rate limit Binance aktif ({msg[:120]}). Server IP istirahat hingga {wib_time} WIB ({m_left}m {sec_left}s lagi).[/bold yellow]")
+                # Rolling window limit 1 menit (bukan ban 5 menit!). Jeda 12 detik agar jendela 1 menit bergeser
+                self.ban_until = max(self.ban_until, now + 12.0)
+                if now - self._last_ban_log_time > 10:
+                    self._last_ban_log_time = now
+                    console.log(f"[bold yellow]Rolling rate limit 1m terdeteksi ({msg[:100]}). Jeda singkat 12 detik lalu lanjut otomatis...[/bold yellow]")
 
     def _apply_fallback_symbols(self):
         """Mengaktifkan daftar default 28 koin crypto likuid utama jika bursa sedang dalam cooldown."""
