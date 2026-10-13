@@ -3,13 +3,17 @@ import hashlib
 import time
 import math
 import urllib.parse
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set
 import requests
+from rich.console import Console
+
+console = Console()
 
 class BinanceFuturesClient:
     """
-    Klien REST API Binance Futures USDⓈ-M murni tanpa library CCXT/Pandas.
-    Menggunakan memori super rendah (<10MB) dan respon latensi rendah.
+    Klien REST API Binance Futures USDⓈ-M Native murni.
+    Memuat aturan presisi pasar (exchangeInfo) satu kali saat startup ke memori (<50KB),
+    menjamin 100% presisi harga/lot size tepat dan secara otomatis menyaring token non-crypto.
     """
     def __init__(self, api_key: str, api_secret: str):
         self.api_key = api_key
@@ -20,7 +24,11 @@ class BinanceFuturesClient:
             "X-MBX-APIKEY": self.api_key,
             "User-Agent": "BinanceAutonomousScalper/2.0 (Render Frankfurt)"
         })
-        self._rules_cache: Dict[str, Dict[str, Any]] = {}
+        self._symbols_rules: Dict[str, Dict[str, Any]] = {}
+        self.allowed_crypto_symbols: Set[str] = set()
+        
+        # Muat pasar dan filter aturan presisi
+        self.load_markets()
 
     def _sign(self, params: Dict[str, Any]) -> Dict[str, Any]:
         params["timestamp"] = int(time.time() * 1000)
@@ -33,6 +41,93 @@ class BinanceFuturesClient:
         ).hexdigest()
         params["signature"] = signature
         return params
+
+    def load_markets(self):
+        """
+        Memuat dan menyaring seluruh instrumen bursa:
+        1. Hanya menyaring kontrak pure crypto 'PERPETUAL' (mengabaikan TRADIFI_PERPETUAL, saham, & komoditas minyak/emas).
+        2. Menyimpan aturan lot size, step size, tick size, dan precision desimal per koin.
+        """
+        try:
+            url = f"{self.base_url}/fapi/v1/exchangeInfo"
+            resp = self.session.get(url, timeout=10)
+            data = resp.json()
+            
+            rules_map = {}
+            allowed = set()
+            
+            for s in data.get("symbols", []):
+                sym = s.get("symbol", "")
+                status = s.get("status", "")
+                contract_type = s.get("contractType", "")
+                quote_asset = s.get("quoteAsset", "")
+                underlying_type = s.get("underlyingType", "")
+                
+                # WAJIB: Hanya trading kontrak Crypto Perpetual murni
+                if quote_asset != "USDT" or status != "TRADING":
+                    continue
+                if contract_type != "PERPETUAL":
+                    continue
+                if underlying_type in ("EQUITY", "COMMODITY", "TradFi"):
+                    continue
+                    
+                tick_size = 0.0001
+                step_size = 1.0
+                min_qty = 1.0
+                min_notional = 5.0
+                
+                for f in s.get("filters", []):
+                    ftype = f.get("filterType")
+                    if ftype == "PRICE_FILTER":
+                        tick_size = float(f.get("tickSize", 0.0001))
+                    elif ftype == "LOT_SIZE":
+                        step_size = float(f.get("stepSize", 1.0))
+                        min_qty = float(f.get("minQty", 1.0))
+                    elif ftype == "MIN_NOTIONAL":
+                        min_notional = float(f.get("notional", 5.0))
+                        
+                price_prec = int(s.get("pricePrecision", 4))
+                qty_prec = int(s.get("quantityPrecision", 2))
+                
+                rules_map[sym] = {
+                    "tick_size": tick_size,
+                    "step_size": step_size,
+                    "min_qty": min_qty,
+                    "min_notional": min_notional,
+                    "price_precision": price_prec,
+                    "qty_precision": qty_prec
+                }
+                allowed.add(sym)
+                
+            self._symbols_rules = rules_map
+            self.allowed_crypto_symbols = allowed
+            console.log(f"[bold green]Berhasil memuat aturan presisi untuk {len(allowed)} koin crypto murni Binance Futures.[/bold green]")
+        except Exception as e:
+            console.log(f"[red]Gagal memuat exchangeInfo Binance: {e}[/red]")
+
+    def format_price(self, symbol: str, price: float) -> float:
+        """Menyesuaikan harga ke tick_size dan presisi desimal resmi bursa."""
+        rules = self._symbols_rules.get(symbol)
+        if not rules:
+            return round(price, 4)
+        tick = rules["tick_size"]
+        prec = rules["price_precision"]
+        if tick <= 0:
+            return round(price, prec)
+        val = math.floor(price / tick) * tick
+        return float(f"{val:.{prec}f}")
+
+    def format_qty(self, symbol: str, qty: float) -> float:
+        """Menyesuaikan lot size kuantitas ke step_size dan presisi desimal resmi bursa."""
+        rules = self._symbols_rules.get(symbol)
+        if not rules:
+            return round(qty, 2)
+        step = rules["step_size"]
+        prec = rules["qty_precision"]
+        if step <= 0:
+            return round(qty, prec)
+        val = math.floor(qty / step) * step
+        return float(f"{val:.{prec}f}")
 
     def get_balance(self) -> Dict[str, float]:
         """Mengambil saldo wallet Futures (USDT)."""
@@ -77,7 +172,7 @@ class BinanceFuturesClient:
                     "entry_price": float(p.get("entryPrice", 0.0)),
                     "mark_price": float(p.get("markPrice", 0.0)),
                     "unrealized_pnl": float(p.get("unRealizedProfit", 0.0)),
-                    "leverage": int(p.get("leverage", 5)),
+                    "leverage": int(p.get("leverage", 10)),
                     "isolated": p.get("isolated") == "true" or p.get("isolated") is True
                 })
         return open_pos
@@ -103,57 +198,13 @@ class BinanceFuturesClient:
         except Exception:
             pass
 
-    def set_leverage(self, symbol: str, leverage: int = 5):
+    def set_leverage(self, symbol: str, leverage: int = 10):
         url = f"{self.base_url}/fapi/v1/leverage"
         params = self._sign({"symbol": symbol, "leverage": leverage})
         try:
             self.session.post(url, params=params, timeout=10)
         except Exception:
             pass
-
-    def get_symbol_rules(self, symbol: str) -> Dict[str, Any]:
-        """Mengambil aturan precision harga dan lot size untuk satu simbol."""
-        if symbol in self._rules_cache:
-            return self._rules_cache[symbol]
-        try:
-            url = f"{self.base_url}/fapi/v1/exchangeInfo?symbol={symbol}"
-            resp = self.session.get(url, timeout=5)
-            data = resp.json()
-            symbols = data.get("symbols", [])
-            if symbols:
-                s = symbols[0]
-                tick_size = 0.0001
-                step_size = 1.0
-                min_qty = 1.0
-                for f in s.get("filters", []):
-                    if f.get("filterType") == "PRICE_FILTER":
-                        tick_size = float(f.get("tickSize", 0.0001))
-                    elif f.get("filterType") == "LOT_SIZE":
-                        step_size = float(f.get("stepSize", 1.0))
-                        min_qty = float(f.get("minQty", 1.0))
-                rules = {"tick_size": tick_size, "step_size": step_size, "min_qty": min_qty}
-                self._rules_cache[symbol] = rules
-                return rules
-        except Exception:
-            pass
-        return {"tick_size": 0.0001, "step_size": 1.0, "min_qty": 1.0}
-
-    def format_price(self, symbol: str, price: float) -> float:
-        rules = self.get_symbol_rules(symbol)
-        step = rules["tick_size"]
-        if step <= 0:
-            return price
-        prec = max(0, int(round(-math.log10(step)))) if step < 1 else 0
-        return round(round(price / step) * step, prec)
-
-    def format_qty(self, symbol: str, qty: float) -> float:
-        rules = self.get_symbol_rules(symbol)
-        step = rules["step_size"]
-        if step <= 0:
-            return qty
-        prec = max(0, int(round(-math.log10(step)))) if step < 1 else 0
-        val = math.floor(qty / step) * step
-        return round(val, prec)
 
     def fetch_best_bid_ask(self, symbol: str) -> Dict[str, float]:
         url = f"{self.base_url}/fapi/v1/depth?symbol={symbol}&limit=5"

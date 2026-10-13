@@ -160,22 +160,18 @@ class BinanceScalper:
         return round(margin_used * config.LEVERAGE, 2)
 
     def _fetch_top_symbols(self) -> List[Dict[str, Any]]:
-        """Mengambil Top 50 koin langsung dari Binance Futures REST API."""
+        """Mengambil Top 50 koin crypto murni langsung dari Binance Futures REST API."""
         try:
             data = self.client.fetch_top_tickers()
             filtered = []
             for item in data:
                 sym = item.get("symbol", "")
-                if not sym.endswith("USDT"):
-                    continue
-                base = sym[:-4]
-                if base in TRADFI_EXCLUSIONS:
+                if sym not in self.client.allowed_crypto_symbols:
                     continue
                 try:
                     q_vol = float(item.get("quoteVolume", 0.0))
                     filtered.append({
                         "symbol": sym,
-                        "base": base,
                         "quoteVolume": q_vol
                     })
                 except Exception:
