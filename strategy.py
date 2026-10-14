@@ -378,31 +378,7 @@ def analyze_coin_comprehensive(
             score = 88.0
 
     # =========================================================================
-    # SETUP 2: RANGE TRADING SAAT SIDEWAYS (Poin 2 & 3 Kalimasada)
-    # "Kondisi sideways sangat merugikan bagi breakout trader, namun sangat
-    #  menguntungkan bagi range trader yang mengandalkan supply dan demand"
-    # =========================================================================
-    if not signal_side and structure == "SIDEWAYS":
-        # Pantulan di Area Demand / Support
-        is_at_support_zone = (c_low <= nearest_support * 1.0025) and (c_close >= nearest_support * 0.9985)
-        if is_at_support_zone and rev_pattern["is_bullish_reversal"] and has_room_for_buy and has_ls_support_buy:
-            if c_vol >= avg_vol * 1.05:
-                signal_side = "BUY"
-                setup_name = "DEMAND_ZONE_BOUNCE"
-                setup_desc = f"Pantulan Demand/Support 15m {nearest_support:.4f} ({rev_pattern['pattern_name']}) di Pasar Sideways"
-                score = 86.0
-
-        # Penolakan di Area Supply / Resistance
-        is_at_resistance_zone = (c_high >= nearest_resistance * 0.9975) and (c_close <= nearest_resistance * 1.0015)
-        if not signal_side and is_at_resistance_zone and rev_pattern["is_bearish_reversal"] and has_room_for_sell and has_ls_support_sell:
-            if c_vol >= avg_vol * 1.05:
-                signal_side = "SELL"
-                setup_name = "SUPPLY_ZONE_REJECTION"
-                setup_desc = f"Penolakan Supply/Resistance 15m {nearest_resistance:.4f} ({rev_pattern['pattern_name']}) di Pasar Sideways"
-                score = 86.0
-
-    # =========================================================================
-    # SETUP 3: EMA 13 & 21 RETEST BOUNCE (Poin 7 Kalimasada - Dynamic S&R)
+    # SETUP 2: EMA 13 & 21 RETEST BOUNCE (Poin 7 Kalimasada - Dynamic S&R)
     # Syarat: Hanya saat Trending & Memiliki Room to Run (Jangan Beli di Pucuk!)
     # =========================================================================
     if not signal_side and structure != "SIDEWAYS":
@@ -413,7 +389,7 @@ def analyze_coin_comprehensive(
                     signal_side = "BUY"
                     setup_name = "EMA13_21_BOUNCE"
                     setup_desc = f"Pullback Retest & Bounce di EMA 13/21 5m ({ema13:.4f}) searah Uptrend"
-                    score = 84.0
+                    score = 86.0
 
         # SELL: Downtrend & Rejection di Dynamic Resistance EMA 13/21
         elif structure == "DOWNTREND" and c_close < ema200_htf and ema13 <= ema21:
@@ -422,30 +398,7 @@ def analyze_coin_comprehensive(
                     signal_side = "SELL"
                     setup_name = "EMA13_21_BOUNCE"
                     setup_desc = f"Pullback Retest & Rejection di EMA 13/21 5m ({ema13:.4f}) searah Downtrend"
-                    score = 84.0
-
-    # =========================================================================
-    # SETUP 4: TRUE BREAKOUT & RETEST (Poin 6 Kalimasada)
-    # Syarat: DILARANG saat Sideways! Menunggu harga menguji level tembusan.
-    # =========================================================================
-    if not signal_side and structure in ("UPTREND", "DOWNTREND"):
-        # BUY Retest: Resistance yang berhasil ditembus kini menjadi Support (RBS)
-        if structure == "UPTREND" and p_close > nearest_resistance and c_close > ema200_htf:
-            if c_low <= nearest_resistance * 1.0020 and c_close >= nearest_resistance * 0.9990:
-                if (c_close >= c_open or rev_pattern["is_bullish_reversal"]) and has_strong_volume and has_ls_support_buy:
-                    signal_side = "BUY"
-                    setup_name = "BREAKOUT_AND_RETEST"
-                    setup_desc = f"True Retest Resistance Become Support (RBS) {nearest_resistance:.4f}"
-                    score = 85.0
-
-        # SELL Retest: Support yang berhasil ditembus kini menjadi Resistance (SBR)
-        elif structure == "DOWNTREND" and p_close < nearest_support and c_close < ema200_htf:
-            if c_high >= nearest_support * 0.9980 and c_close <= nearest_support * 1.0010:
-                if (c_close <= c_open or rev_pattern["is_bearish_reversal"]) and has_strong_volume and has_ls_support_sell:
-                    signal_side = "SELL"
-                    setup_name = "BREAKOUT_AND_RETEST"
-                    setup_desc = f"True Retest Support Become Resistance (SBR) {nearest_support:.4f}"
-                    score = 85.0
+                    score = 86.0
 
     # =========================================================================
     # SETUP 5: COMPRESSION BREAKOUT (Pola Squeeze Akumulasi/Distribusi)
