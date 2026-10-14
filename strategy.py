@@ -465,11 +465,17 @@ def analyze_coin_comprehensive(
         tp_price = entry_price + tp_dist if signal_side == "BUY" else entry_price - tp_dist
         bep_trigger_price = entry_price + sl_dist if signal_side == "BUY" else entry_price - sl_dist
 
-        # 0.5% dari total saldo dialokasikan sebagai margin per posisi (Leverage 50x)
-        target_margin_usd = available_capital * config.RISK_PORTFOLIO_PERCENT
+        # Aturan Margin Bertingkat (50x Leverage):
+        # - Jika saldo < $50: gunakan margin tetap $0.20 (Notional $10.00 pada 50x)
+        # - Jika saldo >= $50: kembali ke 0.5% margin per posisi dari total saldo
+        if available_capital < config.BALANCE_THRESHOLD_SCALING:
+            target_margin_usd = config.FIXED_MARGIN_LOW_BALANCE
+        else:
+            target_margin_usd = available_capital * config.RISK_PORTFOLIO_PERCENT
+
         raw_notional = target_margin_usd * dynamic_leverage
         notional = max(config.MIN_NOTIONAL + 0.15, raw_notional)
-        if available_capital < 20.0:
+        if available_capital < config.BALANCE_THRESHOLD_SCALING:
             notional = min(notional, config.MAX_ORDER_NOTIONAL)
 
         executable_signal = {

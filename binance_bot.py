@@ -161,17 +161,22 @@ class BinanceScalper:
 
     def get_compounded_notional(self) -> float:
         """
-        Menghitung ukuran notional posisi berdasarkan model 0.5% margin dari saldo portofolio dengan leverage 50x.
-        Jaminan minimal $5.15 agar memenuhi syarat batas minimum notional Binance ($5.00).
+        Menghitung ukuran notional posisi berdasarkan aturan margin bertingkat (Leverage 50x):
+        - Saldo < $50: gunakan margin $0.20 (Notional $10.00 pada 50x)
+        - Saldo >= $50: kembali ke 0.5% margin per posisi dari total saldo
         """
         bal = self.get_futures_balance()
         avail = bal["available"]
         base_wallet = avail if avail >= 1.0 else config.DEFAULT_CAPITAL
         
-        target_margin = base_wallet * config.RISK_PORTFOLIO_PERCENT
+        if base_wallet < config.BALANCE_THRESHOLD_SCALING:
+            target_margin = config.FIXED_MARGIN_LOW_BALANCE
+        else:
+            target_margin = base_wallet * config.RISK_PORTFOLIO_PERCENT
+
         raw_notional = target_margin * config.LEVERAGE
         notional = max(config.MIN_NOTIONAL + 0.15, raw_notional)
-        if base_wallet < 20.0:
+        if base_wallet < config.BALANCE_THRESHOLD_SCALING:
             notional = min(notional, config.MAX_ORDER_NOTIONAL)
         return round(notional, 2)
 
