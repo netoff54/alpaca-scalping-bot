@@ -240,7 +240,8 @@ def analyze_coin_comprehensive(
     ohlcv_ltf: List[List[float]],
     derivatives_data: Optional[Dict[str, Any]] = None,
     available_capital: float = 10.0,
-    leverage: int = 10
+    leverage: int = 50,
+    max_symbol_leverage: int = 50
 ) -> Dict[str, Any]:
     """
     Analisis Menyeluruh 1 Koin Crypto (Akademi Crypto Master Blueprint Disempurnakan):
@@ -442,15 +443,11 @@ def analyze_coin_comprehensive(
 
     final_score = min(100.0, round(score, 2))
 
-    # Dynamic Leverage (Fixed 50x sesuai preferensi pengguna)
-    dynamic_leverage = config.LEVERAGE
-    if config.DYNAMIC_LEVERAGE_ENABLED:
-        if final_score >= 85:
-            dynamic_leverage = 50
-        elif final_score >= 75:
-            dynamic_leverage = 35
-        else:
-            dynamic_leverage = 20
+    # Target Leverage & Dynamic Clamping:
+    # Prioritaskan 50x jika didukung bursa; jika koin hanya mendukung di bawah 50x (misal 20x/25x/30x/40x),
+    # sesuaikan ke batas maksimal yang didukung koin tersebut.
+    target_leverage = config.LEVERAGE
+    effective_leverage = min(target_leverage, max_symbol_leverage) if max_symbol_leverage > 0 else target_leverage
 
     # Manajemen Risiko Ketat RR 1:2
     executable_signal = None
@@ -465,50 +462,59 @@ def analyze_coin_comprehensive(
         tp_price = entry_price + tp_dist if signal_side == "BUY" else entry_price - tp_dist
         bep_trigger_price = entry_price + sl_dist if signal_side == "BUY" else entry_price - sl_dist
 
-        # Aturan Margin Bertingkat (50x Leverage):
-        # - Jika saldo < $50: gunakan margin tetap $0.20 (Notional $10.00 pada 50x)
-        # - Jika saldo >= $50: kembali ke 0.5% margin per posisi dari total saldo
+        # Aturan Margin Bertingkat:
+        # - Jika saldo < $50: margin WAJIB tepat $0.20
+        # - Jika saldo >= $50: margin 0.5% dari total saldo portofolio
         if available_capital < config.BALANCE_THRESHOLD_SCALING:
-            target_margin_usd = config.FIXED_MARGIN_LOW_BALANCE
+            target_margin_usd = config.FIXED_MARGIN_LOW_BALANCE  # $0.20
         else:
             target_margin_usd = available_capital * config.RISK_PORTFOLIO_PERCENT
 
-        raw_notional = target_margin_usd * dynamic_leverage
-        notional = max(config.MIN_NOTIONAL + 0.15, raw_notional)
-        if available_capital < config.BALANCE_THRESHOLD_SCALING:
-            notional = min(notional, config.MAX_ORDER_NOTIONAL)
+        raw_notional = target_margin_usd * effective_leverage
 
-        executable_signal = {
-            "symbol": symbol,
-            "side": signal_side,
-            "entry_price": entry_price,
-            "sl_price": sl_price,
-            "tp_price": tp_price,
-            "bep_trigger_price": bep_trigger_price,
-            "sl_percent": round(sl_percent * 100, 2),
-            "tp_percent": round(tp_percent * 100, 2),
-            "rr_ratio": config.RR_RATIO,
-            "dynamic_leverage": dynamic_leverage,
-            "notional": round(notional, 2),
-            "risk_usd": round(notional * sl_percent, 4),
-            "reward_usd": round(notional * tp_percent, 4),
-            "score": final_score,
-            "setup_name": setup_name,
-            "setup_desc": setup_desc,
-            "market_structure": structure,
-            "candlestick_pattern": rev_pattern["pattern_name"],
-            "sweep_status": sweep_status,
-            "ema13": round(ema13, 4),
-            "ema21": round(ema21, 4),
-            "ema200": round(ema200_htf, 4),
-            "nearest_support": round(nearest_support, 4),
-            "nearest_resistance": round(nearest_resistance, 4),
-            "liquidation_pools": liq_pools,
-            "oi_trend": oi_trend,
-            "taker_ratio": taker_ratio,
-            "ls_ratio": ls_ratio,
-            "vol_ratio": round(c_vol / avg_vol, 2) if avg_vol > 0 else 1.0
-        }
+        # KRUSIAL: Pengecekan Batas Minimum Order Binance ($5.00)
+        # Jika nilai notional dengan margin $0.20 tidak mencapai batas minimum ($5.00),
+        # seperti koin dengan max leverage 20x ($0.20 * 20 = $4.00 < $5.00),
+        # JANGAN naikkan margin! LEWATI koin tersebut dan JANGAN buka posisi!
+        if raw_notional < config.MIN_NOTIONAL:
+            executable_signal = None
+        else:
+            notional = raw_notional
+            if available_capital < config.BALANCE_THRESHOLD_SCALING:
+                notional = min(notional, config.MAX_ORDER_NOTIONAL)
+
+            executable_signal = {
+                "symbol": symbol,
+                "side": signal_side,
+                "entry_price": entry_price,
+                "sl_price": sl_price,
+                "tp_price": tp_price,
+                "bep_trigger_price": bep_trigger_price,
+                "sl_percent": round(sl_percent * 100, 2),
+                "tp_percent": round(tp_percent * 100, 2),
+                "rr_ratio": config.RR_RATIO,
+                "dynamic_leverage": effective_leverage,
+                "notional": round(notional, 2),
+                "target_margin": round(target_margin_usd, 4),
+                "risk_usd": round(notional * sl_percent, 4),
+                "reward_usd": round(notional * tp_percent, 4),
+                "score": final_score,
+                "setup_name": setup_name,
+                "setup_desc": setup_desc,
+                "market_structure": structure,
+                "candlestick_pattern": rev_pattern["pattern_name"],
+                "sweep_status": sweep_status,
+                "ema13": round(ema13, 4),
+                "ema21": round(ema21, 4),
+                "ema200": round(ema200_htf, 4),
+                "nearest_support": round(nearest_support, 4),
+                "nearest_resistance": round(nearest_resistance, 4),
+                "liquidation_pools": liq_pools,
+                "oi_trend": oi_trend,
+                "taker_ratio": taker_ratio,
+                "ls_ratio": ls_ratio,
+                "vol_ratio": round(c_vol / avg_vol, 2) if avg_vol > 0 else 1.0
+            }
 
     return {
         "symbol": symbol,

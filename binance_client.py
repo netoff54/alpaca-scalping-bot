@@ -25,6 +25,7 @@ class BinanceFuturesClient:
             "User-Agent": "BinanceAutonomousScalper/2.0 (Render Frankfurt)"
         })
         self._symbols_rules: Dict[str, Dict[str, Any]] = {}
+        self._symbols_max_leverage: Dict[str, int] = {}
         self.allowed_crypto_symbols: Set[str] = set()
         self.ban_until: float = 0.0
         self._last_ban_log_time: float = 0.0
@@ -33,6 +34,7 @@ class BinanceFuturesClient:
         
         # Muat pasar dan filter aturan presisi
         self.load_markets()
+        self.load_leverage_brackets()
 
     def is_banned(self) -> bool:
         """Mengecek apakah IP server sedang dalam masa cooldown rate limit Binance resmi (HTTP 418/429)."""
@@ -339,16 +341,60 @@ class BinanceFuturesClient:
         except Exception:
             pass
 
-    def set_leverage(self, symbol: str, leverage: int = 10):
+    def load_leverage_brackets(self):
+        """Mengambil batas leverage maksimal resmi dari bursa untuk seluruh koin."""
         if self.is_banned():
             return
-        url = f"{self.base_url}/fapi/v1/leverage"
-        params = self._sign({"symbol": symbol, "leverage": leverage})
+        url = f"{self.base_url}/fapi/v1/leverageBracket"
         try:
-            resp = self.session.post(url, params=params, timeout=10)
+            params = self._sign({})
+            resp = self.session.get(url, params=params, timeout=10)
             self.check_response_for_ban(resp)
-        except Exception:
-            pass
+            data = resp.json()
+            if isinstance(data, list):
+                for item in data:
+                    sym = item.get("symbol")
+                    brackets = item.get("brackets", [])
+                    if sym and brackets:
+                        max_lev = int(brackets[0].get("initialLeverage", 20))
+                        self._symbols_max_leverage[sym] = max_lev
+                console.log(f"[bold green]Berhasil memuat batas leverage maksimal untuk {len(self._symbols_max_leverage)} koin.[/bold green]")
+        except Exception as e:
+            console.log(f"[dim]Notice load leverage brackets: {e}[/dim]")
+
+    def get_max_leverage(self, symbol: str) -> int:
+        """Mengembalikan leverage maksimal resmi koin (default 50 jika belum termuat)."""
+        return self._symbols_max_leverage.get(symbol, 50)
+
+    def set_leverage(self, symbol: str, target_leverage: int = 50) -> int:
+        """
+        Mengatur leverage ke target_leverage (misal 50x).
+        Jika koin hanya mendukung di bawah 50x (misal 20x/25x/30x/40x),
+        secara otomatis menggunakan leverage MAKSIMAL yang didukung koin tersebut.
+        Mengembalikan leverage aktual yang aktif di bursa.
+        """
+        if self.is_banned():
+            return min(target_leverage, self.get_max_leverage(symbol))
+        
+        known_max = self.get_max_leverage(symbol)
+        wanted = min(target_leverage, known_max)
+        
+        url = f"{self.base_url}/fapi/v1/leverage"
+        for lev in [wanted, 50, 40, 30, 25, 20, 15, 10]:
+            if lev > target_leverage:
+                continue
+            try:
+                params = self._sign({"symbol": symbol, "leverage": lev})
+                resp = self.session.post(url, params=params, timeout=10)
+                self.check_response_for_ban(resp)
+                data = resp.json()
+                if isinstance(data, dict) and "leverage" in data:
+                    actual = int(data["leverage"])
+                    self._symbols_max_leverage[symbol] = max(self._symbols_max_leverage.get(symbol, 0), actual)
+                    return actual
+            except Exception:
+                pass
+        return wanted
 
     def fetch_best_bid_ask(self, symbol: str) -> Dict[str, float]:
         if self.is_banned():

@@ -176,7 +176,7 @@ class BinanceScalper:
             target_margin = base_wallet * config.RISK_PORTFOLIO_PERCENT
 
         raw_notional = target_margin * config.LEVERAGE
-        notional = max(config.MIN_NOTIONAL + 0.15, raw_notional)
+        notional = raw_notional
         if base_wallet < config.BALANCE_THRESHOLD_SCALING:
             notional = min(notional, config.MAX_ORDER_NOTIONAL)
         return round(notional, 2)
@@ -233,6 +233,14 @@ class BinanceScalper:
                     rules = self.client._symbols_rules.get(sym, {})
                     min_q = rules.get("min_qty", 0.0)
                     if (min_q * last_price) > config.MAX_ORDER_NOTIONAL:
+                        continue
+
+                    # Filter jika koin tidak bisa mencapai minimum order ($5.00) dengan margin $0.20 pada leverage maksimalnya
+                    # Koin dengan max leverage < 25x (misal 20x) tidak akan mencapai $5.00 notional pada margin $0.20
+                    bal_avail = self._cached_balance.get("available", 0.0)
+                    active_margin = config.FIXED_MARGIN_LOW_BALANCE if bal_avail < config.BALANCE_THRESHOLD_SCALING else (bal_avail * config.RISK_PORTFOLIO_PERCENT)
+                    max_sym_lev = self.client.get_max_leverage(sym)
+                    if (active_margin * max_sym_lev) < config.MIN_NOTIONAL:
                         continue
 
                     filtered.append({
@@ -301,13 +309,15 @@ class BinanceScalper:
                 return
 
             # 2. Analisis Menyeluruh Sesuai Master Blueprint Akademi Crypto
+            max_sym_lev = self.client.get_max_leverage(sym)
             analysis = strategy.analyze_coin_comprehensive(
                 symbol=sym,
                 ohlcv_htf=ohlcv_15m,
                 ohlcv_ltf=ohlcv_5m,
                 derivatives_data=deriv_data,
                 available_capital=cap,
-                leverage=config.LEVERAGE
+                leverage=config.LEVERAGE,
+                max_symbol_leverage=max_sym_lev
             )
             analysis["rank"] = rank
             analysis["vol_24h_m"] = round(q_vol / 1_000_000, 2)
@@ -389,12 +399,35 @@ class BinanceScalper:
             return False
 
         try:
-            # 1. Pastikan ISOLATED margin dan Dynamic Leverage sesuai analisis
-            dynamic_leverage = sig.get("dynamic_leverage", config.LEVERAGE)
+            # 1. Pastikan ISOLATED margin dan atur leverage ke 50x atau max didukung koin
+            wanted_leverage = sig.get("dynamic_leverage", config.LEVERAGE)
             self.client.set_margin_type(symbol, "ISOLATED")
-            self.client.set_leverage(symbol, dynamic_leverage)
+            actual_leverage = self.client.set_leverage(symbol, wanted_leverage)
             self._configured_symbols.add(symbol)
             
+            # Hitung target margin sesuai portofolio terkini
+            bal = self.get_futures_balance()
+            avail = bal["available"] if bal["available"] >= 1.0 else config.DEFAULT_CAPITAL
+            if avail < config.BALANCE_THRESHOLD_SCALING:
+                target_margin = config.FIXED_MARGIN_LOW_BALANCE  # Tepat $0.20
+            else:
+                target_margin = avail * config.RISK_PORTFOLIO_PERCENT  # 0.5% dari saldo
+
+            target_notional = target_margin * actual_leverage
+
+            # CEK KETAT: Jika nilai notional di bawah batas minimum Binance ($5.00),
+            # JANGAN buka posisi dan LEWATI koin sesuai instruksi pengguna!
+            if target_notional < config.MIN_NOTIONAL:
+                console.log(
+                    f"[bold yellow]🛡️ Minimal order tidak tercapai: {symbol} pada leverage {actual_leverage}x "
+                    f"dengan margin ${target_margin:.2f} menghasilkan notional ${target_notional:.2f} "
+                    f"(di bawah batas minimum ${config.MIN_NOTIONAL:.2f}). Melewati koin sesuai instruksi.[/bold yellow]"
+                )
+                self.active_order = None
+                self.active_signals = [s for s in self.active_signals if s.get("symbol") != symbol]
+                self._symbol_order_cooldown[symbol] = time.time() + 600
+                return False
+
             # 2. Ambil best bid/ask untuk harga Maker
             depth = self.client.fetch_best_bid_ask(symbol)
             if side == "BUY":
@@ -406,21 +439,24 @@ class BinanceScalper:
             if formatted_price <= 0:
                 formatted_price = self.client.format_price(symbol, target_price)
             
-            # 3. Hitung qty dengan jaminan nilai notional >= $5.00 dan presisi tepat
-            notional = max(5.15, sig.get("notional", 5.15))
-            formatted_qty = self.client.calculate_order_qty(symbol, notional, formatted_price)
+            # 3. Hitung qty dengan presisi tepat
+            formatted_qty = self.client.calculate_order_qty(symbol, target_notional, formatted_price)
             
             if formatted_qty <= 0:
                 console.log(f"[red]Ukuran order terlalu kecil untuk {symbol}[/red]")
                 return False
                 
             effective_notional = formatted_qty * formatted_price
-            margin_used = effective_notional / dynamic_leverage
+            margin_used = effective_notional / actual_leverage
             if effective_notional > config.MAX_ORDER_NOTIONAL:
                 console.log(f"[bold yellow]🛡️ Filter Ukuran Akun: Minimum order {symbol} bernilai ${effective_notional:.2f} (Margin: ${margin_used:.2f}). Melewati agar margin tetap aman (Maks Notional: ${config.MAX_ORDER_NOTIONAL:.2f}).[/bold yellow]")
                 return False
 
-            console.log(f"[bold cyan]Dispatching Maker Limit Order (Risk: ${sig.get('risk_usd', 0.05):.3f}, Leverage: {dynamic_leverage}x): {side} {formatted_qty} {symbol} @ {formatted_price} (Notional: ${effective_notional:.2f}, Margin: ${margin_used:.2f})[/bold cyan]")
+            if effective_notional < config.MIN_NOTIONAL:
+                console.log(f"[bold yellow]🛡️ Notional terhitung ${effective_notional:.2f} < ${config.MIN_NOTIONAL:.2f}. Melewati {symbol} agar margin tetap ${target_margin:.2f}.[/bold yellow]")
+                return False
+
+            console.log(f"[bold cyan]Dispatching Maker Limit Order (Risk: ${sig.get('risk_usd', 0.05):.3f}, Leverage: {actual_leverage}x): {side} {formatted_qty} {symbol} @ {formatted_price} (Notional: ${effective_notional:.2f}, Margin: ${margin_used:.2f})[/bold cyan]")
             
             order = self.client.create_limit_order(
                 symbol=symbol,
@@ -439,7 +475,7 @@ class BinanceScalper:
                 "sl_price": sig["sl_price"],
                 "tp_price": sig["tp_price"],
                 "bep_trigger_price": sig.get("bep_trigger_price", 0.0),
-                "leverage": dynamic_leverage,
+                "leverage": actual_leverage,
                 "risk_usd": sig.get("risk_usd", 0.05),
                 "reward_usd": sig.get("reward_usd", 0.10),
                 "placed_at": time.time()
@@ -464,7 +500,7 @@ class BinanceScalper:
                             "tp_price": sig["tp_price"],
                             "bep_trigger_price": sig.get("bep_trigger_price", 0.0),
                             "bep_activated": False,
-                            "leverage": dynamic_leverage,
+                            "leverage": actual_leverage,
                             "risk_usd": sig.get("risk_usd", 0.05),
                             "reward_usd": sig.get("reward_usd", 0.10),
                             "opened_at": time.time(),
