@@ -49,9 +49,13 @@ class BinanceScalper:
         self.winning_trades: int = 0
         self.total_pnl_usd: float = 0.0
         
-        # Cache Top 50 koin (diperbarui setiap 30 menit)
-        self._cached_top_symbols: List[Dict[str, Any]] = []
-        self._last_top_symbols_refresh: float = 0.0
+        # Cache Semesta 200 koin crypto murni & Sistem Rotasi 10 Batch (20 koin per batch)
+        self._cached_universe_symbols: List[Dict[str, Any]] = []
+        self._last_universe_refresh: float = 0.0
+        self._current_rotation_index: int = 0
+        self._universe_signals_pool: Dict[str, Dict[str, Any]] = {}
+        self._universe_coin_data: Dict[str, Dict[str, Any]] = {}
+        self.current_rotation_info: str = "Rotasi 1/10 (Koin 1-20)"
         self._last_wallet_db_snapshot: float = 0.0
         
         # Balance cache & Rate limit cooldown
@@ -175,66 +179,112 @@ class BinanceScalper:
         ]
         return [{"symbol": s, "quoteVolume": 1000000000.0} for s in top_fallback]
 
-    def _fetch_top_symbols(self) -> List[Dict[str, Any]]:
-        """Mengambil Top 50 koin crypto murni langsung dari Binance Futures REST API."""
+    def _fetch_universe_symbols(self) -> List[Dict[str, Any]]:
+        """
+        Mengambil Semesta 200 Koin Crypto Murni (Non-Stablecoin) Langsung dari Binance Futures:
+        1. Buang semua stablecoin (USDC, FDUSD, BUSD, TUSD, EUR, DAI, AEUR, USDP, USD1, BFUSD, USDT, USTC, dll).
+        2. Hanya koin yang terdaftar di self.client.allowed_crypto_symbols.
+        3. Filter koin dengan volume 24 jam >= config.MIN_24H_VOLUME_USD ($3M).
+        4. Saring koin yang minimum order-nya terlalu besar untuk modal mikro ($11 USDT).
+        5. Urutkan berdasarkan quoteVolume tertinggi dan ambil tepat 200 koin crypto murni.
+        """
         if self.client.is_banned():
-            return self._cached_top_symbols if self._cached_top_symbols else self._get_fallback_symbols()
+            return self._cached_universe_symbols if self._cached_universe_symbols else self._get_fallback_symbols()
 
         try:
             data = self.client.fetch_top_tickers()
             if not isinstance(data, list):
-                return self._cached_top_symbols if self._cached_top_symbols else self._get_fallback_symbols()
+                return self._cached_universe_symbols if self._cached_universe_symbols else self._get_fallback_symbols()
+
+            stablecoin_symbols = {
+                "USDCUSDT", "FDUSDUSDT", "BUSDUSDT", "TUSDUSDT", "EURUSDT", "DAIUSDT", "AEURUSDT",
+                "USDPUSDT", "USD1USDT", "BFUSDUSDT", "USDTUSDT", "USTCUSDT", "EURIUSDT", "USDEUSDT",
+                "USDJUSDT", "XAUTUSDT", "PAXGUSDT"
+            }
 
             filtered = []
             for item in data:
                 if not isinstance(item, dict):
                     continue
                 sym = item.get("symbol", "")
-                if sym not in self.client.allowed_crypto_symbols:
+                if sym not in self.client.allowed_crypto_symbols or sym in stablecoin_symbols:
+                    continue
+                if any(sym.startswith(sc) for sc in ("USDC", "FDUSD", "BUSD", "TUSD", "EUR", "DAI", "AEUR", "USDP", "USD1", "BFUSD")):
                     continue
                 try:
                     q_vol = float(item.get("quoteVolume", 0.0))
+                    last_price = float(item.get("lastPrice", 0.0))
+                    if q_vol < config.MIN_24H_VOLUME_USD or last_price <= 0:
+                        continue
+
+                    # Filter koin dengan ukuran lot minimum terlalu besar untuk akun modal mikro ($11 USDT)
+                    rules = self.client._symbols_rules.get(sym, {})
+                    min_q = rules.get("min_qty", 0.0)
+                    if (min_q * last_price) > config.MAX_ORDER_NOTIONAL:
+                        continue
+
                     filtered.append({
                         "symbol": sym,
                         "quoteVolume": q_vol
                     })
                 except Exception:
                     continue
+
+            # Urutkan berdasarkan volume 24 jam tertinggi
             filtered.sort(key=lambda x: x["quoteVolume"], reverse=True)
-            res = filtered[:config.TOP_COINS_LIMIT]
+            res = filtered[:config.SCAN_UNIVERSE_LIMIT]
             if res:
+                console.log(f"[bold green]Berhasil memuat {len(res)} koin crypto murni (non-stablecoin) ke dalam semesta rotasi.[/bold green]")
                 return res
-            return self._cached_top_symbols if self._cached_top_symbols else self._get_fallback_symbols()
+            return self._cached_universe_symbols if self._cached_universe_symbols else self._get_fallback_symbols()
         except Exception as e:
-            console.log(f"[yellow]Notice fetch top tickers: {e}[/yellow]")
-            return self._cached_top_symbols if self._cached_top_symbols else self._get_fallback_symbols()
+            console.log(f"[yellow]Notice fetch universe tickers: {e}[/yellow]")
+            return self._cached_universe_symbols if self._cached_universe_symbols else self._get_fallback_symbols()
 
     def scan_top_coins(self):
-        """Memindai 20 koin likuid secara sekuensial (Super cepat ~1.5s, RAM <30MB)."""
+        """
+        Memindai 200 koin crypto murni dengan sistem rotasi bertahap:
+        - 20 koin per siklus scan (~3.5 detik)
+        - 10 rotasi berturut-turut (10 x 20 = 200 koin)
+        - Mengumpulkan sinyal dari seluruh koin secara bergantian tanpa membebani rate limit
+        """
         if self.client.is_banned() or self.client.is_scan_throttled():
             return
         t_start = time.time()
         try:
             now = time.time()
-            if not self._cached_top_symbols or (now - self._last_top_symbols_refresh > 1800):
-                self._cached_top_symbols = self._fetch_top_symbols()
-                self._last_top_symbols_refresh = now
+            if not self._cached_universe_symbols or (now - self._last_universe_refresh > 900):
+                self._cached_universe_symbols = self._fetch_universe_symbols()
+                self._last_universe_refresh = now
                 gc.collect()
+
+            universe = self._cached_universe_symbols
+            if not universe:
+                return
+
+            total_univ = len(universe)
+            batch_size = config.ROTATION_BATCH_SIZE
+            total_rots = max(1, math.ceil(total_univ / batch_size))
+            rot_idx = self._current_rotation_index % total_rots
+
+            start_idx = rot_idx * batch_size
+            end_idx = min(total_univ, start_idx + batch_size)
+            current_batch = universe[start_idx:end_idx]
+
+            self.current_rotation_info = f"Rotasi {rot_idx + 1}/{total_rots} (Koin {start_idx + 1}-{end_idx} dari {total_univ})"
 
             bal = self.get_futures_balance()
             cap = bal["available"] if bal["available"] >= 1.0 else config.DEFAULT_CAPITAL
             
-            results = []
-            signals = []
-            
-            for rank, item in enumerate(self._cached_top_symbols, 1):
+            for rank_offset, item in enumerate(current_batch, 1):
                 if self.client.is_banned() or self.client.is_scan_throttled():
                     break
                 sym = item["symbol"]
                 q_vol = item["quoteVolume"]
+                rank = start_idx + rank_offset
                 try:
-                    # Jeda adaptif: 200ms normal, atau 1000ms jika weight bursa tinggi (>2200)
-                    spacing = 1.0 if self.client.current_weight_1m >= 2200 else 0.20
+                    # Jeda adaptif: 150ms normal, atau 1000ms jika weight bursa tinggi (>2200)
+                    spacing = 1.0 if self.client.current_weight_1m >= 2200 else 0.15
                     time.sleep(spacing)
                     ohlcv = self.client.fetch_klines(sym, interval=config.TIMEFRAME, limit=config.CANDLE_LIMIT)
                     if not ohlcv or len(ohlcv) < config.EMA_TREND + 5:
@@ -243,16 +293,6 @@ class BinanceScalper:
                     highs = [c[2] for c in ohlcv]
                     lows = [c[3] for c in ohlcv]
                     latest_price = closes[-1]
-
-                    # 1. Filter koin dengan ukuran lot minimum terlalu besar untuk akun modal mikro (misal BTCUSDT di mana 0.001 BTC = $83+)
-                    rules = self.client._symbols_rules.get(sym, {})
-                    min_q = rules.get("min_qty", 0.0)
-                    if (min_q * latest_price) > config.MAX_ORDER_NOTIONAL:
-                        del ohlcv
-                        del closes
-                        del highs
-                        del lows
-                        continue
 
                     # Ambil data sentimen arus akun Long vs Short global (TF 5m)
                     ls_data = self.client.fetch_long_short_ratio(sym, period="5m")
@@ -279,35 +319,55 @@ class BinanceScalper:
                         "long_pct": ls_data.get("long_pct", 50.0),
                         "short_pct": ls_data.get("short_pct", 50.0),
                         "ls_ratio": ls_data.get("ratio", 1.0),
+                        "candlestick_pattern": sig.get("candlestick_pattern") if sig else "NONE",
+                        "ema_status": sig.get("ema_status") if sig else "NONE",
                         "n_pattern": sig.get("n_pattern") if sig else "NONE",
-                        "signal": sig
+                        "signal": sig,
+                        "updated_at": now
                     }
-                    results.append(coin_data)
+                    self._universe_coin_data[sym] = coin_data
                     
                     if sig is not None:
                         sig_data = sig.copy()
                         sig_data["symbol"] = sym
                         sig_data["rank"] = rank
                         sig_data["vol_24h_m"] = round(q_vol / 1_000_000, 2)
-                        signals.append(sig_data)
+                        sig_data["detected_at"] = now
+                        self._universe_signals_pool[sym] = sig_data
+                    else:
+                        self._universe_signals_pool.pop(sym, None)
                 except Exception:
                     continue
                     
             gc.collect()
+
+            # Bersihkan sinyal yang sudah basi (> 5 menit tidak terdeteksi lagi)
+            expired_syms = [s for s, data in self._universe_signals_pool.items() if now - data.get("detected_at", now) > 300]
+            for s in expired_syms:
+                self._universe_signals_pool.pop(s, None)
             
-            self.ranked_pairs = results
-            self.bullish_count = sum(1 for r in results if r["trend"] == "BULLISH")
-            self.bearish_count = sum(1 for r in results if r["trend"] == "BEARISH")
+            # Perbarui ranked pairs dan watchlist dari seluruh koin yang telah terakumulasi
+            accumulated_coins = list(self._universe_coin_data.values())
+            self.ranked_pairs = accumulated_coins
+            self.bullish_count = sum(1 for r in accumulated_coins if r["trend"] == "BULLISH")
+            self.bearish_count = sum(1 for r in accumulated_coins if r["trend"] == "BEARISH")
+            
+            # Sinyal aktif terurut berdasarkan skor kualitas tertinggi
+            self.active_signals = sorted(self._universe_signals_pool.values(), key=lambda x: x.get("score", 0), reverse=True)
+            
             def _rsi_dist(item):
                 r = item.get("rsi", 50.0)
                 d_buy = 0.0 if (config.RSI_BUY_MIN <= r <= config.RSI_BUY_MAX) else (config.RSI_BUY_MIN - r if r < config.RSI_BUY_MIN else r - config.RSI_BUY_MAX)
                 d_sell = 0.0 if (config.RSI_SELL_MIN <= r <= config.RSI_SELL_MAX) else (config.RSI_SELL_MIN - r if r < config.RSI_SELL_MIN else r - config.RSI_SELL_MAX)
                 return min(d_buy, d_sell)
 
-            self.watchlist = sorted(results, key=_rsi_dist)[:8]
+            self.watchlist = sorted(accumulated_coins, key=_rsi_dist)[:8]
             
             self.last_scan_duration_sec = round(time.time() - t_start, 2)
             self.last_scan_time = time.strftime("%Y-%m-%d %H:%M:%S")
+
+            # Maju ke rotasi berikutnya
+            self._current_rotation_index = (self._current_rotation_index + 1) % total_rots
             
             # Rekam sinyal dan snapshot saldo ke Neon Tech
             if self.active_signals:

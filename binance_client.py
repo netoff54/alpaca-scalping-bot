@@ -144,7 +144,17 @@ class BinanceFuturesClient:
                 quote_asset = s.get("quoteAsset", "")
                 underlying_type = s.get("underlyingType", "")
                 
-                # WAJIB: Hanya trading kontrak Crypto Perpetual murni
+                # WAJIB: Hanya trading kontrak Crypto Perpetual murni (BUANG SEMUA STABLECOIN & FIAT PEG)
+                base_asset = s.get("baseAsset", "").upper()
+                stablecoins = {
+                    "USDC", "FDUSD", "BUSD", "TUSD", "EUR", "DAI", "AEUR", "USDP", "USD1",
+                    "BFUSD", "USDT", "USD", "USTC", "EURI", "USDE", "USDJ", "XAUT", "PAXG"
+                }
+                if base_asset in stablecoins:
+                    continue
+                if any(sym.startswith(sc) for sc in ("USDC", "FDUSD", "BUSD", "TUSD", "EUR", "DAI", "AEUR", "USDP", "USD1", "BFUSD")):
+                    continue
+
                 if quote_asset != "USDT" or status != "TRADING":
                     continue
                 if contract_type != "PERPETUAL":

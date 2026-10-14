@@ -18,10 +18,14 @@ class BotConfig:
         "postgresql://neondb_owner:npg_9cdnsQ6YefiX@ep-small-butterfly-b4dv7o7m-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require"
     )
 
-    # --- Market Scanning (Timeframe 1m) ---
-    TOP_COINS_LIMIT: int = 20              # Pindai 20 koin paling likuid & volatil di Binance Futures
-    SCAN_INTERVAL_SECONDS: int = 15        # Selaras dengan candle 1m (pemindaian cepat setiap 15 detik)
-    TIMEFRAME: str = "1m"                  # Timeframe 1 menit sesuai instruksi
+    # --- Market Scanning: Rotasi 20 Koin x 10 Batch = 200 Koin Crypto Murni ---
+    SCAN_UNIVERSE_LIMIT: int = 200         # Total 200 koin crypto murni (non-stablecoin)
+    ROTATION_BATCH_SIZE: int = 20          # Ukuran batch per rotasi: 20 koin per siklus
+    TOTAL_ROTATIONS: int = 10              # 10 kali rotasi berturut-turut (10 x 20 = 200 koin)
+    TOP_COINS_LIMIT: int = 20              # Kompatibilitas alias ke 20 koin per siklus
+    MIN_24H_VOLUME_USD: float = 3_000_000.0   # Minimal volume $3M agar semesta 200 koin terpenuhi
+    SCAN_INTERVAL_SECONDS: int = 15        # Siklus rotasi setiap 15 detik (10 rotasi = 150 detik / 2.5 menit full scan)
+    TIMEFRAME: str = "1m"                  # Timeframe 1 menit
     CANDLE_LIMIT: int = 220                # 220 candle untuk perhitungan EMA 200 yang presisi
 
     # --- Account & Risk-Budget Management (0.5% Risiko Portofolio) ---
