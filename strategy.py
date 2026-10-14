@@ -1,9 +1,16 @@
+"""
+Strategi Scalping Crypto Win Rate Tinggi (Akademi Crypto - Kalimasada)
+Formula: Price Action Murni + Support/Resistance/Supply-Demand + EMA 13/21 Retest
+         + Konfirmasi Volume Wajib + Pola Price Action + Data Derivatif (OI & CVD)
+         + Ketat Risk to Reward minimal 1:2 (SL geser ke BEP saat 1R).
+"""
+
 import math
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from config import config
 
 def calculate_ema_series(values: List[float], period: int) -> List[float]:
-    """Menghitung EMA berbasis list murni tanpa overhead memori."""
+    """Menghitung Exponential Moving Average (EMA) murni."""
     if not values:
         return []
     k = 2.0 / (period + 1.0)
@@ -12,35 +19,8 @@ def calculate_ema_series(values: List[float], period: int) -> List[float]:
         ema.append(v * k + ema[-1] * (1.0 - k))
     return ema
 
-def calculate_rsi_series(closes: List[float], period: int = 14) -> List[float]:
-    """Menghitung RSI berbasis list murni tanpa alokasi memori besar."""
-    n = len(closes)
-    if n < period + 1:
-        return [50.0] * n
-        
-    gains = [0.0]
-    losses = [0.0]
-    for i in range(1, n):
-        d = closes[i] - closes[i - 1]
-        gains.append(max(d, 0.0))
-        losses.append(max(-d, 0.0))
-        
-    rsi = []
-    for i in range(n):
-        if i < period:
-            rsi.append(50.0)
-        else:
-            avg_g = sum(gains[i - period + 1 : i + 1]) / period
-            avg_l = sum(losses[i - period + 1 : i + 1]) / period
-            if avg_l == 0:
-                rsi.append(100.0 if avg_g > 0 else 50.0)
-            else:
-                rs = avg_g / avg_l
-                rsi.append(100.0 - (100.0 / (1.0 + rs)))
-    return rsi
-
 def calculate_atr_series(highs: List[float], lows: List[float], closes: List[float], period: int = 14) -> List[float]:
-    """Menghitung ATR berbasis list murni."""
+    """Menghitung Average True Range (ATR) untuk pengukuran volatilitas."""
     n = len(closes)
     if n == 0:
         return []
@@ -58,110 +38,101 @@ def calculate_atr_series(highs: List[float], lows: List[float], closes: List[flo
             atr.append(sum(trs[i - period + 1 : i + 1]) / period)
     return atr
 
-def detect_candlestick_pattern(
-    opens: List[float], highs: List[float], lows: List[float], closes: List[float]
-) -> Dict[str, Any]:
+def detect_market_structure(highs: List[float], lows: List[float], closes: List[float]) -> Dict[str, Any]:
     """
-    Mendeteksi pola pembalikan candlestick (Reversal Candlestick):
-    - Bullish: Hammer / Pinbar bawah, Bullish Engulfing, Solid Green Bounce.
-    - Bearish: Shooting Star / Pinbar atas, Bearish Engulfing, Solid Red Rejection.
+    Menganalisis Struktur Pasar (Market Structure):
+    - Bull Market (Uptrend): Terbentuk Higher High (HH) & Higher Low (HL).
+    - Bear Market (Downtrend): Terbentuk Lower High (LH) & Lower Low (LL).
+    - Sideways (Ranging): Bergerak mendatar di dalam range (menguntungkan untuk range trading).
     """
-    if len(closes) < 3:
-        return {"pattern": "NONE", "bias": "NEUTRAL", "score_boost": 0.0, "desc": "Data candle kurang"}
+    n = len(closes)
+    if n < 30:
+        return {"structure": "SIDEWAYS", "bias": "NEUTRAL", "desc": "Data bar kurang"}
 
-    # Candle tertutup terkini (-2) dan sebelumnya (-3)
-    c_open = opens[-2]
-    c_high = highs[-2]
-    c_low = lows[-2]
-    c_close = closes[-2]
-    c_range = c_high - c_low
+    # Identifikasi swing highs dan swing lows dalam 30 bar terakhir (swing window = 3)
+    swing_highs = []
+    swing_lows = []
+    for i in range(n - 28, n - 2):
+        if highs[i] > highs[i - 1] and highs[i] > highs[i - 2] and highs[i] > highs[i + 1] and highs[i] > highs[i + 2]:
+            swing_highs.append(highs[i])
+        if lows[i] < lows[i - 1] and lows[i] < lows[i - 2] and lows[i] < lows[i + 1] and lows[i] < lows[i + 2]:
+            swing_lows.append(lows[i])
 
-    p_open = opens[-3]
-    p_close = closes[-3]
+    if len(swing_highs) >= 2 and len(swing_lows) >= 2:
+        is_hh = swing_highs[-1] > swing_highs[-2]
+        is_hl = swing_lows[-1] > swing_lows[-2]
+        is_lh = swing_highs[-1] < swing_highs[-2]
+        is_ll = swing_lows[-1] < swing_lows[-2]
 
-    if c_range <= 0:
-        return {"pattern": "NEUTRAL", "bias": "NEUTRAL", "score_boost": 0.0, "desc": "Candle doji flat"}
+        if is_hh and is_hl:
+            return {"structure": "UPTREND", "bias": "BULLISH", "desc": "Struktur Bullish (Higher High & Higher Low)"}
+        elif is_lh and is_ll:
+            return {"structure": "DOWNTREND", "bias": "BEARISH", "desc": "Struktur Bearish (Lower High & Lower Low)"}
 
-    body = abs(c_close - c_open)
-    upper_wick = c_high - max(c_open, c_close)
-    lower_wick = min(c_open, c_close) - c_low
+    return {"structure": "SIDEWAYS", "bias": "NEUTRAL", "desc": "Struktur Konsolidasi Mendatar (Range)"}
 
-    # 1. Bullish Hammer / Pinbar (Lower wick panjang >= 38%, rejection di dasar)
-    if lower_wick >= c_range * 0.38 and upper_wick <= c_range * 0.25 and c_close >= c_open:
-        return {
-            "pattern": "HAMMER",
-            "bias": "BULLISH",
-            "score_boost": 20.0,
-            "desc": f"Bullish Hammer/Pinbar (Lower Wick {(lower_wick/c_range)*100:.0f}%)"
-        }
+def find_tested_support_resistance(
+    highs: List[float], lows: List[float], closes: List[float], current_price: float
+) -> Tuple[List[float], List[float]]:
+    """
+    Menemukan level Support & Resistance yang valid sesuai materi video:
+    - Level yang sudah pernah disentuh / diuji beberapa kali (minimal 2 kali)
+      dan terbukti memicu reaksi pembalikan arah.
+    """
+    n = len(closes)
+    tested_supports = []
+    tested_resistances = []
+    if n < 40 or current_price <= 0:
+        return tested_supports, tested_resistances
 
-    # 2. Bullish Engulfing (Candle hijau memakan candle merah sebelumnya)
-    if p_close < p_open and c_close > c_open and c_close >= p_open and body >= c_range * 0.45:
-        return {
-            "pattern": "BULLISH_ENGULFING",
-            "bias": "BULLISH",
-            "score_boost": 20.0,
-            "desc": "Bullish Engulfing solid membalikkan tren"
-        }
+    tolerance = current_price * 0.0025  # Toleransi clustering 0.25%
 
-    # 3. Solid Bullish Bounce (Green candle solid di area oversold)
-    if c_close > c_open and body >= c_range * 0.50 and upper_wick <= c_range * 0.30:
-        return {
-            "pattern": "BULLISH_BOUNCE",
-            "bias": "BULLISH",
-            "score_boost": 12.0,
-            "desc": "Solid Green Reversal Bounce"
-        }
+    # Kumpulkan swing lows (potensial support) & swing highs (potensial resistance)
+    low_touches = []
+    high_touches = []
+    for i in range(max(0, n - 80), n - 2):
+        if lows[i] <= lows[i - 1] and lows[i] <= lows[i + 1]:
+            low_touches.append(lows[i])
+        if highs[i] >= highs[i - 1] and highs[i] >= highs[i + 1]:
+            high_touches.append(highs[i])
 
-    # 4. Bearish Shooting Star / Pinbar (Upper wick panjang >= 38%, rejection di puncak)
-    if upper_wick >= c_range * 0.38 and lower_wick <= c_range * 0.25 and c_close <= c_open:
-        return {
-            "pattern": "SHOOTING_STAR",
-            "bias": "BEARISH",
-            "score_boost": 20.0,
-            "desc": f"Bearish Shooting Star (Upper Wick {(upper_wick/c_range)*100:.0f}%)"
-        }
+    # Cluster level support yang diuji >= 2 kali di bawah harga saat ini
+    for l in low_touches:
+        if l < current_price:
+            count = sum(1 for other in low_touches if abs(other - l) <= tolerance)
+            if count >= 2 and not any(abs(s - l) <= tolerance for s in tested_supports):
+                tested_supports.append(l)
 
-    # 5. Bearish Engulfing (Candle merah memakan candle hijau sebelumnya)
-    if p_close > p_open and c_close < c_open and c_close <= p_open and body >= c_range * 0.45:
-        return {
-            "pattern": "BEARISH_ENGULFING",
-            "bias": "BEARISH",
-            "score_boost": 20.0,
-            "desc": "Bearish Engulfing solid membalikkan tren"
-        }
+    # Cluster level resistance yang diuji >= 2 kali di atas harga saat ini
+    for h in high_touches:
+        if h > current_price:
+            count = sum(1 for other in high_touches if abs(other - h) <= tolerance)
+            if count >= 2 and not any(abs(r - h) <= tolerance for r in tested_resistances):
+                tested_resistances.append(h)
 
-    # 6. Solid Bearish Rejection (Red candle solid di area overbought)
-    if c_close < c_open and body >= c_range * 0.50 and lower_wick <= c_range * 0.30:
-        return {
-            "pattern": "BEARISH_REJECTION",
-            "bias": "BEARISH",
-            "score_boost": 12.0,
-            "desc": "Solid Red Reversal Rejection"
-        }
-
-    return {"pattern": "NEUTRAL", "bias": "NEUTRAL", "score_boost": 0.0, "desc": "Candle netral"}
+    tested_supports.sort(reverse=True)   # Terdekat ke harga saat ini
+    tested_resistances.sort()            # Terdekat ke harga saat ini
+    return tested_supports, tested_resistances
 
 def check_signal_from_ohlcv(
     ohlcv: List[List[float]],
     available_capital: float = 10.0,
     leverage: int = 10,
-    ls_data: Optional[Dict[str, float]] = None
+    derivatives_data: Optional[Dict[str, Any]] = None,
+    ls_data: Optional[Dict[str, Any]] = None
 ) -> Optional[Dict[str, Any]]:
     """
-    Strategi Scalping Terpadu RSI 30 Buy & RSI 70 Sell + Candlestick Reversal & EMA Cross:
-    1. RSI Mean-Reversion Trigger:
-       - BUY saat RSI <= config.RSI_BUY_THRESHOLD (Area oversold / pantulan dari 30).
-       - SELL saat RSI >= config.RSI_SELL_THRESHOLD (Area overbought / penolakan dari 70).
-    2. Candlestick Reversal Confirmation:
-       - BUY didukung Hammer / Bullish Engulfing / Solid Green Bounce (bukan candle dump merah).
-       - SELL didukung Shooting Star / Bearish Engulfing / Solid Red Rejection (bukan candle pump hijau).
-    3. EMA Cross / Reclaim Confirmation:
-       - BUY: Harga menembus ke atas EMA 9 (Reclaim) ATAU Golden Cross (EMA 9 cross di atas EMA 21).
-       - SELL: Harga menembus ke bawah EMA 9 (Breakdown) ATAU Death Cross (EMA 9 cross di bawah EMA 21).
-    4. Sentimen Arus Pasar (Long/Short Ratio): Memastikan tidak melawan arus dominan.
-    5. Dynamic Leverage 10x - 20x sesuai skor analisis.
-    6. Risk to Reward 1:2 (SL 1.0%, TP 2.0%) dengan resiko 0.5% portofolio.
+    Evaluasi sinyal lengkap berdasarkan Master Blueprint Akademi Crypto (Kalimasada):
+    1. Filter Tren Makro (EMA 200 & Struktur Pasar HH/HL vs LH/LL).
+    2. EMA 13 & 21 Retest Bounce: Titik beli ideal saat pullback ke EMA 13 & 21.
+    3. Support / Demand & Resistance / Supply Tested Zones.
+    4. Analisis Volume Wajib: Volume expansion (menghindari artificial demand).
+    5. Pola Price Action:
+       - Liquidity Sweep (Stop Hunting & Reclaim)
+       - Breakout and Retest (RBS / SBR)
+       - Compression Breakout (Squeeze)
+    6. Data Derivatif: Open Interest (OI) Delta & Taker CVD Delta.
+    7. Manajemen Risiko Ketat: RR 1:2 dengan SL ke BEP saat mencapai 1R.
     """
     if len(ohlcv) < config.EMA_TREND + 5:
         return None
@@ -172,185 +143,231 @@ def check_signal_from_ohlcv(
     closes = [c[4] for c in ohlcv]
     volumes = [c[5] for c in ohlcv]
 
-    ema_trend = calculate_ema_series(closes, config.EMA_TREND)
-    ema_fast = calculate_ema_series(closes, config.EMA_FAST)
-    ema_slow = calculate_ema_series(closes, config.EMA_SLOW)
-    rsi_series = calculate_rsi_series(closes, config.RSI_PERIOD)
+    ema13_series = calculate_ema_series(closes, config.EMA_FAST)  # EMA 13
+    ema21_series = calculate_ema_series(closes, config.EMA_SLOW)  # EMA 21
+    ema200_series = calculate_ema_series(closes, config.EMA_TREND) # EMA 200
     atr_series = calculate_atr_series(highs, lows, closes, config.ATR_PERIOD)
 
-    # Menggunakan bar tertutup (-2) dan bar sebelumnya (-3)
-    c_prev_fast = ema_fast[-3]
-    c_prev_slow = ema_slow[-3]
-    c_curr_fast = ema_fast[-2]
-    c_curr_slow = ema_slow[-2]
+    # Candle tertutup terkini (-2) dan candle sebelumnya (-3)
+    c_open = opens[-2]
+    c_high = highs[-2]
+    c_low = lows[-2]
+    c_close = closes[-2]
+    c_vol = volumes[-2]
+    
+    p_open = opens[-3]
+    p_close = closes[-3]
+    p_high = highs[-3]
+    p_low = lows[-3]
 
-    curr_open = opens[-2]
-    curr_high = highs[-2]
-    curr_low = lows[-2]
-    curr_close = closes[-2]
-    curr_trend = ema_trend[-2]
-    curr_vol = volumes[-2]
-    rsi_val = rsi_series[-2]
-    atr_val = atr_series[-2]
+    ema13 = ema13_series[-2]
+    ema21 = ema21_series[-2]
+    ema200 = ema200_series[-2]
+    atr = atr_series[-2]
     latest_price = closes[-1]
 
-    candle_range = curr_high - curr_low
-    upper_wick = curr_high - max(curr_open, curr_close)
-    lower_wick = min(curr_open, curr_close) - curr_low
+    c_range = c_high - c_low
+    if c_range <= 0:
+        return None
+    lower_wick = min(c_open, c_close) - c_low
+    upper_wick = c_high - max(c_open, c_close)
+    body = abs(c_close - c_open)
 
-    # 1. Deteksi Pola Candlestick Reversal
-    candle_info = detect_candlestick_pattern(opens, highs, lows, closes)
-    candle_bias = candle_info.get("bias", "NEUTRAL")
-    candle_pat = candle_info.get("pattern", "NEUTRAL")
+    # Rata-rata volume 20 candle terakhir
+    avg_vol = sum(volumes[-22:-2]) / 20.0 if len(volumes) >= 22 else c_vol
+    has_volume_expansion = (c_vol >= avg_vol * 1.0)
+    has_strong_volume = (c_vol >= avg_vol * config.VOLUME_SPIKE_FACTOR)
 
-    # 2. Cek Crossover & Posisi EMA 9 vs EMA 21
-    golden_cross = (c_prev_fast <= c_prev_slow) and (c_curr_fast > c_curr_slow)
-    death_cross = (c_prev_fast >= c_prev_slow) and (c_curr_fast < c_curr_slow)
+    # 1. Analisis Struktur Pasar & Level S&R Teruji
+    structure_info = detect_market_structure(highs, lows, closes)
+    structure = structure_info["structure"]
+    tested_s, tested_r = find_tested_support_resistance(highs, lows, closes, c_close)
 
-    bullish_ema = golden_cross or (curr_close >= c_curr_fast) or (
-        candle_bias == "BULLISH" and curr_close > curr_open and curr_close > closes[-3]
-    )
-    bearish_ema = death_cross or (curr_close <= c_curr_fast) or (
-        candle_bias == "BEARISH" and curr_close < curr_open and curr_close < closes[-3]
-    )
+    nearest_support = tested_s[0] if tested_s else c_close * 0.993
+    nearest_resistance = tested_r[0] if tested_r else c_close * 1.007
 
-    # 3. Volume Support Filter: Volume candle pemicu wajib aktif
-    avg_vol = sum(volumes[-22:-2]) / 20.0 if len(volumes) >= 22 else curr_vol
-    has_volume_support = (curr_vol >= avg_vol * 0.85)
+    # 2. Data Derivatif
+    deriv = derivatives_data or ls_data or {
+        "long_pct": 50.0, "short_pct": 50.0, "ratio": 1.0,
+        "oi_delta": 0.0, "oi_trend": "NEUTRAL", "taker_ratio": 1.0, "cvd_bias": "NEUTRAL"
+    }
+    ls_ratio = deriv.get("ratio", 1.0)
+    oi_trend = deriv.get("oi_trend", "NEUTRAL")
+    taker_ratio = deriv.get("taker_ratio", 1.0)
 
-    # 4. Sentimen Arus Pasar (Long/Short Flow)
-    ls_info = ls_data or {"long_pct": 50.0, "short_pct": 50.0, "ratio": 1.0}
-    ls_ratio = ls_info.get("ratio", 1.0)
-    long_pct = ls_info.get("long_pct", 50.0)
-    short_pct = ls_info.get("short_pct", 50.0)
+    # Filter Anti-Melawan Arus
     has_ls_support_buy = ls_ratio >= config.LS_RATIO_MIN_BUY
     has_ls_support_sell = ls_ratio <= config.LS_RATIO_MAX_SELL
 
     signal_side = None
+    setup_name = ""
+    setup_desc = ""
+    score = 50.0
 
-    # Syarat BUY / LONG:
-    # 1. RSI oversold di rentang 20 - 30 (config.RSI_BUY_MIN s/d config.RSI_BUY_MAX)
-    # 2. Candlestick reversal bullish ATAU candle hijau solid tanpa upper wick besar
-    # 3. EMA konfirmasi: harga menembus di atas EMA 9, Golden Cross, atau bounce hammer kuat
-    # 4. Volume aktif dan sentimen L/S tidak melawan arus short ekstrem
-    is_valid_buy_candle = (candle_bias == "BULLISH") or (curr_close > curr_open and upper_wick <= candle_range * 0.35)
-    is_rsi_buy = (config.RSI_BUY_MIN <= rsi_val <= config.RSI_BUY_MAX)
-    if is_rsi_buy and is_valid_buy_candle and bullish_ema and \
-       has_volume_support and has_ls_support_buy:
-        signal_side = "BUY"
+    # -------------------------------------------------------------
+    # SETUP A: LIQUIDITY SWEEP (STOP HUNTING & RECLAIM)
+    # Harga menyapu batas support/resistance untuk ambil likuiditas, lalu ditarik masuk kembali
+    # -------------------------------------------------------------
+    # Bullish Sweep: Tusuk support lalu reclaim di atas support dengan ekor bawah panjang
+    if c_low < nearest_support and c_close >= nearest_support and (lower_wick / c_range >= 0.35) and c_close >= c_open:
+        if has_volume_expansion and has_ls_support_buy:
+            signal_side = "BUY"
+            setup_name = "LIQUIDITY_SWEEP"
+            setup_desc = f"Liquidity Sweep di Support {nearest_support:.4f} (Stop Hunting Reclaimed)"
+            score = 88.0
 
-    # Syarat SELL / SHORT:
-    # 1. RSI overbought di rentang 70 - 80 (config.RSI_SELL_MIN s/d config.RSI_SELL_MAX)
-    # 2. Candlestick reversal bearish ATAU candle merah solid tanpa lower wick besar
-    # 3. EMA konfirmasi: harga breakdown di bawah EMA 9, Death Cross, atau rejection shooting star
-    # 4. Volume aktif dan sentimen L/S tidak melawan arus long ekstrem
-    is_valid_sell_candle = (candle_bias == "BEARISH") or (curr_close < curr_open and lower_wick <= candle_range * 0.35)
-    is_rsi_sell = (config.RSI_SELL_MIN <= rsi_val <= config.RSI_SELL_MAX)
-    if is_rsi_sell and is_valid_sell_candle and bearish_ema and \
-       has_volume_support and has_ls_support_sell:
-        signal_side = "SELL"
+    # Bearish Sweep: Tusuk resistance lalu reclaim di bawah resistance dengan ekor atas panjang
+    elif c_high > nearest_resistance and c_close <= nearest_resistance and (upper_wick / c_range >= 0.35) and c_close <= c_open:
+        if has_volume_expansion and has_ls_support_sell:
+            signal_side = "SELL"
+            setup_name = "LIQUIDITY_SWEEP"
+            setup_desc = f"Liquidity Sweep di Resistance {nearest_resistance:.4f} (Stop Hunting Reclaimed)"
+            score = 88.0
+
+    # -------------------------------------------------------------
+    # SETUP B: EMA 13 & 21 RETEST BOUNCE (Sesuai Poin 7 Video)
+    # Tren naik/turun sehat, harga koreksi menyentuh EMA 13 & 21 lalu memantul
+    # -------------------------------------------------------------
+    if not signal_side:
+        # Bullish EMA Bounce: Di atas EMA 200, EMA 13 > EMA 21, candle menyentuh EMA 13/21 lalu ditutup hijau memantul
+        if c_close > ema200 and ema13 >= ema21 and c_low <= max(ema13, ema21) * 1.001 and c_close > max(ema13, ema21):
+            if c_close > c_open and has_volume_expansion and has_ls_support_buy:
+                signal_side = "BUY"
+                setup_name = "EMA13_21_BOUNCE"
+                setup_desc = f"Pullback Retest & Bounce di garis EMA 13/21 ({ema13:.4f})"
+                score = 82.0
+
+        # Bearish EMA Bounce: Di bawah EMA 200, EMA 13 < EMA 21, candle menyentuh EMA 13/21 lalu ditutup merah menolak
+        elif c_close < ema200 and ema13 <= ema21 and c_high >= min(ema13, ema21) * 0.999 and c_close < min(ema13, ema21):
+            if c_close < c_open and has_volume_expansion and has_ls_support_sell:
+                signal_side = "SELL"
+                setup_name = "EMA13_21_BOUNCE"
+                setup_desc = f"Retest Rejection di garis EMA 13/21 ({ema13:.4f})"
+                score = 82.0
+
+    # -------------------------------------------------------------
+    # SETUP C: BREAKOUT AND RETEST (Sesuai Poin 8 Video)
+    # Menunggu retest batas lama yang berganti fungsi (RBS / SBR)
+    # -------------------------------------------------------------
+    if not signal_side and len(tested_s) > 0 and len(tested_r) > 0:
+        # Bullish RBS: Resistance yang baru ditembus diuji kembali menjadi support
+        if p_close < nearest_resistance and c_high > nearest_resistance:
+            # Terjadi penembusan dengan volume kuat
+            if has_strong_volume and c_close > c_open and has_ls_support_buy and c_close > ema200:
+                signal_side = "BUY"
+                setup_name = "BREAKOUT_AND_RETEST"
+                setup_desc = f"Breakout Level Resistance {nearest_resistance:.4f} didukung Volume Kuat"
+                score = 78.0
+
+        # Bearish SBR: Support yang baru ditembus diuji kembali menjadi resistance
+        elif p_close > nearest_support and c_low < nearest_support:
+            if has_strong_volume and c_close < c_open and has_ls_support_sell and c_close < ema200:
+                signal_side = "SELL"
+                setup_name = "BREAKOUT_AND_RETEST"
+                setup_desc = f"Breakdown Level Support {nearest_support:.4f} didukung Volume Kuat"
+                score = 78.0
+
+    # -------------------------------------------------------------
+    # SETUP D: COMPRESSION BREAKOUT (Akumulasi Padat Squeeze)
+    # Volatilitas menyempit lalu meledak menembus batas dengan lonjakan volume
+    # -------------------------------------------------------------
+    if not signal_side and len(atr_series) >= 10:
+        recent_ranges = [highs[k] - lows[k] for k in range(-7, -2)]
+        avg_range = sum(recent_ranges) / len(recent_ranges) if recent_ranges else atr
+        # Jika rentang beberapa bar sebelumnya menyempit padat (volatilitas rendah)
+        if avg_range <= atr * 0.65 and has_strong_volume:
+            if c_close > c_open and c_close > max(opens[-4:-2] + closes[-4:-2]) and c_close > ema21 and has_ls_support_buy:
+                signal_side = "BUY"
+                setup_name = "COMPRESSION_BREAKOUT"
+                setup_desc = "Compression Breakout (Akumulasi padat pecah ke atas)"
+                score = 80.0
+            elif c_close < c_open and c_close < min(opens[-4:-2] + closes[-4:-2]) and c_close < ema21 and has_ls_support_sell:
+                signal_side = "SELL"
+                setup_name = "COMPRESSION_BREAKOUT"
+                setup_desc = "Compression Breakdown (Distribusi padat pecah ke bawah)"
+                score = 80.0
 
     if not signal_side:
         return None
 
-    # 1. Hitung skor kualitas sinyal (Kombinasi RSI Ekstrem 20-30/70-80 + Candlestick Reversal + EMA Cross + Volume)
-    base_score = 50.0
+    # Tambahan Bobot Skor dari Data Derivatif (Open Interest & CVD Taker)
     if signal_side == "BUY":
-        # Rentang RSI 20 - 30: Semakin dalam di rentang 20-30, semakin tinggi potensi pantulan
-        rsi_boost = max(0.0, (config.RSI_BUY_MAX - rsi_val) * 2.5)
-        base_score += min(25.0, rsi_boost)
-        base_score += candle_info.get("score_boost", 10.0)
-        base_score += 15.0 if golden_cross else 8.0
-        if curr_vol >= avg_vol * 1.15:
-            base_score += 8.0
-        if ls_ratio >= 1.05:
-            base_score += 7.0
+        if oi_trend == "EXPANDING":  # Harga naik + OI naik = Bullish Sehat (Modal Baru Masuk)
+            score += 8.0
+        if taker_ratio >= 1.05:     # CVD Positif (Pembeli agresif)
+            score += 6.0
+        if structure == "UPTREND":
+            score += 6.0
     elif signal_side == "SELL":
-        # Rentang RSI 70 - 80: Semakin tinggi di rentang 70-80, semakin tinggi potensi penolakan
-        rsi_boost = max(0.0, (rsi_val - config.RSI_SELL_MIN) * 2.5)
-        base_score += min(25.0, rsi_boost)
-        base_score += candle_info.get("score_boost", 10.0)
-        base_score += 15.0 if death_cross else 8.0
-        if curr_vol >= avg_vol * 1.15:
-            base_score += 8.0
-        if ls_ratio <= 0.95:
-            base_score += 7.0
+        if oi_trend == "EXPANDING":  # Harga turun + OI naik = Bearish Kuat (Penjual Agresif Masuk)
+            score += 8.0
+        if taker_ratio <= 0.95:     # CVD Negatif (Penjual agresif)
+            score += 6.0
+        if structure == "DOWNTREND":
+            score += 6.0
 
-    score = min(100.0, round(base_score, 2))
+    final_score = min(100.0, round(score, 2))
 
-    # 2. Dynamic Leverage Disesuaikan dengan Rasio Hasil Analisis (10x s/d 20x)
+    # Dynamic Leverage (10x - 20x sesuai skor)
     dynamic_leverage = config.LEVERAGE
     if config.DYNAMIC_LEVERAGE_ENABLED:
-        if score >= 82 and candle_pat != "NEUTRAL":
+        if final_score >= 85:
             dynamic_leverage = 20
-        elif score >= 72:
+        elif final_score >= 75:
             dynamic_leverage = 15
         else:
             dynamic_leverage = 10
 
-    # 3. Model Risiko Portofolio 0.5% (Risk-Budget Sizing):
-    # SL = 1.0%, kerugian maksimal tepat 0.5% dari saldo portofolio.
-    # TP = 2.0% (RRR 1:2), keuntungan tepat 2x risiko (1.0% dari saldo portofolio).
-    sl_percent = config.SL_PERCENT  # 1.0%
-    tp_percent = sl_percent * config.RR_RATIO  # 2.0% (Risk to Reward 1:2)
-    risk_budget_usd = available_capital * config.RISK_PORTFOLIO_PERCENT
-    ideal_notional = risk_budget_usd / sl_percent
+    # -------------------------------------------------------------
+    # MANAJEMEN RISIKO KETAT (Risk-to-Reward 1:2)
+    # SL di bawah/atas level invalidasi support/swing low
+    # TP = minimal 2x jarak SL
+    # BEP Trigger = 1R (saat mencapai jarak 1x SL, SL digeser ke BEP)
+    # -------------------------------------------------------------
+    sl_percent = config.SL_PERCENT  # 0.7%
+    tp_percent = config.TP_PERCENT  # 1.4% (RRR 1:2)
 
-    # Pastikan memenuhi batas minimum notional Binance ($5.0) dan batas aman ($5.15)
+    entry_price = latest_price
+    sl_dist = entry_price * sl_percent
+    tp_dist = entry_price * tp_percent
+
+    sl_price = entry_price - sl_dist if signal_side == "BUY" else entry_price + sl_dist
+    tp_price = entry_price + tp_dist if signal_side == "BUY" else entry_price - tp_dist
+    bep_trigger_price = entry_price + sl_dist if signal_side == "BUY" else entry_price - sl_dist
+
+    risk_budget_usd = available_capital * config.RISK_PORTFOLIO_PERCENT  # 0.5% modal
+    ideal_notional = risk_budget_usd / sl_percent
     notional = max(config.MIN_NOTIONAL + 0.15, ideal_notional)
     if available_capital < 20.0:
         notional = min(notional, config.MAX_ORDER_NOTIONAL)
-
-    margin_required = notional / dynamic_leverage
-    qty = notional / latest_price
-
-    if signal_side == "BUY":
-        entry_price = latest_price
-        sl_price = entry_price * (1.0 - sl_percent)
-        tp_price = entry_price * (1.0 + tp_percent)
-        if golden_cross:
-            ema_status = "Golden Cross (EMA 9 > 21)"
-        elif curr_close >= c_curr_fast:
-            ema_status = "Reclaim EMA 9"
-        else:
-            ema_status = "Oversold Dip Bounce"
-    else:
-        entry_price = latest_price
-        sl_price = entry_price * (1.0 + sl_percent)
-        tp_price = entry_price * (1.0 - tp_percent)
-        if death_cross:
-            ema_status = "Death Cross (EMA 9 < 21)"
-        elif curr_close <= c_curr_fast:
-            ema_status = "Breakdown EMA 9"
-        else:
-            ema_status = "Overbought Peak Rejection"
 
     return {
         "side": signal_side,
         "entry_price": entry_price,
         "sl_price": sl_price,
         "tp_price": tp_price,
-        "qty": qty,
-        "notional": notional,
-        "dynamic_leverage": dynamic_leverage,
-        "margin_required": round(margin_required, 4),
-        "risk_usd": round(notional * sl_percent, 4),
-        "reward_usd": round(notional * tp_percent, 4),
+        "bep_trigger_price": bep_trigger_price,
         "sl_percent": round(sl_percent * 100, 2),
         "tp_percent": round(tp_percent * 100, 2),
-        "rsi": round(rsi_val, 2),
-        "ema_trend": round(curr_trend, 4),
-        "atr": round(atr_val, 4),
-        "score": score,
-        "candlestick_pattern": candle_pat,
-        "ema_status": ema_status,
-        "n_pattern": candle_pat,  # Kompatibilitas field lama
-        "n_desc": f"{candle_info.get('desc', '')} + {ema_status}",
+        "rr_ratio": config.RR_RATIO,
+        "dynamic_leverage": dynamic_leverage,
+        "notional": round(notional, 2),
+        "score": final_score,
+        "setup_name": setup_name,
+        "setup_desc": setup_desc,
+        "market_structure": structure,
+        "ema13": round(ema13, 4),
+        "ema21": round(ema21, 4),
+        "ema200": round(ema200, 4),
+        "nearest_support": round(nearest_support, 4),
+        "nearest_resistance": round(nearest_resistance, 4),
+        "oi_trend": oi_trend,
+        "taker_ratio": taker_ratio,
         "ls_ratio": ls_ratio,
-        "long_pct": long_pct,
-        "short_pct": short_pct
+        "vol_ratio": round(c_vol / avg_vol, 2) if avg_vol > 0 else 1.0
     }
 
 def check_signal(ohlcv: List[List[float]], available_capital: float = 10.0, leverage: int = 10, ls_data: Optional[Dict[str, float]] = None) -> Optional[Dict[str, Any]]:
-    """Fungsi utama pemeriksaan sinyal scalping 1m berbasis list OHLCV native."""
-    return check_signal_from_ohlcv(ohlcv, available_capital, leverage, ls_data)
+    """Alias kompatibilitas ke check_signal_from_ohlcv."""
+    return check_signal_from_ohlcv(ohlcv, available_capital, leverage, derivatives_data=ls_data)
+

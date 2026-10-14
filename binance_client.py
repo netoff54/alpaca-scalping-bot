@@ -593,6 +593,60 @@ class BinanceFuturesClient:
         except Exception:
             return {"long_pct": 50.0, "short_pct": 50.0, "ratio": 1.0}
 
+    def fetch_derivatives_data(self, symbol: str, period: str = "5m") -> Dict[str, Any]:
+        """
+        Mengambil data derivatif lengkap sesuai strategi Akademi Crypto (Kalimasada):
+        1. Open Interest (OI Delta): Mendeteksi aliran modal baru vs short covering / liquidation.
+        2. Taker Buy/Sell Ratio (CVD proxy): Mengukur agresivitas volume pasar.
+        3. Global Long/Short Ratio: Menghindari melawan arus mayoritas akun.
+        """
+        res = {
+            "long_pct": 50.0,
+            "short_pct": 50.0,
+            "ratio": 1.0,
+            "oi_delta": 0.0,
+            "oi_trend": "NEUTRAL",
+            "taker_ratio": 1.0,
+            "cvd_bias": "NEUTRAL"
+        }
+        if self.is_banned() or self.is_scan_throttled():
+            return res
+
+        # 1. Global Long/Short Ratio
+        ls_info = self.fetch_long_short_ratio(symbol, period=period)
+        res["long_pct"] = ls_info.get("long_pct", 50.0)
+        res["short_pct"] = ls_info.get("short_pct", 50.0)
+        res["ratio"] = ls_info.get("ratio", 1.0)
+
+        # 2. Open Interest History (2 baris terakhir untuk delta kenaikan modal)
+        try:
+            url_oi = f"{self.base_url}/futures/data/openInterestHist?symbol={symbol}&period={period}&limit=2"
+            r_oi = self.session.get(url_oi, timeout=3)
+            data_oi = r_oi.json()
+            if isinstance(data_oi, list) and len(data_oi) >= 2:
+                prev_oi = float(data_oi[-2].get("sumOpenInterest", 0.0))
+                curr_oi = float(data_oi[-1].get("sumOpenInterest", 0.0))
+                if prev_oi > 0:
+                    d_pct = (curr_oi - prev_oi) / prev_oi
+                    res["oi_delta"] = round(d_pct * 100, 2)
+                    res["oi_trend"] = "EXPANDING" if d_pct > 0.003 else ("CONTRACTING" if d_pct < -0.003 else "STABLE")
+        except Exception:
+            pass
+
+        # 3. Taker Buy/Sell Volume Ratio (CVD Delta)
+        try:
+            url_taker = f"{self.base_url}/futures/data/takerlongshortRatio?symbol={symbol}&period={period}&limit=1"
+            r_taker = self.session.get(url_taker, timeout=3)
+            data_taker = r_taker.json()
+            if isinstance(data_taker, list) and len(data_taker) > 0:
+                t_ratio = float(data_taker[-1].get("buySellRatio", 1.0))
+                res["taker_ratio"] = round(t_ratio, 4)
+                res["cvd_bias"] = "BULLISH_AGGRESSIVE" if t_ratio >= 1.05 else ("BEARISH_AGGRESSIVE" if t_ratio <= 0.95 else "NEUTRAL")
+        except Exception:
+            pass
+
+        return res
+
     def fetch_klines(self, symbol: str, interval: str = "5m", limit: int = 220) -> Optional[List[List[float]]]:
         if self.is_banned() or self.is_scan_throttled():
             return None

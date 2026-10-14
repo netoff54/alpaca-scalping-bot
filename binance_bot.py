@@ -120,14 +120,18 @@ class BinanceScalper:
                 entry_price = pos.get("entry_price", 0.0)
                 notional = contracts * entry_price
                 
-                # Pertahankan SL/TP target
+                # Pertahankan SL/TP target dan status BEP
                 if self.active_position and self.active_position.get("symbol") == symbol:
                     sl_price = self.active_position.get("sl_price", entry_price * (1.0 - config.SL_PERCENT if side == "buy" else 1.0 + config.SL_PERCENT))
                     tp_price = self.active_position.get("tp_price", entry_price * (1.0 + config.TP_PERCENT if side == "buy" else 1.0 - config.TP_PERCENT))
+                    bep_trigger_price = self.active_position.get("bep_trigger_price", entry_price * (1.0 + config.BEP_PROFIT_TRIGGER if side == "buy" else 1.0 - config.BEP_PROFIT_TRIGGER))
+                    bep_activated = self.active_position.get("bep_activated", False)
                     opened_at = self.active_position.get("opened_at", time.time())
                 else:
                     sl_price = entry_price * (1.0 - config.SL_PERCENT) if side == "buy" else entry_price * (1.0 + config.SL_PERCENT)
                     tp_price = entry_price * (1.0 + config.TP_PERCENT) if side == "buy" else entry_price * (1.0 - config.TP_PERCENT)
+                    bep_trigger_price = entry_price * (1.0 + config.BEP_PROFIT_TRIGGER) if side == "buy" else entry_price * (1.0 - config.BEP_PROFIT_TRIGGER)
+                    bep_activated = False
                     opened_at = time.time()
                 
                 self.active_position = {
@@ -137,6 +141,8 @@ class BinanceScalper:
                     "qty": contracts,
                     "sl_price": sl_price,
                     "tp_price": tp_price,
+                    "bep_trigger_price": bep_trigger_price,
+                    "bep_activated": bep_activated,
                     "opened_at": opened_at,
                     "notional": notional
                 }
@@ -294,12 +300,13 @@ class BinanceScalper:
                     lows = [c[3] for c in ohlcv]
                     latest_price = closes[-1]
 
-                    # Ambil data sentimen arus akun Long vs Short global (TF 5m)
-                    ls_data = self.client.fetch_long_short_ratio(sym, period="5m")
-                    sig = strategy.check_signal_from_ohlcv(ohlcv, available_capital=cap, leverage=config.LEVERAGE, ls_data=ls_data)
+                    # Ambil data derivatif: Global L/S ratio, Open Interest trend, Taker CVD ratio
+                    deriv_data = self.client.fetch_derivatives_data(sym, period="5m")
+                    sig = strategy.check_signal_from_ohlcv(ohlcv, available_capital=cap, leverage=config.LEVERAGE, derivatives_data=deriv_data)
                     
                     ema_trend = strategy.calculate_ema_series(closes, config.EMA_TREND)[-2]
-                    rsi_val = strategy.calculate_rsi_series(closes, config.RSI_PERIOD)[-2]
+                    ema13_val = strategy.calculate_ema_series(closes, config.EMA_FAST)[-2]
+                    ema21_val = strategy.calculate_ema_series(closes, config.EMA_SLOW)[-2]
                     atr_val = strategy.calculate_atr_series(highs, lows, closes, config.ATR_PERIOD)[-2]
                     is_bullish = closes[-2] > ema_trend
                     
@@ -314,14 +321,19 @@ class BinanceScalper:
                         "price": latest_price,
                         "vol_24h_m": round(q_vol / 1_000_000, 2),
                         "trend": "BULLISH" if is_bullish else "BEARISH",
-                        "rsi": round(rsi_val, 2),
+                        "market_structure": sig.get("market_structure") if sig else ("UPTREND" if is_bullish else "DOWNTREND"),
+                        "ema13": round(ema13_val, 4),
+                        "ema21": round(ema21_val, 4),
+                        "ema200": round(ema_trend, 4),
                         "atr": round(atr_val, 4),
-                        "long_pct": ls_data.get("long_pct", 50.0),
-                        "short_pct": ls_data.get("short_pct", 50.0),
-                        "ls_ratio": ls_data.get("ratio", 1.0),
-                        "candlestick_pattern": sig.get("candlestick_pattern") if sig else "NONE",
-                        "ema_status": sig.get("ema_status") if sig else "NONE",
-                        "n_pattern": sig.get("n_pattern") if sig else "NONE",
+                        "long_pct": deriv_data.get("long_pct", 50.0),
+                        "short_pct": deriv_data.get("short_pct", 50.0),
+                        "ls_ratio": deriv_data.get("ratio", 1.0),
+                        "oi_trend": deriv_data.get("oi_trend", "NEUTRAL"),
+                        "taker_ratio": deriv_data.get("taker_ratio", 1.0),
+                        "setup_name": sig.get("setup_name") if sig else "NONE",
+                        "setup_desc": sig.get("setup_desc") if sig else "NONE",
+                        "score": sig.get("score", 50.0) if sig else 50.0,
                         "signal": sig
                     }
                     results.append(coin_data)
@@ -344,14 +356,7 @@ class BinanceScalper:
             
             # Sinyal aktif fresh langsung dari batch rotasi detik ini
             self.active_signals = sorted(signals, key=lambda x: x.get("score", 0), reverse=True)
-            
-            def _rsi_dist(item):
-                r = item.get("rsi", 50.0)
-                d_buy = 0.0 if (config.RSI_BUY_MIN <= r <= config.RSI_BUY_MAX) else (config.RSI_BUY_MIN - r if r < config.RSI_BUY_MIN else r - config.RSI_BUY_MAX)
-                d_sell = 0.0 if (config.RSI_SELL_MIN <= r <= config.RSI_SELL_MAX) else (config.RSI_SELL_MIN - r if r < config.RSI_SELL_MIN else r - config.RSI_SELL_MAX)
-                return min(d_buy, d_sell)
-
-            self.watchlist = sorted(results, key=_rsi_dist)[:8]
+            self.watchlist = sorted(results, key=lambda x: x.get("score", 50.0), reverse=True)[:8]
             
             self.last_scan_duration_sec = round(time.time() - t_start, 2)
             self.last_scan_time = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -439,6 +444,7 @@ class BinanceScalper:
                 "qty": formatted_qty,
                 "sl_price": sig["sl_price"],
                 "tp_price": sig["tp_price"],
+                "bep_trigger_price": sig.get("bep_trigger_price", 0.0),
                 "leverage": dynamic_leverage,
                 "risk_usd": sig.get("risk_usd", 0.05),
                 "reward_usd": sig.get("reward_usd", 0.10),
@@ -462,6 +468,8 @@ class BinanceScalper:
                             "qty": formatted_qty,
                             "sl_price": sig["sl_price"],
                             "tp_price": sig["tp_price"],
+                            "bep_trigger_price": sig.get("bep_trigger_price", 0.0),
+                            "bep_activated": False,
                             "leverage": dynamic_leverage,
                             "risk_usd": sig.get("risk_usd", 0.05),
                             "reward_usd": sig.get("reward_usd", 0.10),
@@ -558,95 +566,14 @@ class BinanceScalper:
                 console.log(f"[red]Gagal menutup posisi: {e2}[/red]")
                 return False
 
-    def check_market_reversal(self, symbol: str, side: str, pnl_pct: float) -> Tuple[bool, str]:
-        """
-        Mendeteksi pembalikan arah candlestick & indikator secara fleksibel:
-        1. Jika posisi dalam kondisi PROFIT (>= +0.3%):
-           - Muncul candle penolakan / reversal wick (shooting star / hammer)
-           - EMA 9 memotong balik EMA 21
-           - RSI kehilangan momentum (<48 untuk buy / >52 untuk sell)
-           -> Segera Take Profit lebih awal! Jangan kaku menunggu full TP atau terseret balik ke SL.
-        2. Jika posisi dalam kondisi MINUS / BREAK-EVEN:
-           - Candlestick breakdown dan konfirmasi pembalikan arah di bawah EMA 21
-           -> Cut loss kecil lebih awal sebelum menyentuh SL penuh (-1.0%).
-        """
-        try:
-            ohlcv = self.client.fetch_klines(symbol, interval="1m", limit=30)
-            if not ohlcv or len(ohlcv) < 22:
-                return False, ""
-
-            closes = [c[4] for c in ohlcv]
-            opens = [c[1] for c in ohlcv]
-            highs = [c[2] for c in ohlcv]
-            lows = [c[3] for c in ohlcv]
-
-            c_prev_close = closes[-3]
-            c_open = opens[-2]
-            c_close = closes[-2]
-            c_high = highs[-2]
-            c_low = lows[-2]
-            c_range = c_high - c_low
-
-            ema9 = strategy.calculate_ema_series(closes, 9)
-            ema21 = strategy.calculate_ema_series(closes, 21)
-            rsi = strategy.calculate_rsi_series(closes, 14)[-2]
-
-            # 1. Analisis untuk posisi BUY (Long)
-            if side == "buy":
-                # A. KONDISI PROFIT (>= +0.3%): Amankan profit jika ada tanda pembalikan turun
-                if pnl_pct >= config.REVERSAL_PROFIT_TRIGGER:
-                    # Sinyal Reversal 1: Upper rejection wick pada puncak (Shooting star / Bull trap)
-                    if c_range > 0 and (c_high - max(c_open, c_close)) >= (c_range * 0.45) and c_close < c_open:
-                        return True, f"Candle Rejection di puncak (Upper Wick {((c_high - c_open)/c_range)*100:.0f}%)"
-                    
-                    # Sinyal Reversal 2: EMA 9 memotong ke bawah EMA 21 (Death Cross 1m)
-                    if ema9[-2] < ema21[-2] and ema9[-3] >= ema21[-3]:
-                        return True, "EMA 9 Death Cross ke bawah EMA 21 pada TF 1m"
-
-                    # Sinyal Reversal 3: RSI mencapai target overbought (>= 70.0) dan mulai berbalik turun
-                    if rsi >= config.RSI_SELL_MIN and c_close < c_open:
-                        return True, f"RSI jenuh beli overbought ({rsi:.1f} >= {config.RSI_SELL_MIN}) & candle berbalik turun"
-
-                    # Sinyal Reversal 4: Bearish Engulfing solid
-                    if c_close < c_open and c_close < c_prev_close and (c_open - c_close) >= (c_range * 0.65):
-                        return True, "Candle Bearish Engulfing solid membalikkan tren"
-
-                # B. KONDISI MINUS: Cut loss dini jika terjadi pembalikan tren terkonfirmasi
-                elif pnl_pct < -0.002:
-                    if ema9[-2] < ema21[-2] and c_close < ema21[-2] and c_close < c_open:
-                        return True, "Breakdown terkonfirmasi di bawah EMA 21 (Cut loss dini sebelum SL 1%)"
-
-            # 2. Analisis untuk posisi SELL (Short)
-            elif side == "sell":
-                # A. KONDISI PROFIT (>= +0.3%): Amankan profit jika ada tanda pembalikan naik
-                if pnl_pct >= config.REVERSAL_PROFIT_TRIGGER:
-                    # Sinyal Reversal 1: Lower rejection wick di dasar (Hammer / Buyer absorption)
-                    if c_range > 0 and (min(c_open, c_close) - c_low) >= (c_range * 0.45) and c_close > c_open:
-                        return True, f"Candle Rejection di dasar (Lower Wick {((c_close - c_low)/c_range)*100:.0f}%)"
-                    
-                    # Sinyal Reversal 2: EMA 9 memotong ke atas EMA 21 (Golden Cross 1m)
-                    if ema9[-2] > ema21[-2] and ema9[-3] <= ema21[-3]:
-                        return True, "EMA 9 Golden Cross ke atas EMA 21 pada TF 1m"
-
-                    # Sinyal Reversal 3: RSI mencapai target oversold (<= 30.0) dan mulai berbalik naik
-                    if rsi <= config.RSI_BUY_MAX and c_close > c_open:
-                        return True, f"RSI jenuh jual oversold ({rsi:.1f} <= {config.RSI_BUY_MAX}) & candle memantul naik"
-
-                    # Sinyal Reversal 4: Bullish Engulfing solid
-                    if c_close > c_open and c_close > c_prev_close and (c_close - c_open) >= (c_range * 0.65):
-                        return True, "Candle Bullish Engulfing solid membalikkan tren"
-
-                # B. KONDISI MINUS: Cut loss dini jika terjadi breakout ke atas
-                elif pnl_pct < -0.002:
-                    if ema9[-2] > ema21[-2] and c_close > ema21[-2] and c_close > c_open:
-                        return True, "Breakout terkonfirmasi di atas EMA 21 (Cut loss dini sebelum SL 1%)"
-
-            return False, ""
-        except Exception:
-            return False, ""
-
     def monitor_active_position(self):
-        """Memantau posisi aktif terhadap target Take Profit (+2.0%) dan Stop Loss (-1.0%) dengan Maker Limit Exit & Fleksibel Reversal."""
+        """
+        Memantau posisi aktif dengan manajemen risiko ketat Akademi Crypto (Kalimasada):
+        1. Target Take Profit penuh: +1.4% (Risk to Reward 1:2).
+        2. Stop Loss awal: -0.7% (Resiko terukur 0.5% portofolio).
+        3. Proteksi Break-Even (BEP): Begitu profit mencapai 1R (+0.7%), SL otomatis digeser
+           ke Break-Even (Entry + 0.05% untuk cover fee) sehingga transaksi 100% bebas risiko.
+        """
         if not self.active_position:
             return
             
@@ -655,8 +582,6 @@ class BinanceScalper:
         side = pos["side"]
         entry_price = pos["entry_price"]
         qty = pos["qty"]
-        sl_price = pos["sl_price"]
-        tp_price = pos["tp_price"]
         pos_leverage = pos.get("leverage", config.LEVERAGE)
         
         try:
@@ -667,64 +592,16 @@ class BinanceScalper:
             pnl_pct = ((current_price - entry_price) / entry_price) if side == "buy" else ((entry_price - current_price) / entry_price)
             pnl_usd = pnl_pct * pos["notional"]
 
-            # --- 0. Cek Pembalikan Arah Fleksibel (Jangan Kaku: Amankan Profit Lebih Awal / Cut Loss Dini) ---
-            now = time.time()
-            if config.ENABLE_FLEXIBLE_EXIT and (now - self._last_reversal_check_time >= 10.0):
-                self._last_reversal_check_time = now
-                is_reversal, rev_reason = self.check_market_reversal(symbol, side, pnl_pct)
-                if is_reversal:
-                    is_win = pnl_usd >= 0
-                    tag = "AMANKAN PROFIT FLEKSIBEL" if is_win else "EARLY CUT LOSS (CEGAH SL PENUH)"
-                    color = "bold green" if is_win else "bold yellow"
-                    console.log(f"[{color}]⚡ {tag}: {rev_reason} ({pnl_pct*100:+.2f}%, ${pnl_usd:+.2f}) pada {symbol}[/{color}]")
-                    close_side = "SELL" if side == "buy" else "BUY"
-                    self.execute_maker_close(symbol=symbol, side=close_side, qty=qty, target_price=current_price)
-                    
-                    trade_record = {
-                        "symbol": symbol,
-                        "side": side.upper(),
-                        "entry_price": entry_price,
-                        "exit_price": current_price,
-                        "qty": qty,
-                        "notional": pos["notional"],
-                        "margin_used": pos["notional"] / pos_leverage,
-                        "pnl_usd": round(pnl_usd, 4),
-                        "pnl_pct": round(pnl_pct * 100, 2),
-                        "result": "WIN" if is_win else "LOSS",
-                        "closed_at": time.strftime("%Y-%m-%d %H:%M:%S")
-                    }
-                    self.trade_history.append(trade_record)
-                    db.record_trade(trade_record)
-                    self.total_trades += 1
-                    if is_win:
-                        self.winning_trades += 1
-                    self.total_pnl_usd += pnl_usd
-                    self.active_position = None
-                    return
-            
-            # --- 1. Break-Even Protection (+0.5% profit) ---
-            if side == "buy":
-                if pnl_pct >= config.BREAK_EVEN_TRIGGER and pos["sl_price"] < entry_price:
-                    pos["sl_price"] = entry_price * 1.0005  # Kunci di Entry + 0.05% (tutup biaya fee maker)
-                    console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: SL digeser ke {pos['sl_price']:.4f} (Posisi Bebas Risiko)[/bold cyan]")
-                
-                # --- 2. Trailing Stop (+0.9% profit) ---
-                if pnl_pct >= config.TRAILING_STOP_TRIGGER:
-                    trailing_target = current_price * (1.0 - config.TRAILING_STOP_DISTANCE)
-                    if trailing_target > pos["sl_price"]:
-                        pos["sl_price"] = trailing_target
-                        console.log(f"[bold green]📈 TRAILING STOP NAIK pada {symbol}: SL dikunci di {trailing_target:.4f}[/bold green]")
-                        
-            elif side == "sell":
-                if pnl_pct >= config.BREAK_EVEN_TRIGGER and pos["sl_price"] > entry_price:
-                    pos["sl_price"] = entry_price * 0.9995
-                    console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: SL digeser ke {pos['sl_price']:.4f} (Posisi Bebas Risiko)[/bold cyan]")
-                
-                if pnl_pct >= config.TRAILING_STOP_TRIGGER:
-                    trailing_target = current_price * (1.0 + config.TRAILING_STOP_DISTANCE)
-                    if trailing_target < pos["sl_price"]:
-                        pos["sl_price"] = trailing_target
-                        console.log(f"[bold green]📈 TRAILING STOP TURUN pada {symbol}: SL dikunci di {trailing_target:.4f}[/bold green]")
+            # --- 1. Proteksi Geser SL ke Break-Even (BEP) saat mencapai 1R (+0.7%) ---
+            bep_trigger = pos.get("bep_trigger_price", 0.0)
+            bep_activated = pos.get("bep_activated", False)
+            if not bep_activated:
+                hit_bep = (current_price >= bep_trigger) if side == "buy" else (current_price <= bep_trigger) if bep_trigger > 0 else (pnl_pct >= config.BEP_PROFIT_TRIGGER)
+                if hit_bep:
+                    new_sl = entry_price * 1.0005 if side == "buy" else entry_price * 0.9995
+                    pos["sl_price"] = new_sl
+                    pos["bep_activated"] = True
+                    console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: Profit mencapai 1R (+0.7%), SL digeser ke {new_sl:.4f} (Posisi Bebas Risiko Bebas Fee)[/bold cyan]")
 
             # Perbarui nilai SL/TP terkini
             sl_price = pos["sl_price"]
@@ -733,10 +610,10 @@ class BinanceScalper:
             hit_tp = (current_price >= tp_price) if side == "buy" else (current_price <= tp_price)
             hit_sl = (current_price <= sl_price) if side == "buy" else (current_price >= sl_price)
             
-            console.log(f"[dim]Pemantauan 5s: {symbol} @ {current_price} | PnL: {pnl_pct*100:+.2f}% (${pnl_usd:+.2f}) | TP: {tp_price:.4f} | SL: {sl_price:.4f}[/dim]")
+            console.log(f"[dim]Pemantauan 5s: {symbol} @ {current_price} | PnL: {pnl_pct*100:+.2f}% (${pnl_usd:+.2f}) | TP: {tp_price:.4f} | SL: {sl_price:.4f} | BEP: {'AKTIF' if pos.get('bep_activated') else 'MENUNGGU 1R'}[/dim]")
             
             if hit_tp:
-                console.log(f"[bold green]TAKE PROFIT TERCAPAI! (+{pnl_pct*100:.2f}%, PnL: +${pnl_usd:.2f}) pada {symbol}[/bold green]")
+                console.log(f"[bold green]🎯 TAKE PROFIT TERCAPAI (RR 1:2 / +1.4%)! (+{pnl_pct*100:.2f}%, PnL: +${pnl_usd:.2f}) pada {symbol}[/bold green]")
                 close_side = "SELL" if side == "buy" else "BUY"
                 self.execute_maker_close(symbol=symbol, side=close_side, qty=qty, target_price=current_price)
                 
@@ -763,7 +640,7 @@ class BinanceScalper:
                 
             elif hit_sl:
                 is_be_or_profit = pnl_usd >= 0.0
-                tag = "BREAK-EVEN / TRAILING EXIT" if is_be_or_profit else "STOP LOSS TERPICU"
+                tag = "🛡️ BREAK-EVEN EXIT (Bebas Risiko)" if is_be_or_profit else "🛑 STOP LOSS TERPICU (-0.7%)"
                 res = "WIN" if is_be_or_profit else "LOSS"
                 color = "green" if is_be_or_profit else "red"
                 
