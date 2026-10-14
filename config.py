@@ -56,15 +56,15 @@ class BotConfig:
     RSI_SELL_MAX: float = 80.0             # Batas atas SELL: RSI <= 80.0
     ATR_PERIOD: int = 14                   # Volatilitas adaptif
 
-    # --- Risk / Reward Ratio 1:2 & Fleksibilitas Pembalikan ---
-    SL_PERCENT: float = 0.010              # Stop Loss dasar tepat 1.0% (Resiko 0.5% portofolio)
-    TP_PERCENT: float = 0.020              # Take Profit penuh tepat 2.0% (Risk to Reward 1:2 -> Cuan 2x resiko)
+    # --- Risk / Reward Ratio 1:2 & Fleksibilitas Pembalikan (Opsi A) ---
+    SL_PERCENT: float = 0.007              # Stop Loss diperketat ke 0.7% (Resiko 0.5% portofolio)
+    TP_PERCENT: float = 0.014              # Take Profit 1.4% (Risk to Reward 1:2 -> Cuan 2x resiko)
     RR_RATIO: float = 2.00                 # Risk to Reward 1:2
     ENABLE_FLEXIBLE_EXIT: bool = True      # Keluar fleksibel jika candlestick & indikator membalik arah
     REVERSAL_PROFIT_TRIGGER: float = 0.003 # Amankan profit jika ada pembalikan saat profit >= +0.3%
-    BREAK_EVEN_TRIGGER: float = 0.006      # Geser SL ke Break-Even (+0.05%) saat profit mencapai +0.6%
-    TRAILING_STOP_TRIGGER: float = 0.012   # Aktifkan trailing stop saat profit mencapai +1.2%
-    TRAILING_STOP_DISTANCE: float = 0.005  # Jarak trailing 0.5% dari harga puncak
+    BREAK_EVEN_TRIGGER: float = 0.0045     # Geser SL ke Break-Even (+0.05%) saat profit mencapai +0.45%
+    TRAILING_STOP_TRIGGER: float = 0.009   # Aktifkan trailing stop saat profit mencapai +0.9%
+    TRAILING_STOP_DISTANCE: float = 0.0035 # Jarak trailing 0.35% dari harga puncak
     MAKER_FEE_RATE: float = 0.0002         # 0.02% maker fee pada Binance Futures
 
 config = BotConfig()
