@@ -65,6 +65,7 @@ class BinanceScalper:
         self._configured_symbols: Set[str] = set()
         self._last_reversal_check_time: float = 0.0
         self.last_error: Optional[str] = None
+        self._symbol_order_cooldown: Dict[str, float] = {}
 
     @property
     def _ban_until(self) -> float:
@@ -374,6 +375,13 @@ class BinanceScalper:
         symbol = sig["symbol"]
         side = "BUY" if sig["side"] == "BUY" else "SELL"
         target_price = sig["entry_price"]
+
+        now = time.time()
+        cooldown_until = self._symbol_order_cooldown.get(symbol, 0.0)
+        if now < cooldown_until:
+            rem = int(cooldown_until - now)
+            console.log(f"[yellow]Koin {symbol} dalam jeda cooldown ({rem}s lagi setelah auto-cancel). Melewati agar tidak spam berulang.[/yellow]")
+            return False
         
         base = symbol[:-4] if symbol.endswith("USDT") else symbol
         if base in TRADFI_EXCLUSIONS:
@@ -463,10 +471,13 @@ class BinanceScalper:
                             "notional": formatted_qty * formatted_price
                         }
                         self.active_order = None
+                        self.active_signals = [s for s in self.active_signals if s.get("symbol") != symbol]
                         return True
                     elif status in ("CANCELED", "REJECTED", "EXPIRED"):
                         console.log(f"[yellow]Order dibatalkan/ditolak ({status}).[/yellow]")
                         self.active_order = None
+                        self.active_signals = [s for s in self.active_signals if s.get("symbol") != symbol]
+                        self._symbol_order_cooldown[symbol] = time.time() + 300
                         return False
                 except Exception as err:
                     console.log(f"[dim]Pengecekan order {order_id}: {err}[/dim]")
@@ -478,11 +489,15 @@ class BinanceScalper:
                 console.log(f"[dim]Gagal cancel order: {e}[/dim]")
                 
             self.active_order = None
+            self.active_signals = [s for s in self.active_signals if s.get("symbol") != symbol]
+            self._symbol_order_cooldown[symbol] = time.time() + 300  # Cooldown 5 menit agar tidak spam berulang
             return False
             
         except Exception as e:
             console.log(f"[red]Gagal dispatch limit order: {e}[/red]")
             self.active_order = None
+            self.active_signals = [s for s in self.active_signals if s.get("symbol") != symbol]
+            self._symbol_order_cooldown[symbol] = time.time() + 180
             return False
 
     def execute_maker_close(self, symbol: str, side: str, qty: float, target_price: float) -> bool:
@@ -712,13 +727,17 @@ class BinanceScalper:
                 # 5. Jika ada sinyal valid dan saldo tersedia cukup
                 if self.active_signals and not self.active_order and not self.active_position:
                     best_signal = self.active_signals[0]
-                    console.log(f"[bold green]Sinyal terbaik terdeteksi:[/bold green] {best_signal['side']} {best_signal['symbol']} (Skor: {best_signal.get('score', 0)})")
-                    
-                    min_req = config.MIN_NOTIONAL / config.LEVERAGE
-                    if avail_usdt >= min_req:
-                        self.execute_limit_order(best_signal)
+                    sym = best_signal.get("symbol", "")
+                    if time.time() < self._symbol_order_cooldown.get(sym, 0.0):
+                        # Jika koin teratas masih dalam cooldown setelah auto-cancel, buang dari active_signals
+                        self.active_signals = [s for s in self.active_signals if s.get("symbol") != sym]
                     else:
-                        console.log(f"[yellow]Saldo USDT Futures (${avail_usdt:.2f}) di bawah minimum (${min_req:.2f}). Menunggu modal.[/yellow]")
+                        console.log(f"[bold green]Sinyal terbaik terdeteksi:[/bold green] {best_signal['side']} {best_signal['symbol']} (Skor: {best_signal.get('score', 0)})")
+                        min_req = config.MIN_NOTIONAL / config.LEVERAGE
+                        if avail_usdt >= min_req:
+                            self.execute_limit_order(best_signal)
+                        else:
+                            console.log(f"[yellow]Saldo USDT Futures (${avail_usdt:.2f}) di bawah minimum (${min_req:.2f}). Menunggu modal.[/yellow]")
                         
                 if self.active_position:
                     time.sleep(5)  # Langsung monitor 5s jika posisi baru saja terisi
