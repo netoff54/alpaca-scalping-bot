@@ -274,6 +274,8 @@ class BinanceScalper:
             bal = self.get_futures_balance()
             cap = bal["available"] if bal["available"] >= 1.0 else config.DEFAULT_CAPITAL
             
+            results = []
+            signals = []
             for rank_offset, item in enumerate(current_batch, 1):
                 if self.client.is_banned() or self.client.is_scan_throttled():
                     break
