@@ -1,7 +1,9 @@
 """
 Strategi Scalping Crypto Win Rate Tinggi (Akademi Crypto - Kalimasada)
 Formula: Price Action Murni + Support/Resistance/Supply-Demand + EMA 13/21 Retest
-         + Konfirmasi Volume Wajib + Pola Price Action + Data Derivatif (OI & CVD)
+         + Pemetaan Area Likuidasi (Liquidation Pools) + Deteksi Liquidity Sweep
+         + Konfirmasi Volume Wajib + Data Derivatif (OI & CVD Delta)
+         + Multi-Timeframe (15m Struktur & S&R + 5m Eksekusi Scalp)
          + Ketat Risk to Reward minimal 1:2 (SL geser ke BEP saat 1R).
 """
 
@@ -43,13 +45,13 @@ def detect_market_structure(highs: List[float], lows: List[float], closes: List[
     Menganalisis Struktur Pasar (Market Structure):
     - Bull Market (Uptrend): Terbentuk Higher High (HH) & Higher Low (HL).
     - Bear Market (Downtrend): Terbentuk Lower High (LH) & Lower Low (LL).
-    - Sideways (Ranging): Bergerak mendatar di dalam range (menguntungkan untuk range trading).
+    - Sideways (Ranging): Bergerak mendatar di dalam range.
     """
     n = len(closes)
     if n < 30:
         return {"structure": "SIDEWAYS", "bias": "NEUTRAL", "desc": "Data bar kurang"}
 
-    # Identifikasi swing highs dan swing lows dalam 30 bar terakhir (swing window = 3)
+    # Identifikasi swing highs dan swing lows dalam 30 bar terakhir (swing window = 2)
     swing_highs = []
     swing_lows = []
     for i in range(n - 28, n - 2):
@@ -87,7 +89,6 @@ def find_tested_support_resistance(
 
     tolerance = current_price * 0.0025  # Toleransi clustering 0.25%
 
-    # Kumpulkan swing lows (potensial support) & swing highs (potensial resistance)
     low_touches = []
     high_touches = []
     for i in range(max(0, n - 80), n - 2):
@@ -114,80 +115,131 @@ def find_tested_support_resistance(
     tested_resistances.sort()            # Terdekat ke harga saat ini
     return tested_supports, tested_resistances
 
-def check_signal_from_ohlcv(
-    ohlcv: List[List[float]],
-    available_capital: float = 10.0,
-    leverage: int = 10,
+def calculate_liquidation_pools(
+    nearest_support: float, nearest_resistance: float, current_price: float
+) -> Dict[str, Any]:
+    """
+    Menghitung Pemetaan Area Likuidasi (Liquidation Pools) sesuai Master Blueprint Akademi Crypto:
+    - Long Liquidation Pool (di bawah Support): Tumpukan likuidasi posisi Long retail leverage 50x-100x.
+      Rentang: Support * 0.982 s/d Support * 0.995 (Area magnet penurunan sebelum reclaim).
+    - Short Liquidation Pool (di atas Resistance): Tumpukan likuidasi posisi Short retail leverage 50x-100x.
+      Rentang: Resistance * 1.005 s/d Resistance * 1.018 (Area magnet kenaikan sebelum rejection).
+    """
+    if nearest_support <= 0:
+        nearest_support = current_price * 0.992
+    if nearest_resistance <= 0:
+        nearest_resistance = current_price * 1.008
+
+    long_pool_max = nearest_support * 0.995
+    long_pool_min = nearest_support * 0.982
+    long_dist_pct = round(((current_price - long_pool_max) / current_price) * 100, 2) if current_price > long_pool_max else 0.0
+
+    short_pool_min = nearest_resistance * 1.005
+    short_pool_max = nearest_resistance * 1.018
+    short_dist_pct = round(((short_pool_min - current_price) / current_price) * 100, 2) if current_price < short_pool_min else 0.0
+
+    nearest_pool = "LONG_POOL" if long_dist_pct < short_dist_pct else "SHORT_POOL"
+    nearest_dist = min(long_dist_pct, short_dist_pct)
+
+    return {
+        "nearest_support": round(nearest_support, 4),
+        "nearest_resistance": round(nearest_resistance, 4),
+        "long_liquidation_zone": [round(long_pool_min, 4), round(long_pool_max, 4)],
+        "short_liquidation_zone": [round(short_pool_min, 4), round(short_pool_max, 4)],
+        "long_pool_distance_pct": long_dist_pct,
+        "short_pool_distance_pct": short_dist_pct,
+        "nearest_pool": nearest_pool,
+        "nearest_pool_distance_pct": nearest_dist
+    }
+
+def analyze_coin_comprehensive(
+    symbol: str,
+    ohlcv_htf: List[List[float]],
+    ohlcv_ltf: List[List[float]],
     derivatives_data: Optional[Dict[str, Any]] = None,
-    ls_data: Optional[Dict[str, Any]] = None
-) -> Optional[Dict[str, Any]]:
+    available_capital: float = 10.0,
+    leverage: int = 10
+) -> Dict[str, Any]:
     """
-    Evaluasi sinyal lengkap berdasarkan Master Blueprint Akademi Crypto (Kalimasada):
-    1. Filter Tren Makro (EMA 200 & Struktur Pasar HH/HL vs LH/LL).
-    2. EMA 13 & 21 Retest Bounce: Titik beli ideal saat pullback ke EMA 13 & 21.
-    3. Support / Demand & Resistance / Supply Tested Zones.
-    4. Analisis Volume Wajib: Volume expansion (menghindari artificial demand).
-    5. Pola Price Action:
-       - Liquidity Sweep (Stop Hunting & Reclaim)
-       - Breakout and Retest (RBS / SBR)
-       - Compression Breakout (Squeeze)
-    6. Data Derivatif: Open Interest (OI) Delta & Taker CVD Delta.
-    7. Manajemen Risiko Ketat: RR 1:2 dengan SL ke BEP saat mencapai 1R.
+    Analisis Menyeluruh 1 Koin Crypto (Akademi Crypto Master Blueprint):
+    1. Multi-Timeframe Structure (15m):
+       - Tren Makro (EMA 200) & Struktur Pasar (HH/HL vs LH/LL)
+       - Support & Resistance teruji >= 2 kali
+       - Pemetaan Area Likuidasi (Liquidation Pools)
+    2. Lower Timeframe Scalping Execution (5m):
+       - EMA 13 & 21 Retest Bounce
+       - Liquidity Sweep Reclaim
+       - Breakout & Retest
+       - Compression Squeeze Breakout
+       - Konfirmasi Volume Expansion (>= 115% rata-rata)
+    3. Confluence Derivatif:
+       - Open Interest (OI) Trend
+       - Taker Buy/Sell CVD Ratio
+       - Global Long/Short Ratio
+    4. Strict Risk Management (Risk to Reward 1:2 & BEP saat 1R).
     """
-    if len(ohlcv) < config.EMA_TREND + 5:
-        return None
+    if not ohlcv_ltf or len(ohlcv_ltf) < 25:
+        return {"symbol": symbol, "price": 0.0, "status": "INSUFFICIENT_DATA", "score": 0.0, "signal": None}
 
-    opens = [c[1] for c in ohlcv]
-    highs = [c[2] for c in ohlcv]
-    lows = [c[3] for c in ohlcv]
-    closes = [c[4] for c in ohlcv]
-    volumes = [c[5] for c in ohlcv]
+    # Jika data HTF tidak ada, fallback ke LTF
+    if not ohlcv_htf or len(ohlcv_htf) < 25:
+        ohlcv_htf = ohlcv_ltf
 
-    ema13_series = calculate_ema_series(closes, config.EMA_FAST)  # EMA 13
-    ema21_series = calculate_ema_series(closes, config.EMA_SLOW)  # EMA 21
-    ema200_series = calculate_ema_series(closes, config.EMA_TREND) # EMA 200
-    atr_series = calculate_atr_series(highs, lows, closes, config.ATR_PERIOD)
+    # --- 1. Analisis HTF 15m (Struktur Pasar, S&R, & Area Likuidasi) ---
+    htf_opens = [c[1] for c in ohlcv_htf]
+    htf_highs = [c[2] for c in ohlcv_htf]
+    htf_lows = [c[3] for c in ohlcv_htf]
+    htf_closes = [c[4] for c in ohlcv_htf]
 
-    # Candle tertutup terkini (-2) dan candle sebelumnya (-3)
-    c_open = opens[-2]
-    c_high = highs[-2]
-    c_low = lows[-2]
-    c_close = closes[-2]
-    c_vol = volumes[-2]
-    
-    p_open = opens[-3]
-    p_close = closes[-3]
-    p_high = highs[-3]
-    p_low = lows[-3]
+    structure_info = detect_market_structure(htf_highs, htf_lows, htf_closes)
+    structure = structure_info["structure"]
+
+    latest_price = ohlcv_ltf[-1][4]
+    tested_s, tested_r = find_tested_support_resistance(htf_highs, htf_lows, htf_closes, latest_price)
+
+    nearest_support = tested_s[0] if tested_s else latest_price * 0.992
+    nearest_resistance = tested_r[0] if tested_r else latest_price * 1.008
+
+    # Hitung Area Likuidasi
+    liq_pools = calculate_liquidation_pools(nearest_support, nearest_resistance, latest_price)
+
+    # EMA 200 HTF untuk filter tren makro
+    ema200_series = calculate_ema_series(htf_closes, min(len(htf_closes), config.EMA_TREND))
+    ema200_htf = ema200_series[-1] if ema200_series else latest_price
+
+    # --- 2. Analisis LTF 5m (Eksekusi Scalping) ---
+    ltf_opens = [c[1] for c in ohlcv_ltf]
+    ltf_highs = [c[2] for c in ohlcv_ltf]
+    ltf_lows = [c[3] for c in ohlcv_ltf]
+    ltf_closes = [c[4] for c in ohlcv_ltf]
+    ltf_volumes = [c[5] for c in ohlcv_ltf]
+
+    ema13_series = calculate_ema_series(ltf_closes, config.EMA_FAST)
+    ema21_series = calculate_ema_series(ltf_closes, config.EMA_SLOW)
+    atr_series = calculate_atr_series(ltf_highs, ltf_lows, ltf_closes, config.ATR_PERIOD)
+
+    c_open = ltf_opens[-2]
+    c_high = ltf_highs[-2]
+    c_low = ltf_lows[-2]
+    c_close = ltf_closes[-2]
+    c_vol = ltf_volumes[-2]
+
+    p_close = ltf_closes[-3]
 
     ema13 = ema13_series[-2]
     ema21 = ema21_series[-2]
-    ema200 = ema200_series[-2]
-    atr = atr_series[-2]
-    latest_price = closes[-1]
+    atr = atr_series[-2] if len(atr_series) >= 2 else (latest_price * 0.005)
 
-    c_range = c_high - c_low
-    if c_range <= 0:
-        return None
+    c_range = c_high - c_low if (c_high - c_low) > 0 else 0.0001
     lower_wick = min(c_open, c_close) - c_low
     upper_wick = c_high - max(c_open, c_close)
-    body = abs(c_close - c_open)
 
-    # Rata-rata volume 20 candle terakhir
-    avg_vol = sum(volumes[-22:-2]) / 20.0 if len(volumes) >= 22 else c_vol
+    avg_vol = sum(ltf_volumes[-22:-2]) / 20.0 if len(ltf_volumes) >= 22 else c_vol
     has_volume_expansion = (c_vol >= avg_vol * 1.0)
     has_strong_volume = (c_vol >= avg_vol * config.VOLUME_SPIKE_FACTOR)
 
-    # 1. Analisis Struktur Pasar & Level S&R Teruji
-    structure_info = detect_market_structure(highs, lows, closes)
-    structure = structure_info["structure"]
-    tested_s, tested_r = find_tested_support_resistance(highs, lows, closes, c_close)
-
-    nearest_support = tested_s[0] if tested_s else c_close * 0.993
-    nearest_resistance = tested_r[0] if tested_r else c_close * 1.007
-
-    # 2. Data Derivatif
-    deriv = derivatives_data or ls_data or {
+    # --- 3. Data Derivatif ---
+    deriv = derivatives_data or {
         "long_pct": 50.0, "short_pct": 50.0, "ratio": 1.0,
         "oi_delta": 0.0, "oi_trend": "NEUTRAL", "taker_ratio": 1.0, "cvd_bias": "NEUTRAL"
     }
@@ -195,7 +247,6 @@ def check_signal_from_ohlcv(
     oi_trend = deriv.get("oi_trend", "NEUTRAL")
     taker_ratio = deriv.get("taker_ratio", 1.0)
 
-    # Filter Anti-Melawan Arus
     has_ls_support_buy = ls_ratio >= config.LS_RATIO_MIN_BUY
     has_ls_support_sell = ls_ratio <= config.LS_RATIO_MAX_SELL
 
@@ -203,112 +254,93 @@ def check_signal_from_ohlcv(
     setup_name = ""
     setup_desc = ""
     score = 50.0
+    sweep_status = "NONE"
 
-    # -------------------------------------------------------------
-    # SETUP A: LIQUIDITY SWEEP (STOP HUNTING & RECLAIM)
-    # Harga menyapu batas support/resistance untuk ambil likuiditas, lalu ditarik masuk kembali
-    # -------------------------------------------------------------
-    # Bullish Sweep: Tusuk support lalu reclaim di atas support dengan ekor bawah panjang
-    if c_low < nearest_support and c_close >= nearest_support and (lower_wick / c_range >= 0.35) and c_close >= c_open:
+    # --- SETUP 1: LIQUIDITY SWEEP (Poin 8 & 9 Video) ---
+    long_liq_max = liq_pools["long_liquidation_zone"][1]
+    short_liq_min = liq_pools["short_liquidation_zone"][0]
+
+    if (c_low <= long_liq_max or c_low < nearest_support) and c_close >= nearest_support and (lower_wick / c_range >= 0.35) and c_close >= c_open:
+        sweep_status = "LONG_LIQUIDITY_SWEPT"
         if has_volume_expansion and has_ls_support_buy:
             signal_side = "BUY"
             setup_name = "LIQUIDITY_SWEEP"
-            setup_desc = f"Liquidity Sweep di Support {nearest_support:.4f} (Stop Hunting Reclaimed)"
+            setup_desc = f"Liquidity Sweep di Long Pool {long_liq_max:.4f} & Reclaim Support {nearest_support:.4f}"
             score = 88.0
 
-    # Bearish Sweep: Tusuk resistance lalu reclaim di bawah resistance dengan ekor atas panjang
-    elif c_high > nearest_resistance and c_close <= nearest_resistance and (upper_wick / c_range >= 0.35) and c_close <= c_open:
+    elif (c_high >= short_liq_min or c_high > nearest_resistance) and c_close <= nearest_resistance and (upper_wick / c_range >= 0.35) and c_close <= c_open:
+        sweep_status = "SHORT_LIQUIDITY_SWEPT"
         if has_volume_expansion and has_ls_support_sell:
             signal_side = "SELL"
             setup_name = "LIQUIDITY_SWEEP"
-            setup_desc = f"Liquidity Sweep di Resistance {nearest_resistance:.4f} (Stop Hunting Reclaimed)"
+            setup_desc = f"Liquidity Sweep di Short Pool {short_liq_min:.4f} & Reclaim Resistance {nearest_resistance:.4f}"
             score = 88.0
 
-    # -------------------------------------------------------------
-    # SETUP B: EMA 13 & 21 RETEST BOUNCE (Sesuai Poin 7 Video)
-    # Tren naik/turun sehat, harga koreksi menyentuh EMA 13 & 21 lalu memantul
-    # -------------------------------------------------------------
+    # --- SETUP 2: EMA 13 & 21 RETEST BOUNCE (Poin 7 Video) ---
     if not signal_side:
-        # Bullish EMA Bounce: Di atas EMA 200, EMA 13 > EMA 21, candle menyentuh EMA 13/21 lalu ditutup hijau memantul
-        if c_close > ema200 and ema13 >= ema21 and c_low <= max(ema13, ema21) * 1.001 and c_close > max(ema13, ema21):
+        if c_close > ema200_htf and ema13 >= ema21 and c_low <= max(ema13, ema21) * 1.001 and c_close > max(ema13, ema21):
             if c_close > c_open and has_volume_expansion and has_ls_support_buy:
                 signal_side = "BUY"
                 setup_name = "EMA13_21_BOUNCE"
-                setup_desc = f"Pullback Retest & Bounce di garis EMA 13/21 ({ema13:.4f})"
+                setup_desc = f"Pullback Retest & Bounce di EMA 13/21 5m ({ema13:.4f}) searah Tren 15m"
                 score = 82.0
-
-        # Bearish EMA Bounce: Di bawah EMA 200, EMA 13 < EMA 21, candle menyentuh EMA 13/21 lalu ditutup merah menolak
-        elif c_close < ema200 and ema13 <= ema21 and c_high >= min(ema13, ema21) * 0.999 and c_close < min(ema13, ema21):
+        elif c_close < ema200_htf and ema13 <= ema21 and c_high >= min(ema13, ema21) * 0.999 and c_close < min(ema13, ema21):
             if c_close < c_open and has_volume_expansion and has_ls_support_sell:
                 signal_side = "SELL"
                 setup_name = "EMA13_21_BOUNCE"
-                setup_desc = f"Retest Rejection di garis EMA 13/21 ({ema13:.4f})"
+                setup_desc = f"Pullback Retest & Rejection di EMA 13/21 5m ({ema13:.4f}) searah Tren 15m"
                 score = 82.0
 
-    # -------------------------------------------------------------
-    # SETUP C: BREAKOUT AND RETEST (Sesuai Poin 8 Video)
-    # Menunggu retest batas lama yang berganti fungsi (RBS / SBR)
-    # -------------------------------------------------------------
+    # --- SETUP 3: BREAKOUT AND RETEST (Poin 8 Video) ---
     if not signal_side and len(tested_s) > 0 and len(tested_r) > 0:
-        # Bullish RBS: Resistance yang baru ditembus diuji kembali menjadi support
         if p_close < nearest_resistance and c_high > nearest_resistance:
-            # Terjadi penembusan dengan volume kuat
-            if has_strong_volume and c_close > c_open and has_ls_support_buy and c_close > ema200:
+            if has_strong_volume and c_close > c_open and has_ls_support_buy and c_close > ema200_htf:
                 signal_side = "BUY"
                 setup_name = "BREAKOUT_AND_RETEST"
-                setup_desc = f"Breakout Level Resistance {nearest_resistance:.4f} didukung Volume Kuat"
-                score = 78.0
-
-        # Bearish SBR: Support yang baru ditembus diuji kembali menjadi resistance
+                setup_desc = f"Breakout Resistance 15m {nearest_resistance:.4f} didukung Volume Kuat"
+                score = 80.0
         elif p_close > nearest_support and c_low < nearest_support:
-            if has_strong_volume and c_close < c_open and has_ls_support_sell and c_close < ema200:
+            if has_strong_volume and c_close < c_open and has_ls_support_sell and c_close < ema200_htf:
                 signal_side = "SELL"
                 setup_name = "BREAKOUT_AND_RETEST"
-                setup_desc = f"Breakdown Level Support {nearest_support:.4f} didukung Volume Kuat"
-                score = 78.0
+                setup_desc = f"Breakdown Support 15m {nearest_support:.4f} didukung Volume Kuat"
+                score = 80.0
 
-    # -------------------------------------------------------------
-    # SETUP D: COMPRESSION BREAKOUT (Akumulasi Padat Squeeze)
-    # Volatilitas menyempit lalu meledak menembus batas dengan lonjakan volume
-    # -------------------------------------------------------------
+    # --- SETUP 4: COMPRESSION BREAKOUT ---
     if not signal_side and len(atr_series) >= 10:
-        recent_ranges = [highs[k] - lows[k] for k in range(-7, -2)]
+        recent_ranges = [ltf_highs[k] - ltf_lows[k] for k in range(-7, -2)]
         avg_range = sum(recent_ranges) / len(recent_ranges) if recent_ranges else atr
-        # Jika rentang beberapa bar sebelumnya menyempit padat (volatilitas rendah)
         if avg_range <= atr * 0.65 and has_strong_volume:
-            if c_close > c_open and c_close > max(opens[-4:-2] + closes[-4:-2]) and c_close > ema21 and has_ls_support_buy:
+            if c_close > c_open and c_close > max(ltf_opens[-4:-2] + ltf_closes[-4:-2]) and c_close > ema21 and has_ls_support_buy:
                 signal_side = "BUY"
                 setup_name = "COMPRESSION_BREAKOUT"
                 setup_desc = "Compression Breakout (Akumulasi padat pecah ke atas)"
                 score = 80.0
-            elif c_close < c_open and c_close < min(opens[-4:-2] + closes[-4:-2]) and c_close < ema21 and has_ls_support_sell:
+            elif c_close < c_open and c_close < min(ltf_opens[-4:-2] + ltf_closes[-4:-2]) and c_close < ema21 and has_ls_support_sell:
                 signal_side = "SELL"
                 setup_name = "COMPRESSION_BREAKOUT"
                 setup_desc = "Compression Breakdown (Distribusi padat pecah ke bawah)"
                 score = 80.0
 
-    if not signal_side:
-        return None
-
-    # Tambahan Bobot Skor dari Data Derivatif (Open Interest & CVD Taker)
+    # Bobot Skor Derivatif
     if signal_side == "BUY":
-        if oi_trend == "EXPANDING":  # Harga naik + OI naik = Bullish Sehat (Modal Baru Masuk)
+        if oi_trend == "EXPANDING":
             score += 8.0
-        if taker_ratio >= 1.05:     # CVD Positif (Pembeli agresif)
+        if taker_ratio >= 1.05:
             score += 6.0
         if structure == "UPTREND":
             score += 6.0
     elif signal_side == "SELL":
-        if oi_trend == "EXPANDING":  # Harga turun + OI naik = Bearish Kuat (Penjual Agresif Masuk)
+        if oi_trend == "EXPANDING":
             score += 8.0
-        if taker_ratio <= 0.95:     # CVD Negatif (Penjual agresif)
+        if taker_ratio <= 0.95:
             score += 6.0
         if structure == "DOWNTREND":
             score += 6.0
 
     final_score = min(100.0, round(score, 2))
 
-    # Dynamic Leverage (10x - 20x sesuai skor)
+    # Dynamic Leverage
     dynamic_leverage = config.LEVERAGE
     if config.DYNAMIC_LEVERAGE_ENABLED:
         if final_score >= 85:
@@ -318,56 +350,100 @@ def check_signal_from_ohlcv(
         else:
             dynamic_leverage = 10
 
-    # -------------------------------------------------------------
-    # MANAJEMEN RISIKO KETAT (Risk-to-Reward 1:2)
-    # SL di bawah/atas level invalidasi support/swing low
-    # TP = minimal 2x jarak SL
-    # BEP Trigger = 1R (saat mencapai jarak 1x SL, SL digeser ke BEP)
-    # -------------------------------------------------------------
-    sl_percent = config.SL_PERCENT  # 0.7%
-    tp_percent = config.TP_PERCENT  # 1.4% (RRR 1:2)
+    # Manajemen Risiko Ketat RR 1:2
+    executable_signal = None
+    if signal_side and final_score >= config.MIN_SETUP_SCORE:
+        sl_percent = config.SL_PERCENT  # 0.7%
+        tp_percent = config.TP_PERCENT  # 1.4% (RRR 1:2)
+        entry_price = latest_price
+        sl_dist = entry_price * sl_percent
+        tp_dist = entry_price * tp_percent
 
-    entry_price = latest_price
-    sl_dist = entry_price * sl_percent
-    tp_dist = entry_price * tp_percent
+        sl_price = entry_price - sl_dist if signal_side == "BUY" else entry_price + sl_dist
+        tp_price = entry_price + tp_dist if signal_side == "BUY" else entry_price - tp_dist
+        bep_trigger_price = entry_price + sl_dist if signal_side == "BUY" else entry_price - sl_dist
 
-    sl_price = entry_price - sl_dist if signal_side == "BUY" else entry_price + sl_dist
-    tp_price = entry_price + tp_dist if signal_side == "BUY" else entry_price - tp_dist
-    bep_trigger_price = entry_price + sl_dist if signal_side == "BUY" else entry_price - sl_dist
+        risk_budget_usd = available_capital * config.RISK_PORTFOLIO_PERCENT
+        ideal_notional = risk_budget_usd / sl_percent
+        notional = max(config.MIN_NOTIONAL + 0.15, ideal_notional)
+        if available_capital < 20.0:
+            notional = min(notional, config.MAX_ORDER_NOTIONAL)
 
-    risk_budget_usd = available_capital * config.RISK_PORTFOLIO_PERCENT  # 0.5% modal
-    ideal_notional = risk_budget_usd / sl_percent
-    notional = max(config.MIN_NOTIONAL + 0.15, ideal_notional)
-    if available_capital < 20.0:
-        notional = min(notional, config.MAX_ORDER_NOTIONAL)
+        executable_signal = {
+            "symbol": symbol,
+            "side": signal_side,
+            "entry_price": entry_price,
+            "sl_price": sl_price,
+            "tp_price": tp_price,
+            "bep_trigger_price": bep_trigger_price,
+            "sl_percent": round(sl_percent * 100, 2),
+            "tp_percent": round(tp_percent * 100, 2),
+            "rr_ratio": config.RR_RATIO,
+            "dynamic_leverage": dynamic_leverage,
+            "notional": round(notional, 2),
+            "risk_usd": round(notional * sl_percent, 4),
+            "reward_usd": round(notional * tp_percent, 4),
+            "score": final_score,
+            "setup_name": setup_name,
+            "setup_desc": setup_desc,
+            "market_structure": structure,
+            "sweep_status": sweep_status,
+            "ema13": round(ema13, 4),
+            "ema21": round(ema21, 4),
+            "ema200": round(ema200_htf, 4),
+            "nearest_support": round(nearest_support, 4),
+            "nearest_resistance": round(nearest_resistance, 4),
+            "liquidation_pools": liq_pools,
+            "oi_trend": oi_trend,
+            "taker_ratio": taker_ratio,
+            "ls_ratio": ls_ratio,
+            "vol_ratio": round(c_vol / avg_vol, 2) if avg_vol > 0 else 1.0
+        }
 
     return {
-        "side": signal_side,
-        "entry_price": entry_price,
-        "sl_price": sl_price,
-        "tp_price": tp_price,
-        "bep_trigger_price": bep_trigger_price,
-        "sl_percent": round(sl_percent * 100, 2),
-        "tp_percent": round(tp_percent * 100, 2),
-        "rr_ratio": config.RR_RATIO,
-        "dynamic_leverage": dynamic_leverage,
-        "notional": round(notional, 2),
-        "score": final_score,
-        "setup_name": setup_name,
-        "setup_desc": setup_desc,
+        "symbol": symbol,
+        "price": latest_price,
+        "structure_timeframe": config.STRUCTURE_TIMEFRAME,
+        "execution_timeframe": config.TIMEFRAME,
         "market_structure": structure,
-        "ema13": round(ema13, 4),
-        "ema21": round(ema21, 4),
-        "ema200": round(ema200, 4),
+        "structure_desc": structure_info.get("desc", ""),
+        "trend_bias": structure_info.get("bias", "NEUTRAL"),
+        "ema13_5m": round(ema13, 4),
+        "ema21_5m": round(ema21, 4),
+        "ema200_15m": round(ema200_htf, 4),
         "nearest_support": round(nearest_support, 4),
         "nearest_resistance": round(nearest_resistance, 4),
+        "liquidation_pools": liq_pools,
+        "sweep_status": sweep_status,
         "oi_trend": oi_trend,
+        "oi_delta": deriv.get("oi_delta", 0.0),
         "taker_ratio": taker_ratio,
         "ls_ratio": ls_ratio,
-        "vol_ratio": round(c_vol / avg_vol, 2) if avg_vol > 0 else 1.0
+        "vol_ratio": round(c_vol / avg_vol, 2) if avg_vol > 0 else 1.0,
+        "has_volume_expansion": has_volume_expansion,
+        "setup_name": setup_name or "NONE",
+        "setup_desc": setup_desc or "Menunggu setup terbentuk",
+        "score": final_score,
+        "signal": executable_signal
     }
 
-def check_signal(ohlcv: List[List[float]], available_capital: float = 10.0, leverage: int = 10, ls_data: Optional[Dict[str, float]] = None) -> Optional[Dict[str, Any]]:
+def check_signal_from_ohlcv(
+    ohlcv: List[List[float]],
+    available_capital: float = 10.0,
+    leverage: int = 10,
+    derivatives_data: Optional[Dict[str, Any]] = None,
+    ls_data: Optional[Dict[str, Any]] = None
+) -> Optional[Dict[str, Any]]:
+    """Kompatibilitas wrapper untuk evaluasi sinyal native."""
+    deriv = derivatives_data or ls_data
+    analysis = analyze_coin_comprehensive("PAIR", ohlcv, ohlcv, deriv, available_capital, leverage)
+    return analysis.get("signal")
+
+def check_signal(
+    ohlcv: List[List[float]],
+    available_capital: float = 10.0,
+    leverage: int = 10,
+    ls_data: Optional[Dict[str, float]] = None
+) -> Optional[Dict[str, Any]]:
     """Alias kompatibilitas ke check_signal_from_ohlcv."""
     return check_signal_from_ohlcv(ohlcv, available_capital, leverage, derivatives_data=ls_data)
-

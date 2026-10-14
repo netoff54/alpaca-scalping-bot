@@ -49,11 +49,13 @@ class BinanceScalper:
         self.winning_trades: int = 0
         self.total_pnl_usd: float = 0.0
         
-        # Cache Semesta 200 koin crypto murni & Sistem Rotasi 10 Batch (20 koin per batch)
+        # Cache Semesta 500 koin crypto murni & Sistem Rotasi 1 Koin Per Siklus
         self._cached_universe_symbols: List[Dict[str, Any]] = []
         self._last_universe_refresh: float = 0.0
         self._current_rotation_index: int = 0
-        self.current_rotation_info: str = "Rotasi 1/10 (Koin 1-20)"
+        self.current_rotation_info: str = "Rotasi 1/500 (Menyiapkan Analisis)"
+        self.current_coin_analysis: Dict[str, Any] = {}
+        self._coins_analysis_history: Dict[str, Dict[str, Any]] = {}
         self._last_wallet_db_snapshot: float = 0.0
         
         # Balance cache & Rate limit cooldown
@@ -247,10 +249,13 @@ class BinanceScalper:
 
     def scan_top_coins(self):
         """
-        Memindai 200 koin crypto murni dengan sistem rotasi bertahap:
-        - 20 koin per siklus scan (~3.5 detik)
-        - 10 rotasi berturut-turut (10 x 20 = 200 koin)
-        - Mengumpulkan sinyal dari seluruh koin secara bergantian tanpa membebani rate limit
+        Memindai semesta koin (hingga 500 koin) dengan sistem rotasi 1 koin per siklus:
+        - 1 koin dianalisis secara komprehensif & mendalam (Multi-Timeframe 15m + 5m)
+        - Pemetaan Area Likuidasi (Liquidation Pools Long & Short)
+        - Deteksi Reaksi Price Action & Liquidity Sweep Reclaim
+        - Struktur Pasar (HH/HL vs LH/LL) & S&R Teruji >= 2 kali
+        - Retest EMA 13 & 21 5m, Volume Expansion, Open Interest, & CVD Taker Delta
+        - Sebanyak 500 rotasi berturut-turut untuk menyisir seluruh koin tanpa screening singkat.
         """
         if self.client.is_banned() or self.client.is_scan_throttled():
             return
@@ -267,102 +272,78 @@ class BinanceScalper:
                 return
 
             total_univ = len(universe)
-            batch_size = config.ROTATION_BATCH_SIZE
-            total_rots = max(1, math.ceil(total_univ / batch_size))
-            rot_idx = self._current_rotation_index % total_rots
+            rot_idx = self._current_rotation_index % total_univ
+            item = universe[rot_idx]
+            sym = item["symbol"]
+            q_vol = item["quoteVolume"]
+            rank = rot_idx + 1
 
-            start_idx = rot_idx * batch_size
-            end_idx = min(total_univ, start_idx + batch_size)
-            current_batch = universe[start_idx:end_idx]
-
-            self.current_rotation_info = f"Rotasi {rot_idx + 1}/{total_rots} (Koin {start_idx + 1}-{end_idx} dari {total_univ})"
+            self.current_rotation_info = f"Rotasi {rank}/{total_univ} (Analisis Menyeluruh: {sym})"
 
             bal = self.get_futures_balance()
             cap = bal["available"] if bal["available"] >= 1.0 else config.DEFAULT_CAPITAL
-            
-            results = []
-            signals = []
-            for rank_offset, item in enumerate(current_batch, 1):
-                if self.client.is_banned() or self.client.is_scan_throttled():
-                    break
-                sym = item["symbol"]
-                q_vol = item["quoteVolume"]
-                rank = start_idx + rank_offset
-                try:
-                    # Jeda adaptif: 150ms normal, atau 1000ms jika weight bursa tinggi (>2200)
-                    spacing = 1.0 if self.client.current_weight_1m >= 2200 else 0.15
-                    time.sleep(spacing)
-                    ohlcv = self.client.fetch_klines(sym, interval=config.TIMEFRAME, limit=config.CANDLE_LIMIT)
-                    if not ohlcv or len(ohlcv) < config.EMA_TREND + 5:
-                        continue
-                    closes = [c[4] for c in ohlcv]
-                    highs = [c[2] for c in ohlcv]
-                    lows = [c[3] for c in ohlcv]
-                    latest_price = closes[-1]
 
-                    # Ambil data derivatif: Global L/S ratio, Open Interest trend, Taker CVD ratio
-                    deriv_data = self.client.fetch_derivatives_data(sym, period="5m")
-                    sig = strategy.check_signal_from_ohlcv(ohlcv, available_capital=cap, leverage=config.LEVERAGE, derivatives_data=deriv_data)
-                    
-                    ema_trend = strategy.calculate_ema_series(closes, config.EMA_TREND)[-2]
-                    ema13_val = strategy.calculate_ema_series(closes, config.EMA_FAST)[-2]
-                    ema21_val = strategy.calculate_ema_series(closes, config.EMA_SLOW)[-2]
-                    atr_val = strategy.calculate_atr_series(highs, lows, closes, config.ATR_PERIOD)[-2]
-                    is_bullish = closes[-2] > ema_trend
-                    
-                    del ohlcv
-                    del closes
-                    del highs
-                    del lows
-                    
-                    coin_data = {
-                        "rank": rank,
-                        "symbol": sym,
-                        "price": latest_price,
-                        "vol_24h_m": round(q_vol / 1_000_000, 2),
-                        "trend": "BULLISH" if is_bullish else "BEARISH",
-                        "market_structure": sig.get("market_structure") if sig else ("UPTREND" if is_bullish else "DOWNTREND"),
-                        "ema13": round(ema13_val, 4),
-                        "ema21": round(ema21_val, 4),
-                        "ema200": round(ema_trend, 4),
-                        "atr": round(atr_val, 4),
-                        "long_pct": deriv_data.get("long_pct", 50.0),
-                        "short_pct": deriv_data.get("short_pct", 50.0),
-                        "ls_ratio": deriv_data.get("ratio", 1.0),
-                        "oi_trend": deriv_data.get("oi_trend", "NEUTRAL"),
-                        "taker_ratio": deriv_data.get("taker_ratio", 1.0),
-                        "setup_name": sig.get("setup_name") if sig else "NONE",
-                        "setup_desc": sig.get("setup_desc") if sig else "NONE",
-                        "score": sig.get("score", 50.0) if sig else 50.0,
-                        "signal": sig
-                    }
-                    results.append(coin_data)
-                    
-                    if sig is not None:
-                        sig_data = sig.copy()
-                        sig_data["symbol"] = sym
-                        sig_data["rank"] = rank
-                        sig_data["vol_24h_m"] = round(q_vol / 1_000_000, 2)
-                        signals.append(sig_data)
-                except Exception:
-                    continue
-                    
-            gc.collect()
+            # 1. Fetch Multi-Timeframe: 15m untuk Struktur & Area Likuidasi, 5m untuk Eksekusi Scalp
+            ohlcv_15m = self.client.fetch_klines(sym, interval=config.STRUCTURE_TIMEFRAME, limit=config.CANDLE_LIMIT)
+            time.sleep(0.08)
+            ohlcv_5m = self.client.fetch_klines(sym, interval=config.TIMEFRAME, limit=config.CANDLE_LIMIT)
+            time.sleep(0.08)
+            deriv_data = self.client.fetch_derivatives_data(sym, period="5m")
 
-            # HASIL LANGSUNG PER ROTASI (Analisis fresh langsung dari 20 koin detik ini tanpa akumulasi basi)
-            self.ranked_pairs = results
-            self.bullish_count = sum(1 for r in results if r["trend"] == "BULLISH")
-            self.bearish_count = sum(1 for r in results if r["trend"] == "BEARISH")
-            
-            # Sinyal aktif fresh langsung dari batch rotasi detik ini
-            self.active_signals = sorted(signals, key=lambda x: x.get("score", 0), reverse=True)
-            self.watchlist = sorted(results, key=lambda x: x.get("score", 50.0), reverse=True)[:8]
-            
+            if not ohlcv_5m or len(ohlcv_5m) < 25:
+                self._current_rotation_index = (self._current_rotation_index + 1) % total_univ
+                return
+
+            # 2. Analisis Menyeluruh Sesuai Master Blueprint Akademi Crypto
+            analysis = strategy.analyze_coin_comprehensive(
+                symbol=sym,
+                ohlcv_htf=ohlcv_15m,
+                ohlcv_ltf=ohlcv_5m,
+                derivatives_data=deriv_data,
+                available_capital=cap,
+                leverage=config.LEVERAGE
+            )
+            analysis["rank"] = rank
+            analysis["vol_24h_m"] = round(q_vol / 1_000_000, 2)
+
+            self.current_coin_analysis = analysis
+            self._coins_analysis_history[sym] = analysis
+
+            # Perbarui ranked pairs dari histori koin yang telah dianalisis (50 koin aktif terakhir)
+            self.ranked_pairs = list(self._coins_analysis_history.values())[-50:]
+            self.bullish_count = sum(1 for r in self.ranked_pairs if r.get("trend_bias") == "BULLISH")
+            self.bearish_count = sum(1 for r in self.ranked_pairs if r.get("trend_bias") == "BEARISH")
+
+            # Perbarui Watchlist berdasarkan skor kualitas & kedekatan dengan pool likuidasi
+            sorted_by_score = sorted(
+                self._coins_analysis_history.values(),
+                key=lambda x: (x.get("score", 0), -x.get("liquidation_pools", {}).get("nearest_pool_distance_pct", 99.0)),
+                reverse=True
+            )
+            self.watchlist = sorted_by_score[:8]
+
+            # 3. Evaluasi Sinyal Eksekusi
+            sig = analysis.get("signal")
+            if sig is not None and sig.get("score", 0) >= config.MIN_SETUP_SCORE:
+                console.log(f"[bold green]🎯 SETUP DITEMUKAN PADA {sym}! {sig['setup_name']} (Skor: {sig['score']})[/bold green]")
+                existing_syms = [s["symbol"] for s in self.active_signals]
+                if sym not in existing_syms:
+                    sig_entry = sig.copy()
+                    sig_entry["rank"] = rank
+                    sig_entry["vol_24h_m"] = round(q_vol / 1_000_000, 2)
+                    self.active_signals.insert(0, sig_entry)
+                    self.active_signals = self.active_signals[:8]
+                    db.record_signals([sig_entry])
+
+                # Eksekusi jika tidak ada posisi atau order aktif
+                if not self.active_position and not self.active_order and not self.client.is_banned():
+                    self.execute_limit_order(sig)
+
             self.last_scan_duration_sec = round(time.time() - t_start, 2)
             self.last_scan_time = time.strftime("%Y-%m-%d %H:%M:%S")
 
             # Maju ke rotasi berikutnya
-            self._current_rotation_index = (self._current_rotation_index + 1) % total_rots
+            self._current_rotation_index = (self._current_rotation_index + 1) % total_univ
             
             # Rekam sinyal dan snapshot saldo ke Neon Tech
             if self.active_signals:

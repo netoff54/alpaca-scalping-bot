@@ -85,11 +85,11 @@ def index():
             "margin_mode": "ISOLATED",
             "leverage": f"Dinamis 10x - 20x (Sesuai Hasil Analisis)",
             "order_type": "100% LIMIT MAKER ONLY (Masuk & Keluar Post-Only GTX / Fee Terendah)",
-            "strategy_model": "Price Action & S&R + EMA 13/21 Retest + Volume & Data Derivatif (Akademi Crypto)",
-            "scanning_engine": "Rotasi Realtime 20 Koin x 10 Batch = Semesta 200 Koin (Analisis Langsung Tanpa Akumulasi Basi)",
+            "strategy_model": "Multi-Timeframe 15m/5m + Liquidation Pools + S&R + EMA 13/21 + OI & CVD (Akademi Crypto)",
+            "scanning_engine": "Analisis Menyeluruh 1 Koin Per Rotasi (500 Rotasi = 500 Koin Komprehensif Tanpa Screening Singkat)",
             "rotation_status": scalper.current_rotation_info,
             "universe_total_coins": len(scalper._cached_universe_symbols),
-            "current_batch_coins": len(scalper.ranked_pairs),
+            "current_coin_deep_analysis": scalper.current_coin_analysis,
             "sentiment_flow": "Binance Futures Open Interest + CVD Delta + L/S Account Ratio",
             "risk_model": "0.5% Risiko Portofolio (Ketat RRR 1:2 / TP +1.4% SL -0.7%) + Geser SL ke BEP pada 1R (+0.7%)",
             "futures_wallet_usdt": bal["total_wallet"],
@@ -162,10 +162,12 @@ def positions():
 
 @app.get("/scan-results")
 def scan_results():
-    """Endpoint detail hasil pemindaian Top 200 koin Binance Futures."""
+    """Endpoint detail hasil pemindaian Top 500 koin Binance Futures."""
     return {
         "last_scan_time": scalper.last_scan_time,
         "last_scan_duration_sec": scalper.last_scan_duration_sec,
+        "rotation_status": scalper.current_rotation_info,
+        "current_coin_deep_analysis": scalper.current_coin_analysis,
         "total_coins_scanned": len(scalper.ranked_pairs),
         "bullish_count": scalper.bullish_count,
         "bearish_count": scalper.bearish_count,

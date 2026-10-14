@@ -15,15 +15,17 @@ class BotConfig:
     # --- Database Neon Tech (PostgreSQL Cloud) ---
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
-    # --- Market Scanning: Rotasi 20 Koin x 10 Batch = 200 Koin Crypto Murni ---
-    SCAN_UNIVERSE_LIMIT: int = 200         # Total 200 koin crypto murni (non-stablecoin)
-    ROTATION_BATCH_SIZE: int = 20          # Ukuran batch per rotasi: 20 koin per siklus
-    TOTAL_ROTATIONS: int = 10              # 10 kali rotasi berturut-turut (10 x 20 = 200 koin)
-    TOP_COINS_LIMIT: int = 20              # Kompatibilitas alias ke 20 koin per siklus
-    MIN_24H_VOLUME_USD: float = 3_000_000.0   # Minimal volume $3M agar semesta 200 koin terpenuhi
-    SCAN_INTERVAL_SECONDS: int = 15        # Siklus rotasi setiap 15 detik
-    TIMEFRAME: str = "1m"                  # Timeframe 1 menit
-    CANDLE_LIMIT: int = 220                # 220 candle untuk perhitungan EMA 200 yang presisi
+    # --- Market Scanning: 500 Koin Murni, 1 Koin Per Rotasi (Analisis Menyeluruh) ---
+    SCAN_UNIVERSE_LIMIT: int = 500         # Total hingga 500 koin crypto murni (non-stablecoin)
+    ROTATION_BATCH_SIZE: int = 1           # 1 Koin per rotasi (Analisis Menyeluruh, Bukan Screening Singkat)
+    TOTAL_ROTATIONS: int = 500             # 500 rotasi berurutan dari koin 1 s/d koin 500
+    TOP_COINS_LIMIT: int = 1               # 1 koin per rotasi
+    MIN_24H_VOLUME_USD: float = 1_000_000.0   # Minimal volume $1M agar semesta 500 koin terpenuhi
+    SCAN_INTERVAL_SECONDS: int = 3         # Siklus 3 detik per koin (500 koin = 25 menit 1 siklus penuh)
+    TIMEFRAME: str = "5m"                  # Timeframe eksekusi scalping 5 menit (Sesuai Akademi Crypto)
+    STRUCTURE_TIMEFRAME: str = "15m"       # Timeframe struktur pasar, S&R teruji, & Area Likuidasi 15 menit
+    CANDLE_LIMIT: int = 150                # 150 candle untuk perhitungan EMA 13/21/200 yang presisi
+    MIN_SETUP_SCORE: float = 80.0          # Skor minimal agar sinyal dieksekusi (hanya setup matang)
 
     # --- Account & Risk-Budget Management (0.5% Risiko Portofolio) ---
     DEFAULT_CAPITAL: float = 10.0          # Modal dasar $10
