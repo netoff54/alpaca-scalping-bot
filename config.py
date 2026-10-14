@@ -53,6 +53,7 @@ class BotConfig:
     EMA_SLOW: int = 21                     # EMA 21 (Sesuai video: Moving Average scalping ideal)
     EMA_TREND: int = 200                   # EMA 200 (Filter tren makro pasar)
     ATR_PERIOD: int = 14                   # Pengukuran volatilitas
+    RSI_PERIOD: int = 14                   # Relative Strength Index (Poin 7 Kalimasada)
     VOLUME_SPIKE_FACTOR: float = 1.15      # Konfirmasi volume transaksi >= 115% rata-rata
 
     # --- Risk / Reward Ratio 1:2 Ketat & Proteksi BEP ---
