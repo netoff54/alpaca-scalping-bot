@@ -7,10 +7,7 @@ from rich.console import Console
 
 console = Console()
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://neondb_owner:npg_9cdnsQ6YefiX@ep-small-butterfly-b4dv7o7m-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require"
-)
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 class NeonDatabase:
     """
@@ -18,11 +15,13 @@ class NeonDatabase:
     Menggunakan schema khusus 'binance_scalper' agar 100% terpisah dari database Bitget.
     """
     def __init__(self, db_url: str = DATABASE_URL):
-        self.db_url = db_url
+        self.db_url = db_url or os.getenv("DATABASE_URL", "")
         self._is_connected = False
 
     def get_connection(self):
         """Membuat koneksi ke PostgreSQL Neon Tech dengan SSL require."""
+        if not self.db_url:
+            raise ValueError("DATABASE_URL belum dikonfigurasi di environment variable.")
         return psycopg2.connect(self.db_url, sslmode="require", connect_timeout=10)
 
     def init_db(self):

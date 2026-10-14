@@ -13,10 +13,7 @@ class BotConfig:
     API_SECRET: str = os.getenv("BINANCE_API_SECRET", "")
 
     # --- Database Neon Tech (PostgreSQL Cloud) ---
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        "postgresql://neondb_owner:npg_9cdnsQ6YefiX@ep-small-butterfly-b4dv7o7m-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require"
-    )
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
     # --- Market Scanning: Rotasi 20 Koin x 10 Batch = 200 Koin Crypto Murni ---
     SCAN_UNIVERSE_LIMIT: int = 200         # Total 200 koin crypto murni (non-stablecoin)
