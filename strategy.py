@@ -442,15 +442,15 @@ def analyze_coin_comprehensive(
 
     final_score = min(100.0, round(score, 2))
 
-    # Dynamic Leverage
+    # Dynamic Leverage (Fixed 50x sesuai preferensi pengguna)
     dynamic_leverage = config.LEVERAGE
     if config.DYNAMIC_LEVERAGE_ENABLED:
         if final_score >= 85:
-            dynamic_leverage = 20
+            dynamic_leverage = 50
         elif final_score >= 75:
-            dynamic_leverage = 15
+            dynamic_leverage = 35
         else:
-            dynamic_leverage = 10
+            dynamic_leverage = 20
 
     # Manajemen Risiko Ketat RR 1:2
     executable_signal = None
@@ -465,9 +465,10 @@ def analyze_coin_comprehensive(
         tp_price = entry_price + tp_dist if signal_side == "BUY" else entry_price - tp_dist
         bep_trigger_price = entry_price + sl_dist if signal_side == "BUY" else entry_price - sl_dist
 
-        risk_budget_usd = available_capital * config.RISK_PORTFOLIO_PERCENT
-        ideal_notional = risk_budget_usd / sl_percent
-        notional = max(config.MIN_NOTIONAL + 0.15, ideal_notional)
+        # 0.5% dari total saldo dialokasikan sebagai margin per posisi (Leverage 50x)
+        target_margin_usd = available_capital * config.RISK_PORTFOLIO_PERCENT
+        raw_notional = target_margin_usd * dynamic_leverage
+        notional = max(config.MIN_NOTIONAL + 0.15, raw_notional)
         if available_capital < 20.0:
             notional = min(notional, config.MAX_ORDER_NOTIONAL)
 

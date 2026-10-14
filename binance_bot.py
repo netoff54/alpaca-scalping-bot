@@ -161,16 +161,16 @@ class BinanceScalper:
 
     def get_compounded_notional(self) -> float:
         """
-        Menghitung ukuran notional posisi berdasarkan model Risk-Budget 0.5% portofolio.
-        Jika SL = 1.0%, kerugian maksimal saat SL tepat 0.5% dari saldo kas portofolio.
+        Menghitung ukuran notional posisi berdasarkan model 0.5% margin dari saldo portofolio dengan leverage 50x.
+        Jaminan minimal $5.15 agar memenuhi syarat batas minimum notional Binance ($5.00).
         """
         bal = self.get_futures_balance()
         avail = bal["available"]
         base_wallet = avail if avail >= 1.0 else config.DEFAULT_CAPITAL
         
-        risk_budget = base_wallet * config.RISK_PORTFOLIO_PERCENT
-        ideal_notional = risk_budget / config.SL_PERCENT
-        notional = max(config.MIN_NOTIONAL + 0.15, ideal_notional)
+        target_margin = base_wallet * config.RISK_PORTFOLIO_PERCENT
+        raw_notional = target_margin * config.LEVERAGE
+        notional = max(config.MIN_NOTIONAL + 0.15, raw_notional)
         if base_wallet < 20.0:
             notional = min(notional, config.MAX_ORDER_NOTIONAL)
         return round(notional, 2)
@@ -404,7 +404,7 @@ class BinanceScalper:
             effective_notional = formatted_qty * formatted_price
             margin_used = effective_notional / dynamic_leverage
             if effective_notional > config.MAX_ORDER_NOTIONAL:
-                console.log(f"[bold yellow]🛡️ Filter Ukuran Akun: Minimum order {symbol} bernilai ${effective_notional:.2f} (Margin: ${margin_used:.2f}). Melewati agar margin tetap ~$0.25 - $0.50 (Maks Notional: ${config.MAX_ORDER_NOTIONAL:.2f}).[/bold yellow]")
+                console.log(f"[bold yellow]🛡️ Filter Ukuran Akun: Minimum order {symbol} bernilai ${effective_notional:.2f} (Margin: ${margin_used:.2f}). Melewati agar margin tetap aman (Maks Notional: ${config.MAX_ORDER_NOTIONAL:.2f}).[/bold yellow]")
                 return False
 
             console.log(f"[bold cyan]Dispatching Maker Limit Order (Risk: ${sig.get('risk_usd', 0.05):.3f}, Leverage: {dynamic_leverage}x): {side} {formatted_qty} {symbol} @ {formatted_price} (Notional: ${effective_notional:.2f}, Margin: ${margin_used:.2f})[/bold cyan]")

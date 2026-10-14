@@ -27,17 +27,17 @@ class BotConfig:
     CANDLE_LIMIT: int = 150                # 150 candle untuk perhitungan EMA 13/21/200 yang presisi
     MIN_SETUP_SCORE: float = 80.0          # Skor minimal agar sinyal dieksekusi (hanya setup matang)
 
-    # --- Account & Risk-Budget Management (0.5% Risiko Portofolio) ---
+    # --- Account & Risk-Budget Management (0.5% Margin Portofolio x 50x Leverage) ---
     DEFAULT_CAPITAL: float = 10.0          # Modal dasar $10
-    RISK_PORTFOLIO_PERCENT: float = 0.005  # Resikokan 0.5% dari total portofolio
+    RISK_PORTFOLIO_PERCENT: float = 0.005  # 0.5% margin dari total portofolio per posisi
     COMPOUNDING_ENABLED: bool = True       # Compounding dinamis berdasarkan saldo
-    LEVERAGE: int = 10                     # Leverage basis (disesuaikan dinamis 10x - 20x sesuai analisis)
-    DYNAMIC_LEVERAGE_ENABLED: bool = True  # Aktifkan penyesuaian leverage dinamis berdasarkan skor sinyal
+    LEVERAGE: int = 50                     # Leverage 50x tetap sesuai instruksi
+    DYNAMIC_LEVERAGE_ENABLED: bool = False # Fixed 50x leverage
     MARGIN_MODE: str = "ISOLATED"          # WAJIB ISOLATED MARGIN
     ORDER_TYPE: str = "LIMIT"              # WAJIB LIMIT ORDER (Maker Only - Fee Rendah)
     CLOSE_ORDER_TYPE: str = "LIMIT"        # WAJIB LIMIT ORDER KELUAR (Maker Close - Post Only GTX)
     MIN_NOTIONAL: float = 5.0              # Nilai notional minimum Binance ($5.0)
-    MAX_ORDER_NOTIONAL: float = 6.50       # Batas maksimal notional untuk akun modal mikro ($11 USDT)
+    MAX_ORDER_NOTIONAL: float = 12.00      # Batas maksimal notional untuk akun modal mikro (Margin tetap <= $0.24 pada 50x)
 
     # --- Limit Order & Anti-FOMO Settings ---
     LIMIT_TIMEOUT_SECONDS: int = 30        # Batalkan limit order jika tidak terisi dalam 30 detik
