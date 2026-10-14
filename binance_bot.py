@@ -53,8 +53,6 @@ class BinanceScalper:
         self._cached_universe_symbols: List[Dict[str, Any]] = []
         self._last_universe_refresh: float = 0.0
         self._current_rotation_index: int = 0
-        self._universe_signals_pool: Dict[str, Dict[str, Any]] = {}
-        self._universe_coin_data: Dict[str, Dict[str, Any]] = {}
         self.current_rotation_info: str = "Rotasi 1/10 (Koin 1-20)"
         self._last_wallet_db_snapshot: float = 0.0
         
@@ -322,38 +320,28 @@ class BinanceScalper:
                         "candlestick_pattern": sig.get("candlestick_pattern") if sig else "NONE",
                         "ema_status": sig.get("ema_status") if sig else "NONE",
                         "n_pattern": sig.get("n_pattern") if sig else "NONE",
-                        "signal": sig,
-                        "updated_at": now
+                        "signal": sig
                     }
-                    self._universe_coin_data[sym] = coin_data
+                    results.append(coin_data)
                     
                     if sig is not None:
                         sig_data = sig.copy()
                         sig_data["symbol"] = sym
                         sig_data["rank"] = rank
                         sig_data["vol_24h_m"] = round(q_vol / 1_000_000, 2)
-                        sig_data["detected_at"] = now
-                        self._universe_signals_pool[sym] = sig_data
-                    else:
-                        self._universe_signals_pool.pop(sym, None)
+                        signals.append(sig_data)
                 except Exception:
                     continue
                     
             gc.collect()
 
-            # Bersihkan sinyal yang sudah basi (> 5 menit tidak terdeteksi lagi)
-            expired_syms = [s for s, data in self._universe_signals_pool.items() if now - data.get("detected_at", now) > 300]
-            for s in expired_syms:
-                self._universe_signals_pool.pop(s, None)
+            # HASIL LANGSUNG PER ROTASI (Analisis fresh langsung dari 20 koin detik ini tanpa akumulasi basi)
+            self.ranked_pairs = results
+            self.bullish_count = sum(1 for r in results if r["trend"] == "BULLISH")
+            self.bearish_count = sum(1 for r in results if r["trend"] == "BEARISH")
             
-            # Perbarui ranked pairs dan watchlist dari seluruh koin yang telah terakumulasi
-            accumulated_coins = list(self._universe_coin_data.values())
-            self.ranked_pairs = accumulated_coins
-            self.bullish_count = sum(1 for r in accumulated_coins if r["trend"] == "BULLISH")
-            self.bearish_count = sum(1 for r in accumulated_coins if r["trend"] == "BEARISH")
-            
-            # Sinyal aktif terurut berdasarkan skor kualitas tertinggi
-            self.active_signals = sorted(self._universe_signals_pool.values(), key=lambda x: x.get("score", 0), reverse=True)
+            # Sinyal aktif fresh langsung dari batch rotasi detik ini
+            self.active_signals = sorted(signals, key=lambda x: x.get("score", 0), reverse=True)
             
             def _rsi_dist(item):
                 r = item.get("rsi", 50.0)
@@ -361,7 +349,7 @@ class BinanceScalper:
                 d_sell = 0.0 if (config.RSI_SELL_MIN <= r <= config.RSI_SELL_MAX) else (config.RSI_SELL_MIN - r if r < config.RSI_SELL_MIN else r - config.RSI_SELL_MAX)
                 return min(d_buy, d_sell)
 
-            self.watchlist = sorted(accumulated_coins, key=_rsi_dist)[:8]
+            self.watchlist = sorted(results, key=_rsi_dist)[:8]
             
             self.last_scan_duration_sec = round(time.time() - t_start, 2)
             self.last_scan_time = time.strftime("%Y-%m-%d %H:%M:%S")
