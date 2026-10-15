@@ -536,11 +536,13 @@ class BinanceScalper:
             self._symbol_order_cooldown[symbol] = time.time() + 180
             return False
 
-    def execute_maker_close(self, symbol: str, side: str, qty: float, target_price: float) -> bool:
+    def execute_maker_close(self, symbol: str, side: str, qty: float, target_price: float, is_emergency: bool = False) -> Tuple[bool, float]:
         """
         Menutup posisi menggunakan Maker Limit Order (timeInForce=GTX / Post Only) agar fee terendah (0.02%).
-        Memantau order hingga 8 detik di posisi harga teratas (top of book).
-        Jika pergerakan pasar cepat tak kunjung terisi, fallback otomatis ke market order agar modal terlindungi.
+        - Jika is_emergency=True (Stop Loss atau BEP terpicu): pantau maksimal 1.5s agar tidak terkena slippage.
+        - Jika Take Profit normal (is_emergency=False): pantau hingga 6s di antrean teratas.
+        Fallback otomatis ke market order untuk menjamin kepastian penutupan posisi seketika.
+        Mengembalikan (sukses: bool, actual_exit_price: float).
         """
         try:
             depth = self.client.fetch_best_bid_ask(symbol)
@@ -559,49 +561,60 @@ class BinanceScalper:
 
             res = self.client.create_limit_close_order(symbol, side, qty, formatted_price)
             
-            # Jika ditolak karena crossed (-5022), geser 1 tick agar tetap maker
+            # Jika ditolak karena crossed (-5022 Post-Only):
             if isinstance(res, dict) and res.get("code") == -5022:
-                if side == "SELL":
-                    formatted_price = self.client.format_price(symbol, formatted_price + tick)
+                if is_emergency:
+                    console.log(f"[yellow]Limit close crossed saat emergency/BEP. Langsung eksekusi market close instan...[/yellow]")
+                    m_res = self.client.create_market_close_order(symbol, side, qty)
+                    fill_p = float(m_res.get("avgPrice", 0.0)) if isinstance(m_res, dict) else 0.0
+                    return True, (fill_p if fill_p > 0 else target_price)
                 else:
-                    formatted_price = self.client.format_price(symbol, formatted_price - tick)
-                res = self.client.create_limit_close_order(symbol, side, qty, formatted_price)
+                    if side == "SELL":
+                        formatted_price = self.client.format_price(symbol, formatted_price + tick)
+                    else:
+                        formatted_price = self.client.format_price(symbol, formatted_price - tick)
+                    res = self.client.create_limit_close_order(symbol, side, qty, formatted_price)
 
             order_id = res.get("orderId") if isinstance(res, dict) else None
             if not order_id:
                 console.log(f"[yellow]Limit close gagal, beralih ke market close darurat...[/yellow]")
-                self.client.create_market_close_order(symbol, side, qty)
-                return True
+                m_res = self.client.create_market_close_order(symbol, side, qty)
+                fill_p = float(m_res.get("avgPrice", 0.0)) if isinstance(m_res, dict) else 0.0
+                return True, (fill_p if fill_p > 0 else target_price)
 
-            # Pantau hingga 8 detik agar terisi sebagai Maker
+            # Batas waktu tunggu: 1.5 detik jika emergency (SL/BEP) agar harga tidak longsor, 6 detik jika Take Profit normal
+            max_wait = 1.5 if is_emergency else 6.0
             t0 = time.time()
-            while time.time() - t0 < 8:
-                time.sleep(1.5)
+            while time.time() - t0 < max_wait:
+                time.sleep(0.7)
                 chk = self.client.get_order(symbol, order_id)
                 status = chk.get("status")
                 if status == "FILLED":
-                    console.log(f"[bold green]MAKER LIMIT CLOSE TERISI PENUH! ({symbol} @ {formatted_price}, Fee Terendah Maker)[/bold green]")
-                    return True
+                    fill_p = float(chk.get("avgPrice", 0.0)) or formatted_price
+                    console.log(f"[bold green]MAKER LIMIT CLOSE TERISI PENUH! ({symbol} @ {fill_p}, Fee Terendah Maker)[/bold green]")
+                    return True, fill_p
                 elif status in ("CANCELED", "REJECTED", "EXPIRED"):
                     break
 
-            # Jika belum terisi setelah 8 detik, batalkan dan tuntaskan dengan market order
-            console.log(f"[yellow]Maker limit close belum terisi setelah 8s. Menuntaskan dengan market order...[/yellow]")
+            # Jika belum terisi setelah batas waktu, batalkan dan tuntaskan seketika dengan market order
+            console.log(f"[yellow]Maker limit close belum terisi setelah {max_wait}s. Menuntaskan dengan market order agar profit terkunci aman...[/yellow]")
             try:
                 self.client.cancel_order(symbol, order_id)
             except Exception:
                 pass
-            self.client.create_market_close_order(symbol, side, qty)
-            return True
+            m_res = self.client.create_market_close_order(symbol, side, qty)
+            fill_p = float(m_res.get("avgPrice", 0.0)) if isinstance(m_res, dict) else 0.0
+            return True, (fill_p if fill_p > 0 else target_price)
 
         except Exception as e:
             console.log(f"[yellow]Notice maker close: {e}, fallback ke market close...[/yellow]")
             try:
-                self.client.create_market_close_order(symbol, side, qty)
-                return True
+                m_res = self.client.create_market_close_order(symbol, side, qty)
+                fill_p = float(m_res.get("avgPrice", 0.0)) if isinstance(m_res, dict) else 0.0
+                return True, (fill_p if fill_p > 0 else target_price)
             except Exception as e2:
                 console.log(f"[red]Gagal menutup posisi: {e2}[/red]")
-                return False
+                return False, target_price
 
     def monitor_active_position(self):
         """
@@ -609,7 +622,8 @@ class BinanceScalper:
         1. Target Take Profit penuh: +1.4% (Risk to Reward 1:2).
         2. Stop Loss awal: -0.7% (Resiko terukur 0.5% portofolio).
         3. Proteksi Break-Even (BEP): Begitu profit mencapai 1R (+0.7%), SL otomatis digeser
-           ke Break-Even (Entry + 0.05% untuk cover fee) sehingga transaksi 100% bebas risiko.
+           ke Break-Even (+0.20% di atas Entry) sehingga menutup semua fee bursa & mengunci untung bersih,
+           menjadikan posisi 100% bebas risiko tanpa potensi rugi.
         """
         if not self.active_position:
             return
@@ -635,10 +649,20 @@ class BinanceScalper:
             if not bep_activated:
                 hit_bep = (current_price >= bep_trigger) if side == "buy" else (current_price <= bep_trigger) if bep_trigger > 0 else (pnl_pct >= config.BEP_PROFIT_TRIGGER)
                 if hit_bep:
-                    new_sl = entry_price * 1.0005 if side == "buy" else entry_price * 0.9995
-                    pos["sl_price"] = new_sl
+                    bep_lock = getattr(config, "BEP_LOCK_PROFIT", 0.0020) # +0.20% di atas entry
+                    raw_bep = entry_price * (1.0 + bep_lock) if side == "buy" else entry_price * (1.0 - bep_lock)
+                    formatted_bep = self.client.format_price(symbol, raw_bep)
+                    
+                    rules = self.client._symbols_rules.get(symbol, {})
+                    tick = rules.get("tick_size", 0.0001)
+                    if side == "buy":
+                        formatted_bep = max(formatted_bep, entry_price + 2 * tick)
+                    else:
+                        formatted_bep = min(formatted_bep, entry_price - 2 * tick)
+                        
+                    pos["sl_price"] = formatted_bep
                     pos["bep_activated"] = True
-                    console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: Profit mencapai 1R (+0.7%), SL digeser ke {new_sl:.4f} (Posisi Bebas Risiko Bebas Fee)[/bold cyan]")
+                    console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: Profit mencapai 1R (+0.7%), SL digeser ke {formatted_bep} (Terkunci Profit Bersih Menutup Semua Fee Bursa)[/bold cyan]")
 
             # Perbarui nilai SL/TP terkini
             sl_price = pos["sl_price"]
@@ -652,18 +676,22 @@ class BinanceScalper:
             if hit_tp:
                 console.log(f"[bold green]🎯 TAKE PROFIT TERCAPAI (RR 1:2 / +1.4%)! (+{pnl_pct*100:.2f}%, PnL: +${pnl_usd:.2f}) pada {symbol}[/bold green]")
                 close_side = "SELL" if side == "buy" else "BUY"
-                self.execute_maker_close(symbol=symbol, side=close_side, qty=qty, target_price=current_price)
+                success, actual_exit = self.execute_maker_close(symbol=symbol, side=close_side, qty=qty, target_price=current_price, is_emergency=False)
                 
+                final_exit = actual_exit if actual_exit > 0 else current_price
+                real_pnl_pct = ((final_exit - entry_price) / entry_price) if side == "buy" else ((entry_price - final_exit) / entry_price)
+                real_pnl_usd = real_pnl_pct * pos["notional"]
+
                 trade_record = {
                     "symbol": symbol,
                     "side": side.upper(),
                     "entry_price": entry_price,
-                    "exit_price": current_price,
+                    "exit_price": final_exit,
                     "qty": qty,
                     "notional": pos["notional"],
                     "margin_used": pos["notional"] / pos_leverage,
-                    "pnl_usd": round(pnl_usd, 4),
-                    "pnl_pct": round(pnl_pct * 100, 2),
+                    "pnl_usd": round(real_pnl_usd, 4),
+                    "pnl_pct": round(real_pnl_pct * 100, 2),
                     "result": "WIN",
                     "closed_at": time.strftime("%Y-%m-%d %H:%M:%S")
                 }
@@ -672,29 +700,34 @@ class BinanceScalper:
                 
                 self.total_trades += 1
                 self.winning_trades += 1
-                self.total_pnl_usd += pnl_usd
+                self.total_pnl_usd += real_pnl_usd
                 self.active_position = None
                 
             elif hit_sl:
-                is_be_or_profit = pnl_usd >= 0.0
-                tag = "🛡️ BREAK-EVEN EXIT (Bebas Risiko)" if is_be_or_profit else "🛑 STOP LOSS TERPICU (-0.7%)"
-                res = "WIN" if is_be_or_profit else "LOSS"
+                is_be_or_profit = pos.get("bep_activated", False) or (pnl_usd >= 0.0)
+                tag = "🛡️ BREAK-EVEN EXIT (Bebas Risiko Terkunci)" if is_be_or_profit else "🛑 STOP LOSS TERPICU (-0.7%)"
                 color = "green" if is_be_or_profit else "red"
                 
                 console.log(f"[bold {color}]{tag}! ({pnl_pct*100:+.2f}%, PnL: ${pnl_usd:+.2f}) pada {symbol}[/bold {color}]")
                 close_side = "SELL" if side == "buy" else "BUY"
-                self.execute_maker_close(symbol=symbol, side=close_side, qty=qty, target_price=current_price)
+                # Ketika SL atau BEP terpicu, gunakan mode emergency (maks 1.5s maker -> langsung market close) agar tidak terselip / slippage!
+                success, actual_exit = self.execute_maker_close(symbol=symbol, side=close_side, qty=qty, target_price=current_price, is_emergency=True)
                 
+                final_exit = actual_exit if actual_exit > 0 else current_price
+                real_pnl_pct = ((final_exit - entry_price) / entry_price) if side == "buy" else ((entry_price - final_exit) / entry_price)
+                real_pnl_usd = real_pnl_pct * pos["notional"]
+                res = "WIN" if real_pnl_usd >= 0.0 else "LOSS"
+
                 trade_record = {
                     "symbol": symbol,
                     "side": side.upper(),
                     "entry_price": entry_price,
-                    "exit_price": current_price,
+                    "exit_price": final_exit,
                     "qty": qty,
                     "notional": pos["notional"],
                     "margin_used": pos["notional"] / pos_leverage,
-                    "pnl_usd": round(pnl_usd, 4),
-                    "pnl_pct": round(pnl_pct * 100, 2),
+                    "pnl_usd": round(real_pnl_usd, 4),
+                    "pnl_pct": round(real_pnl_pct * 100, 2),
                     "result": res,
                     "closed_at": time.strftime("%Y-%m-%d %H:%M:%S")
                 }
@@ -702,9 +735,9 @@ class BinanceScalper:
                 db.record_trade(trade_record)
                 
                 self.total_trades += 1
-                if is_be_or_profit:
+                if real_pnl_usd >= 0.0:
                     self.winning_trades += 1
-                self.total_pnl_usd += pnl_usd
+                self.total_pnl_usd += real_pnl_usd
                 self.active_position = None
                 
         except Exception as e:

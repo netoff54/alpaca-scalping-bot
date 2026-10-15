@@ -21,8 +21,9 @@ function simulateMarket(numRuns = 100, tradesPerRun = 50, leverage = 20) {
   const FIXED_MARGIN = 0.50; // $0.50
   const TP_PCT = 0.014;      // +1.4%
   const SL_PCT = 0.007;      // -0.7%
-  const BEP_TRIGGER = 0.007; // +0.7% moves SL to +0.05%
-  const FEE_RATE = 0.0004;   // 0.02% open + 0.02% close
+  const BEP_TRIGGER = 0.007; // +0.7% moves SL to +0.20%
+  const BEP_LOCK_PROFIT = 0.0020; // +0.20% (menutup fee 0.07% + mengunci profit bersih)
+  const FEE_RATE = 0.0007;   // 0.02% maker open + 0.05% taker/market close
 
   // Strategy Setup Edge (Akademi Crypto: Multi-timeframe trend alignment + S&R bounce):
   // Historical statistical win rate for Trend-aligned Retest with 1:2 RRR:
@@ -55,8 +56,8 @@ function simulateMarket(numRuns = 100, tradesPerRun = 50, leverage = 20) {
         pnlPct = TP_PCT;
         totalWins++;
       } else if (rand < P_TP + P_BEP) {
-        // Trailed to Breakeven (locked +0.05% to cover fee)
-        pnlPct = 0.0005;
+        // Trailed to Breakeven (+0.20% lock-in, covering all fees with net profit)
+        pnlPct = BEP_LOCK_PROFIT;
         totalBeps++;
       } else {
         // Stop Loss

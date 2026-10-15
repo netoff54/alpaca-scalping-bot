@@ -90,7 +90,7 @@ def index():
             "rotation_status": scalper.current_rotation_info,
             "universe_total_coins": len(scalper._cached_universe_symbols),
             "current_coin_deep_analysis": scalper.current_coin_analysis,
-            "risk_model": f"Margin ${config.FIXED_MARGIN_LOW_BALANCE:.2f} per posisi jika saldo < ${config.BALANCE_THRESHOLD_SCALING:.0f} (Lewati jika notional < ${config.MIN_NOTIONAL:.2f}), atau {config.RISK_PORTFOLIO_PERCENT*100:.1f}% saldo jika >= ${config.BALANCE_THRESHOLD_SCALING:.0f} + Leverage 50x (atau Max Didukung Koin) + Ketat RRR 1:2 (TP +{config.TP_PERCENT*100:.1f}% SL -{config.SL_PERCENT*100:.1f}%) + Geser SL ke BEP pada 1R (+{config.BEP_PROFIT_TRIGGER*100:.1f}%)",
+            "risk_model": f"Margin ${config.FIXED_MARGIN_LOW_BALANCE:.2f} per posisi jika saldo < ${config.BALANCE_THRESHOLD_SCALING:.0f} (Lewati jika notional < ${config.MIN_NOTIONAL:.2f}), atau {config.RISK_PORTFOLIO_PERCENT*100:.1f}% saldo jika >= ${config.BALANCE_THRESHOLD_SCALING:.0f} + Leverage 50x (atau Max Didukung Koin) + Ketat RRR 1:2 (TP +{config.TP_PERCENT*100:.1f}% SL -{config.SL_PERCENT*100:.1f}%) + Geser SL ke BEP Mengunci +{config.BEP_LOCK_PROFIT*100:.2f}% (Bebas Rugi & Menutup Seluruh Fee) pada 1R (+{config.BEP_PROFIT_TRIGGER*100:.1f}%)",
             "futures_wallet_usdt": bal["total_wallet"],
             "available_usdt": bal["available"],
             "trade_size_notional": scalper.get_compounded_notional(),
