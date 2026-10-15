@@ -162,9 +162,9 @@ class BinanceScalper:
 
     def get_compounded_notional(self) -> float:
         """
-        Menghitung ukuran notional posisi berdasarkan aturan margin bertingkat (Leverage 50x):
-        - Saldo < $50: gunakan margin $0.20 (Notional $10.00 pada 50x)
-        - Saldo >= $50: kembali ke 0.5% margin per posisi dari total saldo
+        Menghitung ukuran notional posisi berdasarkan aturan margin bertingkat:
+        - Saldo < $100: gunakan margin $0.50 (Notional $25.00 pada 50x / $10.00 pada 20x)
+        - Saldo >= $100: kembali ke 0.5% margin per posisi dari total saldo
         """
         bal = self.get_futures_balance()
         avail = bal["available"]
@@ -235,8 +235,8 @@ class BinanceScalper:
                     if (min_q * last_price) > config.MAX_ORDER_NOTIONAL:
                         continue
 
-                    # Filter jika koin tidak bisa mencapai minimum order ($5.00) dengan margin $0.20 pada leverage maksimalnya
-                    # Koin dengan max leverage < 25x (misal 20x) tidak akan mencapai $5.00 notional pada margin $0.20
+                    # Filter jika koin tidak bisa mencapai minimum order ($5.00) dengan margin $0.50 pada leverage maksimalnya
+                    # Dengan margin $0.50, koin dengan leverage >= 10x ($0.50 * 10 = $5.00) sudah memenuhi minimum order
                     bal_avail = self._cached_balance.get("available", 0.0)
                     active_margin = config.FIXED_MARGIN_LOW_BALANCE if bal_avail < config.BALANCE_THRESHOLD_SCALING else (bal_avail * config.RISK_PORTFOLIO_PERCENT)
                     max_sym_lev = self.client.get_max_leverage(sym)
@@ -409,9 +409,9 @@ class BinanceScalper:
             bal = self.get_futures_balance()
             avail = bal["available"] if bal["available"] >= 1.0 else config.DEFAULT_CAPITAL
             if avail < config.BALANCE_THRESHOLD_SCALING:
-                target_margin = config.FIXED_MARGIN_LOW_BALANCE  # Tepat $0.20
+                target_margin = config.FIXED_MARGIN_LOW_BALANCE  # Tepat $0.50 (saldo < $100)
             else:
-                target_margin = avail * config.RISK_PORTFOLIO_PERCENT  # 0.5% dari saldo
+                target_margin = avail * config.RISK_PORTFOLIO_PERCENT  # 0.5% dari saldo (saldo >= $100)
 
             target_notional = target_margin * actual_leverage
 

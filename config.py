@@ -29,17 +29,17 @@ class BotConfig:
 
     # --- Account & Risk-Budget Management (Leverage 50x) ---
     DEFAULT_CAPITAL: float = 10.0          # Modal dasar $10
-    FIXED_MARGIN_LOW_BALANCE: float = 0.20 # Margin $0.20 jika saldo < $50 (Notional $10.00 pada 50x)
-    BALANCE_THRESHOLD_SCALING: float = 50.0# Batas ambang $50 untuk beralih ke 0.5% margin per posisi
-    RISK_PORTFOLIO_PERCENT: float = 0.005  # 0.5% margin dari total portofolio per posisi jika saldo >= $50
+    FIXED_MARGIN_LOW_BALANCE: float = 0.50 # Margin $0.50 jika saldo < $100 (Notional $25.00 pada 50x / $10.00 pada 20x)
+    BALANCE_THRESHOLD_SCALING: float = 100.0# Batas ambang $100 untuk beralih ke 0.5% margin per posisi dari total saldo
+    RISK_PORTFOLIO_PERCENT: float = 0.005  # 0.5% margin dari total portofolio per posisi jika saldo >= $100
     COMPOUNDING_ENABLED: bool = True       # Compounding dinamis berdasarkan saldo
-    LEVERAGE: int = 50                     # Leverage 50x tetap sesuai instruksi
-    DYNAMIC_LEVERAGE_ENABLED: bool = False # Fixed 50x leverage
+    LEVERAGE: int = 50                     # Leverage 50x prioritas utama (atau max didukung koin)
+    DYNAMIC_LEVERAGE_ENABLED: bool = False # Fixed 50x / Max leverage
     MARGIN_MODE: str = "ISOLATED"          # WAJIB ISOLATED MARGIN
     ORDER_TYPE: str = "LIMIT"              # WAJIB LIMIT ORDER (Maker Only - Fee Rendah)
     CLOSE_ORDER_TYPE: str = "LIMIT"        # WAJIB LIMIT ORDER KELUAR (Maker Close - Post Only GTX)
     MIN_NOTIONAL: float = 5.0              # Nilai notional minimum Binance ($5.0)
-    MAX_ORDER_NOTIONAL: float = 15.00      # Batas maksimal notional untuk akun modal mikro (Target notional $10 aman)
+    MAX_ORDER_NOTIONAL: float = 35.00      # Batas maksimal notional untuk akun modal mikro (Target notional $25 aman)
 
     # --- Limit Order & Anti-FOMO Settings ---
     LIMIT_TIMEOUT_SECONDS: int = 30        # Batalkan limit order jika tidak terisi dalam 30 detik
