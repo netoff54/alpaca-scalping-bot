@@ -399,10 +399,13 @@ class BinanceScalper:
             return False
 
         try:
-            # 1. Pastikan ISOLATED margin dan atur leverage ke 50x atau max didukung koin
-            wanted_leverage = sig.get("dynamic_leverage", config.LEVERAGE)
+            # 1. Pastikan ISOLATED margin dan atur leverage dalam rentang 50x turun ke 20x
             self.client.set_margin_type(symbol, "ISOLATED")
-            actual_leverage = self.client.set_leverage(symbol, wanted_leverage)
+            actual_leverage = self.client.set_leverage(
+                symbol,
+                target_leverage=config.LEVERAGE_MAX,
+                min_leverage=config.LEVERAGE_MIN
+            )
             self._configured_symbols.add(symbol)
             
             # Hitung target margin sesuai portofolio terkini
@@ -411,7 +414,7 @@ class BinanceScalper:
             if avail < config.BALANCE_THRESHOLD_SCALING:
                 target_margin = config.FIXED_MARGIN_LOW_BALANCE  # Tepat $0.50 (saldo < $100)
             else:
-                target_margin = avail * config.RISK_PORTFOLIO_PERCENT  # 0.5% dari saldo (saldo >= $100)
+                target_margin = avail * config.RISK_PORTFOLIO_PERCENT  # 0.5% dari saldo (saldo >= $100, misal $101 -> $0.505)
 
             target_notional = target_margin * actual_leverage
 

@@ -27,14 +27,15 @@ class BotConfig:
     CANDLE_LIMIT: int = 150                # 150 candle untuk perhitungan EMA 13/21/200 yang presisi
     MIN_SETUP_SCORE: float = 80.0          # Skor minimal agar sinyal dieksekusi (hanya setup matang)
 
-    # --- Account & Risk-Budget Management (Leverage 50x) ---
+    # --- Account & Risk-Budget Management (Leverage Range 50x -> 20x) ---
     DEFAULT_CAPITAL: float = 10.0          # Modal dasar $10
-    FIXED_MARGIN_LOW_BALANCE: float = 0.50 # Margin $0.50 jika saldo < $100 (Notional $25.00 pada 50x / $10.00 pada 20x)
+    FIXED_MARGIN_LOW_BALANCE: float = 0.50 # Margin $0.50 jika saldo < $100 (Notional $10 - $25)
     BALANCE_THRESHOLD_SCALING: float = 100.0# Batas ambang $100 untuk beralih ke 0.5% margin per posisi dari total saldo
-    RISK_PORTFOLIO_PERCENT: float = 0.005  # 0.5% margin dari total portofolio per posisi jika saldo >= $100
+    RISK_PORTFOLIO_PERCENT: float = 0.005  # 0.5% margin dari total portofolio per posisi jika saldo >= $100 (Compounding)
     COMPOUNDING_ENABLED: bool = True       # Compounding dinamis berdasarkan saldo
-    LEVERAGE: int = 50                     # Leverage 50x prioritas utama (atau max didukung koin)
-    DYNAMIC_LEVERAGE_ENABLED: bool = False # Fixed 50x / Max leverage
+    LEVERAGE: int = 50                     # Leverage 50x target utama
+    LEVERAGE_MAX: int = 50                 # Batas atas leverage (50x diutamakan)
+    LEVERAGE_MIN: int = 20                 # Batas bawah probing leverage (20x)
     MARGIN_MODE: str = "ISOLATED"          # WAJIB ISOLATED MARGIN
     ORDER_TYPE: str = "LIMIT"              # WAJIB LIMIT ORDER (Maker Only - Fee Rendah)
     CLOSE_ORDER_TYPE: str = "LIMIT"        # WAJIB LIMIT ORDER KELUAR (Maker Close - Post Only GTX)

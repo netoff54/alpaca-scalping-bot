@@ -2,6 +2,7 @@ import hmac
 import hashlib
 import time
 import math
+import re
 import urllib.parse
 from typing import Dict, Any, List, Optional, Set
 import requests
@@ -366,35 +367,70 @@ class BinanceFuturesClient:
         """Mengembalikan leverage maksimal resmi koin (default 50 jika belum termuat)."""
         return self._symbols_max_leverage.get(symbol, 50)
 
-    def set_leverage(self, symbol: str, target_leverage: int = 50) -> int:
+    def set_leverage(self, symbol: str, target_leverage: int = 50, min_leverage: int = 20) -> int:
         """
-        Mengatur leverage ke target_leverage (misal 50x).
-        Jika koin hanya mendukung di bawah 50x (misal 20x/25x/30x/40x),
-        secara otomatis menggunakan leverage MAKSIMAL yang didukung koin tersebut.
-        Mengembalikan leverage aktual yang aktif di bursa.
+        Mengatur leverage dengan sistem Range Stepping Probing [50x down to 20x]:
+        1. Mencoba target_leverage (50x) terlebih dahulu.
+        2. Jika ditolak bursa/koin/akun (misal akun 20 hari atau koin dibatasi 40x),
+           secara berurutan mencoba 49x, 48x, ... hingga 20x untuk memastikan leverage
+           maksimal yang tersedia terpakai.
+        3. Menjamin bot selalu menggunakan leverage tertinggi yang tersedia (maksimal yang diizinkan).
+        4. Menyimpan hasil sukses ke cache agar tidak perlu probing berulang pada trade berikutnya.
         """
         if self.is_banned():
-            return min(target_leverage, self.get_max_leverage(symbol))
+            return max(min_leverage, min(target_leverage, self.get_max_leverage(symbol)))
         
-        known_max = self.get_max_leverage(symbol)
-        wanted = min(target_leverage, known_max)
+        cached_lev = self._symbols_max_leverage.get(symbol)
+        start_lev = min(target_leverage, cached_lev if cached_lev and cached_lev >= min_leverage else target_leverage)
         
         url = f"{self.base_url}/fapi/v1/leverage"
-        for lev in [wanted, 50, 40, 30, 25, 20, 15, 10]:
-            if lev > target_leverage:
-                continue
+        
+        # 1. Coba start_lev (50x)
+        try:
+            params = self._sign({"symbol": symbol, "leverage": start_lev})
+            resp = self.session.post(url, params=params, timeout=10)
+            self.check_response_for_ban(resp)
+            data = resp.json()
+            if isinstance(data, dict) and "leverage" in data:
+                actual = int(data["leverage"])
+                self._symbols_max_leverage[symbol] = actual
+                console.log(f"[bold green]Leverage {symbol} berhasil diset ke {actual}x (Maksimal yang diizinkan bursa).[/bold green]")
+                return actual
+            
+            # Jika ditolak bursa, periksa apakah pesan error mencantumkan batas maksimal spesifik
+            err_msg = str(data.get("msg", ""))
+            match = re.search(r'(?:max(?:imum)?\s*leverage|leverage\s*is\s*larger\s*than|allowed\s*is)\D*(\d+)', err_msg, re.I)
+            if match:
+                suggested_max = int(match.group(1))
+                if min_leverage <= suggested_max <= target_leverage:
+                    params = self._sign({"symbol": symbol, "leverage": suggested_max})
+                    resp2 = self.session.post(url, params=params, timeout=10)
+                    data2 = resp2.json()
+                    if isinstance(data2, dict) and "leverage" in data2:
+                        actual = int(data2["leverage"])
+                        self._symbols_max_leverage[symbol] = actual
+                        console.log(f"[bold green]Leverage {symbol} berhasil diset ke {actual}x (Sesuai batas resmi akun/koin: {actual}x).[/bold green]")
+                        return actual
+        except Exception as e:
+            console.log(f"[dim]Pemeriksaan awal leverage {start_lev}x {symbol}: {e}[/dim]")
+
+        # 2. Stepping turun berurutan dari 49x ke 20x sesuai instruksi pengguna
+        console.log(f"[yellow]Mencari leverage tertinggi yang tersedia untuk {symbol} (Range {start_lev-1}x s/d {min_leverage}x berurutan)...[/yellow]")
+        for lev in range(start_lev - 1, min_leverage - 1, -1):
             try:
                 params = self._sign({"symbol": symbol, "leverage": lev})
-                resp = self.session.post(url, params=params, timeout=10)
+                resp = self.session.post(url, params=params, timeout=6)
                 self.check_response_for_ban(resp)
                 data = resp.json()
                 if isinstance(data, dict) and "leverage" in data:
                     actual = int(data["leverage"])
-                    self._symbols_max_leverage[symbol] = max(self._symbols_max_leverage.get(symbol, 0), actual)
+                    self._symbols_max_leverage[symbol] = actual
+                    console.log(f"[bold green]Ditemukan leverage maksimal untuk {symbol}: {actual}x (Range 50x-20x)![/bold green]")
                     return actual
             except Exception:
-                pass
-        return wanted
+                continue
+
+        return min_leverage
 
     def fetch_best_bid_ask(self, symbol: str) -> Dict[str, float]:
         if self.is_banned():

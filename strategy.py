@@ -443,11 +443,12 @@ def analyze_coin_comprehensive(
 
     final_score = min(100.0, round(score, 2))
 
-    # Target Leverage & Dynamic Clamping:
-    # Prioritaskan 50x jika didukung bursa; jika koin hanya mendukung di bawah 50x (misal 20x/25x/30x/40x),
-    # sesuaikan ke batas maksimal yang didukung koin tersebut.
-    target_leverage = config.LEVERAGE
+    # Target Leverage & Range Stepping Clamping:
+    # Mengutamakan 50x, jika koin/akun dibatasi, ambil batas tertinggi dalam rentang [20x, 50x].
+    target_leverage = config.LEVERAGE_MAX
+    min_leverage = config.LEVERAGE_MIN
     effective_leverage = min(target_leverage, max_symbol_leverage) if max_symbol_leverage > 0 else target_leverage
+    effective_leverage = max(min_leverage, effective_leverage)
 
     # Manajemen Risiko Ketat RR 1:2
     executable_signal = None
