@@ -153,7 +153,44 @@ class BinanceScalper:
             else:
                 # Pastikan tidak dalam cooldown sebelum menyatakan posisi telah tertutup
                 if not self.client.is_banned() and self.active_position is not None:
-                    console.log(f"[bold yellow]Posisi {self.active_position.get('symbol')} telah selesai/tertutup di Binance.[/bold yellow]")
+                    closed_pos = self.active_position
+                    sym = closed_pos.get("symbol")
+                    console.log(f"[bold yellow]Posisi {sym} telah selesai/tertutup di Binance (Eksekusi Native Stop Loss / BEP Bursa).[/bold yellow]")
+                    self.client.cancel_all_open_orders(sym)
+                    
+                    try:
+                        entry_p = closed_pos.get("entry_price", 0.0)
+                        exit_p = closed_pos.get("sl_price", entry_p)
+                        c_side = closed_pos.get("side", "buy").lower()
+                        c_notional = closed_pos.get("notional", 0.0)
+                        c_lev = closed_pos.get("leverage", config.LEVERAGE)
+                        
+                        real_pnl_pct = ((exit_p - entry_p) / entry_p) if c_side == "buy" else ((entry_p - exit_p) / entry_p)
+                        real_pnl_usd = real_pnl_pct * c_notional
+                        res = "WIN" if real_pnl_usd >= 0.0 else "LOSS"
+                        
+                        trade_record = {
+                            "symbol": sym,
+                            "side": c_side.upper(),
+                            "entry_price": entry_p,
+                            "exit_price": exit_p,
+                            "qty": closed_pos.get("qty", 0.0),
+                            "notional": c_notional,
+                            "margin_used": (c_notional / c_lev) if c_lev > 0 else 0.0,
+                            "pnl_usd": round(real_pnl_usd, 4),
+                            "pnl_pct": round(real_pnl_pct * 100, 2),
+                            "result": res,
+                            "closed_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                        }
+                        self.trade_history.append(trade_record)
+                        db.record_trade(trade_record)
+                        self.total_trades += 1
+                        if real_pnl_usd >= 0.0:
+                            self.winning_trades += 1
+                        self.total_pnl_usd += real_pnl_usd
+                    except Exception as e_rec:
+                        console.log(f"[dim]Notice record native trade: {e_rec}[/dim]")
+                        
                     self.active_position = None
                 return None
         except Exception as e:
@@ -494,6 +531,17 @@ class BinanceScalper:
                     status = chk.get("status")
                     if status == "FILLED":
                         console.log(f"[bold green]LIMIT ORDER TERISI PENUH! ({symbol} @ {formatted_price})[/bold green]")
+                        
+                        # 1. Pasang Native Stop Loss (STOP_MARKET) langsung di Matching Engine Binance
+                        sl_side = "SELL" if side.lower() == "buy" else "BUY"
+                        native_sl = self.client.create_stop_loss_order(
+                            symbol=symbol,
+                            side=sl_side,
+                            stop_price=sig["sl_price"],
+                            qty=formatted_qty
+                        )
+                        native_sl_id = native_sl.get("orderId") if isinstance(native_sl, dict) else None
+
                         self.active_position = {
                             "symbol": symbol,
                             "side": side.lower(),
@@ -503,6 +551,7 @@ class BinanceScalper:
                             "tp_price": sig["tp_price"],
                             "bep_trigger_price": sig.get("bep_trigger_price", 0.0),
                             "bep_activated": False,
+                            "native_sl_order_id": native_sl_id,
                             "leverage": actual_leverage,
                             "risk_usd": sig.get("risk_usd", 0.05),
                             "reward_usd": sig.get("reward_usd", 0.10),
@@ -665,7 +714,31 @@ class BinanceScalper:
                         
                     pos["sl_price"] = formatted_bep
                     pos["bep_activated"] = True
-                    console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: Profit mencapai 1R (+0.7%), SL digeser ke {formatted_bep} (Terkunci Profit Bersih Menutup Semua Fee Bursa)[/bold cyan]")
+                    console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: Profit mencapai 1R (+0.7%), menggeser Native SL ke {formatted_bep} (Terkunci Untung Bersih)[/bold cyan]")
+                    
+                    # Batalkan Stop Loss lama di Binance & Pasang Native STOP_MARKET baru di harga BEP
+                    try:
+                        old_sl_id = pos.get("native_sl_order_id")
+                        if old_sl_id:
+                            try:
+                                self.client.cancel_order(symbol, old_sl_id)
+                            except Exception:
+                                self.client.cancel_all_open_orders(symbol)
+                        else:
+                            self.client.cancel_all_open_orders(symbol)
+
+                        sl_side = "SELL" if side == "buy" else "BUY"
+                        new_sl = self.client.create_stop_loss_order(
+                            symbol=symbol,
+                            side=sl_side,
+                            stop_price=formatted_bep,
+                            qty=qty
+                        )
+                        if isinstance(new_sl, dict) and new_sl.get("orderId"):
+                            pos["native_sl_order_id"] = new_sl.get("orderId")
+                            console.log(f"[bold green]🛡️ NATIVE BREAK-EVEN STOP LOSS BERHASIL DIPASANG DI BINANCE pada {symbol} @ {formatted_bep}[/bold green]")
+                    except Exception as e_bep:
+                        console.log(f"[red]Gagal memasang Native BEP SL di Binance: {e_bep}[/red]")
 
             # Perbarui nilai SL/TP terkini
             sl_price = pos["sl_price"]
@@ -674,10 +747,16 @@ class BinanceScalper:
             hit_tp = (current_price >= tp_price) if side == "buy" else (current_price <= tp_price)
             hit_sl = (current_price <= sl_price) if side == "buy" else (current_price >= sl_price)
             
-            console.log(f"[dim]Pemantauan 5s: {symbol} @ {current_price} | PnL: {pnl_pct*100:+.2f}% (${pnl_usd:+.2f}) | TP: {tp_price:.4f} | SL: {sl_price:.4f} | BEP: {'AKTIF' if pos.get('bep_activated') else 'MENUNGGU 1R'}[/dim]")
+            console.log(f"[dim]Pemantauan 2.5s: {symbol} @ {current_price} | PnL: {pnl_pct*100:+.2f}% (${pnl_usd:+.2f}) | TP: {tp_price:.4f} | SL: {sl_price:.4f} | BEP: {'AKTIF' if pos.get('bep_activated') else 'MENUNGGU 1R'}[/dim]")
             
             if hit_tp:
                 console.log(f"[bold green]🎯 TAKE PROFIT TERCAPAI (RR 1:2 / +1.4%)! (+{pnl_pct*100:.2f}%, PnL: +${pnl_usd:.2f}) pada {symbol}[/bold green]")
+                # Batalkan Native SL yang masih terpasang di Binance agar tidak tereksekusi ganda
+                try:
+                    self.client.cancel_all_open_orders(symbol)
+                except Exception as e_c:
+                    console.log(f"[dim]Cancel native SL saat TP: {e_c}[/dim]")
+
                 close_side = "SELL" if side == "buy" else "BUY"
                 success, actual_exit = self.execute_maker_close(symbol=symbol, side=close_side, qty=qty, target_price=current_price, is_emergency=False)
                 
@@ -707,13 +786,24 @@ class BinanceScalper:
                 self.active_position = None
                 
             elif hit_sl:
+                # Periksa apakah posisi sudah ditutup oleh Native Stop Loss di Binance
+                pos_check = self.sync_exchange_position(force=True)
+                if not pos_check:
+                    console.log(f"[bold green]Posisi {symbol} telah berhasil ditutup instan oleh Native SL/BEP di Binance matching engine.[/bold green]")
+                    return
+
+                # Jika masih terbuka karena anomali bursa, eksekusi darurat seketika
                 is_be_or_profit = pos.get("bep_activated", False) or (pnl_usd >= 0.0)
                 tag = "🛡️ BREAK-EVEN EXIT (Bebas Risiko Terkunci)" if is_be_or_profit else "🛑 STOP LOSS TERPICU (-0.7%)"
                 color = "green" if is_be_or_profit else "red"
                 
                 console.log(f"[bold {color}]{tag}! ({pnl_pct*100:+.2f}%, PnL: ${pnl_usd:+.2f}) pada {symbol}[/bold {color}]")
+                try:
+                    self.client.cancel_all_open_orders(symbol)
+                except Exception:
+                    pass
+
                 close_side = "SELL" if side == "buy" else "BUY"
-                # Ketika SL atau BEP terpicu, gunakan mode emergency (maks 1.5s maker -> langsung market close) agar tidak terselip / slippage!
                 success, actual_exit = self.execute_maker_close(symbol=symbol, side=close_side, qty=qty, target_price=current_price, is_emergency=True)
                 
                 final_exit = actual_exit if actual_exit > 0 else current_price
@@ -771,7 +861,7 @@ class BinanceScalper:
                             self.client._last_ban_log_time = now_log
                             console.log(f"[yellow]IP Cooldown Binance aktif ({m_left}m {sec_left}s lagi). Menunggu otomatis tanpa request ke bursa...[/yellow]")
                         if self.active_position:
-                            time.sleep(min(5, max(1, s_left)))
+                            time.sleep(min(2.5, max(1, s_left)))
                         else:
                             time.sleep(min(30, max(5, s_left + 1)))
                         continue
@@ -783,10 +873,10 @@ class BinanceScalper:
                 # 1. Selalu sinkronisasi posisi riil dari Binance
                 self.sync_exchange_position()
 
-                # 2. Jika ada posisi aktif, pantau harga setiap 5 detik
+                # 2. Jika ada posisi aktif, pantau harga setiap 2.5 detik
                 if self.active_position:
                     self.monitor_active_position()
-                    time.sleep(5)  # Cek harga posisi aktif setiap 5 detik sesuai permintaan
+                    time.sleep(2.5)  # Cek harga posisi aktif setiap 2.5 detik sesuai permintaan
                     continue
                     
                 # 3. Jalankan pemindaian koin Top volume
@@ -812,7 +902,7 @@ class BinanceScalper:
                             console.log(f"[yellow]Saldo USDT Futures (${avail_usdt:.2f}) di bawah minimum (${min_req:.2f}). Menunggu modal.[/yellow]")
                         
                 if self.active_position:
-                    time.sleep(5)  # Langsung monitor 5s jika posisi baru saja terisi
+                    time.sleep(2.5)  # Langsung monitor 2.5s jika posisi baru saja terisi
                 else:
                     time.sleep(config.SCAN_INTERVAL_SECONDS)
                 
