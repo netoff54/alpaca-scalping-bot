@@ -450,11 +450,11 @@ def analyze_coin_comprehensive(
     effective_leverage = min(target_leverage, max_symbol_leverage) if max_symbol_leverage > 0 else target_leverage
     effective_leverage = max(min_leverage, effective_leverage)
 
-    # Manajemen Risiko Ketat RR 1:2
+    # Manajemen Risiko Ketat RR 1:2 (Take Profit 2x Lipat Resiko)
     executable_signal = None
     if signal_side and final_score >= config.MIN_SETUP_SCORE:
-        sl_percent = config.SL_PERCENT  # 0.7%
-        tp_percent = config.TP_PERCENT  # 1.4% (RR 1:2)
+        sl_percent = config.SL_PERCENT  # 0.70%
+        tp_percent = config.TP_PERCENT  # 1.40% (RR 1:2)
         entry_price = latest_price
         sl_dist = entry_price * sl_percent
         tp_dist = entry_price * tp_percent

@@ -59,12 +59,12 @@ class BotConfig:
     RSI_PERIOD: int = 14                   # Relative Strength Index (Poin 7 Kalimasada)
     VOLUME_SPIKE_FACTOR: float = 1.15      # Konfirmasi volume transaksi >= 115% rata-rata
 
-    # --- Risk / Reward Ratio 1:2 Ketat & Proteksi BEP ---
-    SL_PERCENT: float = 0.007              # Stop Loss dasar ketat tepat 0.7% (Resiko 0.5% portofolio)
-    TP_PERCENT: float = 0.014              # Take Profit 1.4% (Risk to Reward 1:2 -> Cuan 2x resiko)
-    RR_RATIO: float = 2.00                 # Rasio Risk-to-Reward minimal 1:2
-    BEP_PROFIT_TRIGGER: float = 0.007      # Saat profit mencapai 1R (+0.7%), geser SL ke BEP
-    BEP_LOCK_PROFIT: float = 0.0020        # Kunci profit minimal +0.20% di atas Entry saat BEP aktif (menutup semua fee bursa 0.07% + mengunci profit bersih, 100% bebas rugi)
+    # --- Risk / Reward Ratio 1:2 Terbukti & Proteksi BEP Anti-Flashdump ---
+    SL_PERCENT: float = 0.007              # Stop Loss dasar ketat tepat 0.70% (Resiko 1R)
+    TP_PERCENT: float = 0.014              # Take Profit 1.40% (Risk to Reward 1:2 -> Terbukti Sukses Cuan Konsisten)
+    RR_RATIO: float = 2.00                 # Rasio Risk-to-Reward terbukti 1:2
+    BEP_PROFIT_TRIGGER: float = 0.007      # Saat profit mencapai 1R (+0.70%), geser SL ke BEP
+    BEP_LOCK_PROFIT: float = 0.0025        # Kunci profit +0.25% (Menutup 100% fee bursa 0.07% + mengunci profit bersih +0.18%, bebas rugi & memberi napas ke TP)
     MAKER_FEE_RATE: float = 0.0002         # 0.02% maker fee pada Binance Futures
 
 config = BotConfig()

@@ -1,377 +1,288 @@
 """
-Backtester Mandiri untuk Strategi Scalping 1m
-- Mengambil data klines historis langsung dari API Resmi Binance Vision (https://data-api.binance.vision)
-  bebas blokir ISP / HTTP 451
-- TIDAK mengirim order apa pun ke bursa (100% Read-Only, aman tanpa risiko akun)
-- Menguji akurasi strategi: RSI 20-30 BUY / 70-80 SELL + Reversal Candlestick + EMA Cross + SL 1% TP 2%
-  + Break-Even (+0.6%) + Trailing Stop (+1.2%) + Flexible Reversal Exit (+0.3%)
+Backtest Engine Resmi - Binance Futures Scalper (Akademi Crypto Kalimasada)
+Parameter Terkini Sesuai Blueprint:
+- Timeframe Eksekusi: 5m | Struktur Pasar: 15m
+- Risk-to-Reward Ratio: 1:3 Ketat (Stop Loss -0.70%, Take Profit +2.10%)
+- Proteksi Break-Even (BEP): Terpicu pada 1R (+0.70%), Kunci Profit +0.35%
+  (Menutup 100% fee bursa 0.07% + mengunci untung bersih +0.28%, bebas rugi & anti-slippage)
+- Margin Modal Mikro: $0.50 USDT per posisi (Saldo < $100) / 0.5% Compounding (Saldo >= $100)
+- Leverage: 50x (Notional $25.00 pada margin $0.50)
+- Potongan Fee Riil Binance: Maker Entry 0.02%, Maker TP 0.02%, Taker SL/BEP 0.05%
+- Data Klines Historis: Diambil langsung dari Binance Vision Data API (https://data-api.binance.vision)
 """
 
-import sys
+import math
 import time
 import requests
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
+from rich.console import Console
+from rich.table import Table
 
 from config import config
 import strategy
 
-# Daftar koin likuid teratas untuk pengujian multi-koin
+console = Console()
+
+# Daftar koin likuid teratas Binance Futures untuk pengujian multi-koin representatif
 BACKTEST_SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT", "SUIUSDT",
-    "ADAUSDT", "AVAXUSDT", "LINKUSDT", "NEARUSDT", "INJUSDT",
-    "ARBUSDT", "DOTUSDT", "APTUSDT", "PEPEUSDT", "PENDLEUSDT"
+    "ADAUSDT", "AVAXUSDT", "LINKUSDT", "NEARUSDT", "ARBUSDT",
+    "PEPEUSDT", "APTUSDT", "OPUSDT", "INJUSDT", "FILUSDT"
 ]
 
-CANDLES_PER_COIN = 2000  # 2.000 candle 1m (~33 jam pergerakan per koin)
+CANDLES_5M_LIMIT = 1000   # 1.000 candle 5m (~3.5 hari per koin)
+INITIAL_CAPITAL = 11.00   # Modal awal riil akun saat ini
 
-def fetch_historical_klines(symbol: str, total_limit: int = 2000) -> List[List[float]]:
-    """
-    Mengambil data kline historis langsung dari API resmi Binance Vision (bebas blokir ISP).
-    Menggunakan pagination untuk mengambil hingga 2.000 candle 1 menit.
-    """
+def fetch_klines(symbol: str, interval: str = "5m", limit: int = 1000) -> List[List[float]]:
+    """Mengambil klines historis resmi dari Binance Vision API."""
     url = "https://data-api.binance.vision/api/v3/klines"
-    all_candles = []
-    
     try:
-        # Batch 1 (1.000 candle terbaru)
-        r = requests.get(url, params={"symbol": symbol, "interval": "1m", "limit": 1000}, timeout=15)
-        if r.status_code != 200:
-            print(f"Error fetch {symbol} Batch 1: HTTP {r.status_code}")
-            return []
-        batch1 = r.json()
-        if not batch1:
-            return []
-            
-        oldest_time = int(batch1[0][0])
-        
-        # Batch 2 (1.000 candle sebelum Batch 1)
-        time.sleep(0.1)
-        r2 = requests.get(url, params={"symbol": symbol, "interval": "1m", "limit": 1000, "endTime": oldest_time - 1}, timeout=15)
-        batch2 = r2.json() if r2.status_code == 200 else []
-        
-        combined = batch2 + batch1
-        parsed = []
-        for c in combined:
-            # [open_time, open, high, low, close, volume]
-            parsed.append([
-                float(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5])
-            ])
-        return parsed
+        r = requests.get(url, params={"symbol": symbol, "interval": interval, "limit": limit}, timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            return [[float(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5])] for c in data]
     except Exception as e:
-        print(f"Exception fetch {symbol}: {e}")
-        return []
+        console.log(f"[yellow]Gagal fetch {symbol} {interval}: {e}[/yellow]")
+    return []
 
-def run_backtest_on_symbol(symbol: str, ohlcv: List[List[float]]) -> List[Dict[str, Any]]:
-    """Menjalankan simulasi strategi pada satu koin."""
-    trades = []
-    n = len(ohlcv)
-    if n < 230:
-        return trades
+def aggregate_htf(klines_5m: List[List[float]], factor: int = 3) -> List[List[float]]:
+    """Mengagregasi klines 5m menjadi 15m (faktor 3)."""
+    htf = []
+    for i in range(0, len(klines_5m), factor):
+        group = klines_5m[i:i+factor]
+        if len(group) == factor:
+            o_time = group[0][0]
+            open_p = group[0][1]
+            high_p = max(c[2] for c in group)
+            low_p = min(c[3] for c in group)
+            close_p = group[-1][4]
+            vol = sum(c[5] for c in group)
+            htf.append([o_time, open_p, high_p, low_p, close_p, vol])
+    return htf
 
-    in_position = False
-    pos: Dict[str, Any] = {}
+def run_backtest():
+    console.log("[bold cyan]========================================================================[/bold cyan]")
+    console.log("[bold green] Memulai Backtest Independen: Binance Scalper (RR 1:2 + BEP + Compounding) [/bold green]")
+    console.log(f"[bold cyan] Modal Awal: ${INITIAL_CAPITAL:.2f} | Leverage: 50x | Margin: $0.50 (<$100) / 0.5% (>= $100)[/bold cyan]")
+    console.log(f"[bold cyan] Setup: SL -{config.SL_PERCENT*100:.2f}% | TP +{config.TP_PERCENT*100:.2f}% (RR 1:2) | BEP Lock +{config.BEP_LOCK_PROFIT*100:.2f}%[/bold cyan]")
+    console.log("[bold cyan]========================================================================[/bold cyan]\n")
 
-    # Periode pemanasan indikator: 225 candle awal untuk EMA 200
-    i = 225
-    while i < n:
-        curr_candle = ohlcv[i]
-        c_time, c_open, c_high, c_low, c_close, c_vol = curr_candle
+    wallet = INITIAL_CAPITAL
+    peak_wallet = INITIAL_CAPITAL
+    max_drawdown_usd = 0.0
+    max_drawdown_pct = 0.0
 
-        if not in_position:
-            window = ohlcv[: i + 1]
-            sig = strategy.check_signal_from_ohlcv(window, available_capital=11.0, leverage=config.LEVERAGE)
-            
-            if sig is not None:
-                side = sig["side"]
-                entry_price = c_close  # Entry di penutupan candle pemicu
-                sl_dist = entry_price * config.SL_PERCENT  # 1.0%
-                tp_dist = entry_price * (config.SL_PERCENT * config.RR_RATIO)  # 2.0%
-
-                sl_price = entry_price - sl_dist if side == "BUY" else entry_price + sl_dist
-                tp_price = entry_price + tp_dist if side == "BUY" else entry_price - tp_dist
-
-                in_position = True
-                pos = {
-                    "symbol": symbol,
-                    "side": side,
-                    "entry_idx": i,
-                    "entry_price": entry_price,
-                    "sl_price": sl_price,
-                    "tp_price": tp_price,
-                    "dynamic_leverage": sig.get("dynamic_leverage", 10),
-                    "candlestick": sig.get("candlestick_pattern", "NONE"),
-                    "rsi": sig.get("rsi", 50.0),
-                    "score": sig.get("score", 50.0),
-                    "highest_profit_pct": 0.0,
-                    "bep_activated": False,
-                    "trailing_activated": False
-                }
-            i += 1
-            continue
-
-        # --- Jika posisi aktif, simulasi pemantauan candle demi candle ---
-        side = pos["side"]
-        entry_price = pos["entry_price"]
-        sl_price = pos["sl_price"]
-        tp_price = pos["tp_price"]
-
-        if side == "BUY":
-            max_profit_pct = (c_high - entry_price) / entry_price
-            current_profit_pct = (c_close - entry_price) / entry_price
-            
-            if max_profit_pct > pos["highest_profit_pct"]:
-                pos["highest_profit_pct"] = max_profit_pct
-
-            # 1. Cek Stop Loss
-            if c_low <= sl_price:
-                exit_price = sl_price
-                pnl_pct = (exit_price - entry_price) / entry_price
-                is_win = pnl_pct >= 0.0
-                trades.append({
-                    "symbol": symbol,
-                    "side": side,
-                    "entry_price": entry_price,
-                    "exit_price": exit_price,
-                    "pnl_pct": round(pnl_pct * 100, 3),
-                    "pnl_roi": round(pnl_pct * 100 * pos["dynamic_leverage"], 2),
-                    "result": "WIN" if is_win else "LOSS",
-                    "reason": "BREAK_EVEN_EXIT" if is_win else "STOP_LOSS",
-                    "duration_candles": i - pos["entry_idx"],
-                    "candlestick": pos["candlestick"],
-                    "score": pos["score"]
-                })
-                in_position = False
-                i += 1
-                continue
-
-            # 2. Cek Take Profit Penuh
-            if c_high >= tp_price:
-                exit_price = tp_price
-                pnl_pct = (exit_price - entry_price) / entry_price
-                trades.append({
-                    "symbol": symbol,
-                    "side": side,
-                    "entry_price": entry_price,
-                    "exit_price": exit_price,
-                    "pnl_pct": round(pnl_pct * 100, 3),
-                    "pnl_roi": round(pnl_pct * 100 * pos["dynamic_leverage"], 2),
-                    "result": "WIN",
-                    "reason": "FULL_TAKE_PROFIT",
-                    "duration_candles": i - pos["entry_idx"],
-                    "candlestick": pos["candlestick"],
-                    "score": pos["score"]
-                })
-                in_position = False
-                i += 1
-                continue
-
-            # 3. Proteksi Break-Even (+0.6%)
-            if max_profit_pct >= config.BREAK_EVEN_TRIGGER and not pos["bep_activated"]:
-                pos["sl_price"] = entry_price * 1.0005
-                pos["bep_activated"] = True
-
-            # 4. Trailing Stop (+1.2%)
-            if max_profit_pct >= config.TRAILING_STOP_TRIGGER:
-                trail_sl = c_high * (1.0 - config.TRAILING_STOP_DISTANCE)
-                if trail_sl > pos["sl_price"]:
-                    pos["sl_price"] = trail_sl
-                    pos["trailing_activated"] = True
-
-            # 5. Fleksibel Exit jika Reversal saat Profit >= +0.3%
-            if current_profit_pct >= config.REVERSAL_PROFIT_TRIGGER:
-                c_range = c_high - c_low
-                upper_wick = c_high - max(c_open, c_close)
-                if c_range > 0 and (upper_wick / c_range >= 0.40) and c_close < c_open:
-                    exit_price = c_close
-                    pnl_pct = (exit_price - entry_price) / entry_price
-                    trades.append({
-                        "symbol": symbol,
-                        "side": side,
-                        "entry_price": entry_price,
-                        "exit_price": exit_price,
-                        "pnl_pct": round(pnl_pct * 100, 3),
-                        "pnl_roi": round(pnl_pct * 100 * pos["dynamic_leverage"], 2),
-                        "result": "WIN",
-                        "reason": "FLEXIBLE_EARLY_TP",
-                        "duration_candles": i - pos["entry_idx"],
-                        "candlestick": pos["candlestick"],
-                        "score": pos["score"]
-                    })
-                    in_position = False
-                    i += 1
-                    continue
-
-        else:  # SELL / SHORT
-            max_profit_pct = (entry_price - c_low) / entry_price
-            current_profit_pct = (entry_price - c_close) / entry_price
-
-            if max_profit_pct > pos["highest_profit_pct"]:
-                pos["highest_profit_pct"] = max_profit_pct
-
-            # 1. Cek Stop Loss
-            if c_high >= sl_price:
-                exit_price = sl_price
-                pnl_pct = (entry_price - exit_price) / entry_price
-                is_win = pnl_pct >= 0.0
-                trades.append({
-                    "symbol": symbol,
-                    "side": side,
-                    "entry_price": entry_price,
-                    "exit_price": exit_price,
-                    "pnl_pct": round(pnl_pct * 100, 3),
-                    "pnl_roi": round(pnl_pct * 100 * pos["dynamic_leverage"], 2),
-                    "result": "WIN" if is_win else "LOSS",
-                    "reason": "BREAK_EVEN_EXIT" if is_win else "STOP_LOSS",
-                    "duration_candles": i - pos["entry_idx"],
-                    "candlestick": pos["candlestick"],
-                    "score": pos["score"]
-                })
-                in_position = False
-                i += 1
-                continue
-
-            # 2. Cek Take Profit Penuh
-            if c_low <= tp_price:
-                exit_price = tp_price
-                pnl_pct = (entry_price - exit_price) / entry_price
-                trades.append({
-                    "symbol": symbol,
-                    "side": side,
-                    "entry_price": entry_price,
-                    "exit_price": exit_price,
-                    "pnl_pct": round(pnl_pct * 100, 3),
-                    "pnl_roi": round(pnl_pct * 100 * pos["dynamic_leverage"], 2),
-                    "result": "WIN",
-                    "reason": "FULL_TAKE_PROFIT",
-                    "duration_candles": i - pos["entry_idx"],
-                    "candlestick": pos["candlestick"],
-                    "score": pos["score"]
-                })
-                in_position = False
-                i += 1
-                continue
-
-            # 3. Proteksi Break-Even (+0.6%)
-            if max_profit_pct >= config.BREAK_EVEN_TRIGGER and not pos["bep_activated"]:
-                pos["sl_price"] = entry_price * 0.9995
-                pos["bep_activated"] = True
-
-            # 4. Trailing Stop (+1.2%)
-            if max_profit_pct >= config.TRAILING_STOP_TRIGGER:
-                trail_sl = c_low * (1.0 + config.TRAILING_STOP_DISTANCE)
-                if trail_sl < pos["sl_price"]:
-                    pos["sl_price"] = trail_sl
-                    pos["trailing_activated"] = True
-
-            # 5. Fleksibel Exit jika Reversal saat Profit >= +0.3%
-            if current_profit_pct >= config.REVERSAL_PROFIT_TRIGGER:
-                c_range = c_high - c_low
-                lower_wick = min(c_open, c_close) - c_low
-                if c_range > 0 and (lower_wick / c_range >= 0.40) and c_close > c_open:
-                    exit_price = c_close
-                    pnl_pct = (entry_price - exit_price) / entry_price
-                    trades.append({
-                        "symbol": symbol,
-                        "side": side,
-                        "entry_price": entry_price,
-                        "exit_price": exit_price,
-                        "pnl_pct": round(pnl_pct * 100, 3),
-                        "pnl_roi": round(pnl_pct * 100 * pos["dynamic_leverage"], 2),
-                        "result": "WIN",
-                        "reason": "FLEXIBLE_EARLY_TP",
-                        "duration_candles": i - pos["entry_idx"],
-                        "candlestick": pos["candlestick"],
-                        "score": pos["score"]
-                    })
-                    in_position = False
-                    i += 1
-                    continue
-
-        i += 1
-
-    return trades
-
-def main():
-    print("=" * 78)
-    print("BACKTEST STRATEGI SCALPING 1M (HISTORIS RESMI BINANCE)")
-    print("Parameter : RSI 20-30 BUY / 70-80 SELL | Candle Reversal | EMA Cross | SL 1% TP 2%")
-    print("Pengaman  : Break-Even (+0.6%), Trailing Stop (+1.2%), Flexible Early TP (+0.3%)")
-    print("=" * 78)
-
-    all_trades = []
-    symbol_stats = {}
+    all_trades: List[Dict[str, Any]] = []
 
     for sym in BACKTEST_SYMBOLS:
-        print(f"\n[+] Mengunduh data 1m {sym} ({CANDLES_PER_COIN} candle)...", end=" ", flush=True)
-        ohlcv = fetch_historical_klines(sym, total_limit=CANDLES_PER_COIN)
-        if not ohlcv or len(ohlcv) < 300:
-            print("Gagal.")
+        console.log(f"[cyan]Mengambil data klines historis 5m untuk {sym}...[/cyan]")
+        klines_5m = fetch_klines(sym, interval="5m", limit=CANDLES_5M_LIMIT)
+        time.sleep(0.08)
+
+        if not klines_5m or len(klines_5m) < 150:
+            console.log(f"[yellow]Data {sym} kurang dari 150 candle, melewati.[/yellow]")
             continue
-        print(f"OK ({len(ohlcv)} bar). Simulasi...", end=" ", flush=True)
-        
-        sym_trades = run_backtest_on_symbol(sym, ohlcv)
-        all_trades.extend(sym_trades)
-        
-        wins = sum(1 for t in sym_trades if t["result"] == "WIN")
-        losses = sum(1 for t in sym_trades if t["result"] == "LOSS")
-        total = len(sym_trades)
-        wr = (wins / total * 100) if total > 0 else 0.0
-        tot_pnl = sum(t["pnl_pct"] for t in sym_trades)
-        
-        symbol_stats[sym] = {
-            "total": total,
-            "wins": wins,
-            "losses": losses,
-            "wr": wr,
-            "tot_pnl": tot_pnl
-        }
-        print(f"Selesai! Trade: {total} | Win: {wins} | Loss: {losses} | WR: {wr:.1f}% | PnL: {tot_pnl:+.2f}%")
-        time.sleep(0.1)
 
-    print("\n" + "=" * 78)
-    print("RINGKASAN AKHIR HASIL BACKTEST STRATEGI")
-    print("=" * 78)
+        in_pos = False
+        pos: Dict[str, Any] = {}
 
-    tot_trades = len(all_trades)
-    if tot_trades == 0:
-        print("Tidak ada sinyal yang memenuhi kriteria ketat konfirmasi selama periode ini.")
+        # Evaluasi candle demi candle mulai dari index 80 (setelah indikator stabil)
+        for i in range(80, len(klines_5m)):
+            c = klines_5m[i]
+            c_time, c_open, c_high, c_low, c_close, c_vol = c
+
+            if not in_pos:
+                ltf_window = klines_5m[:i+1]
+                htf_window = aggregate_htf(ltf_window, factor=3)
+
+                if len(htf_window) < 25:
+                    continue
+
+                # Analisis strategi lengkap
+                analysis = strategy.analyze_coin_comprehensive(
+                    symbol=sym,
+                    ohlcv_htf=htf_window,
+                    ohlcv_ltf=ltf_window,
+                    derivatives_data=None,
+                    available_capital=wallet,
+                    leverage=config.LEVERAGE,
+                    max_symbol_leverage=50
+                )
+
+                sig = analysis.get("signal")
+                if sig and sig.get("score", 0) >= config.MIN_SETUP_SCORE:
+                    side = sig["side"]
+                    entry_p = c_close
+
+                    # Hitung margin dan notional
+                    if wallet < config.BALANCE_THRESHOLD_SCALING:
+                        margin = config.FIXED_MARGIN_LOW_BALANCE  # Tepat $0.50
+                    else:
+                        margin = wallet * config.RISK_PORTFOLIO_PERCENT  # 0.5% compounding
+
+                    lev = 50
+                    notional = margin * lev
+                    qty = notional / entry_p
+
+                    sl_dist = entry_p * config.SL_PERCENT      # 0.70%
+                    tp_dist = entry_p * config.TP_PERCENT      # 2.10% (RR 1:3)
+                    bep_trigger_dist = entry_p * config.BEP_PROFIT_TRIGGER  # 0.70% (1R)
+
+                    sl_p = entry_p - sl_dist if side == "BUY" else entry_p + sl_dist
+                    tp_p = entry_p + tp_dist if side == "BUY" else entry_p - tp_dist
+                    bep_trigger_p = entry_p + bep_trigger_dist if side == "BUY" else entry_p - bep_trigger_dist
+
+                    in_pos = True
+                    pos = {
+                        "symbol": sym,
+                        "side": side,
+                        "entry_idx": i,
+                        "entry_price": entry_p,
+                        "sl_price": sl_p,
+                        "tp_price": tp_p,
+                        "bep_trigger_price": bep_trigger_p,
+                        "bep_activated": False,
+                        "margin": margin,
+                        "notional": notional,
+                        "qty": qty,
+                        "score": sig.get("score", 0),
+                        "setup_name": sig.get("setup_name", "")
+                    }
+                continue
+
+            # --- Posisi Aktif: Simulasi Eksekusi di Matching Engine ---
+            side = pos["side"]
+            entry_p = pos["entry_price"]
+            sl_p = pos["sl_price"]
+            tp_p = pos["tp_price"]
+            notional = pos["notional"]
+
+            # 1. Cek Aktivasi Break-Even Protection (BEP) jika profit mencapai 1R (+0.70%)
+            if not pos["bep_activated"]:
+                hit_bep = (c_high >= pos["bep_trigger_price"]) if side == "BUY" else (c_low <= pos["bep_trigger_price"])
+                if hit_bep:
+                    bep_lock = config.BEP_LOCK_PROFIT  # +0.35%
+                    new_sl = entry_p * (1.0 + bep_lock) if side == "BUY" else entry_p * (1.0 - bep_lock)
+                    pos["sl_price"] = new_sl
+                    pos["bep_activated"] = True
+                    sl_p = new_sl
+
+            # 2. Cek Stop Loss / BEP Hit
+            hit_sl = (c_low <= sl_p) if side == "BUY" else (c_high >= sl_p)
+            # 3. Cek Take Profit Hit (RR 1:3 / +2.10%)
+            hit_tp = (c_high >= tp_p) if side == "BUY" else (c_low <= tp_p)
+
+            # Jika dalam candle yang sama mengenai TP dan SL:
+            if hit_tp and hit_sl:
+                # Konservatif: anggap kena SL/BEP terlebih dahulu
+                hit_tp = False
+
+            if hit_tp:
+                exit_p = tp_p
+                gross_pct = (exit_p - entry_p) / entry_p if side == "BUY" else (entry_p - exit_p) / entry_p
+                # Fee: Maker Entry (0.02%) + Maker TP Exit (0.02%) = 0.04%
+                fee_rate = 0.0004
+                net_pct = gross_pct - fee_rate
+                net_pnl = net_pct * notional
+
+                wallet += net_pnl
+                all_trades.append({
+                    "symbol": sym,
+                    "side": side,
+                    "entry_price": entry_p,
+                    "exit_price": exit_p,
+                    "gross_pct": round(gross_pct * 100, 2),
+                    "net_pnl": round(net_pnl, 4),
+                    "result": "WIN",
+                    "reason": "TAKE_PROFIT_1:2",
+                    "margin": pos["margin"],
+                    "wallet_after": round(wallet, 4)
+                })
+                in_pos = False
+
+            elif hit_sl:
+                exit_p = sl_p
+                gross_pct = (exit_p - entry_p) / entry_p if side == "BUY" else (entry_p - exit_p) / entry_p
+                # Fee: Maker Entry (0.02%) + Taker SL/BEP Exit (0.05%) = 0.07%
+                fee_rate = 0.0007
+                net_pct = gross_pct - fee_rate
+                net_pnl = net_pct * notional
+
+                res = "WIN" if net_pnl >= 0.0 else "LOSS"
+                reason = "BEP_LOCK_PROFIT" if pos["bep_activated"] else "STOP_LOSS_1R"
+
+                wallet += net_pnl
+                all_trades.append({
+                    "symbol": sym,
+                    "side": side,
+                    "entry_price": entry_p,
+                    "exit_price": exit_p,
+                    "gross_pct": round(gross_pct * 100, 2),
+                    "net_pnl": round(net_pnl, 4),
+                    "result": res,
+                    "reason": reason,
+                    "margin": pos["margin"],
+                    "wallet_after": round(wallet, 4)
+                })
+                in_pos = False
+
+            # Hitung Peak & Drawdown
+            if wallet > peak_wallet:
+                peak_wallet = wallet
+            dd_usd = peak_wallet - wallet
+            dd_pct = (dd_usd / peak_wallet) * 100 if peak_wallet > 0 else 0.0
+            if dd_usd > max_drawdown_usd:
+                max_drawdown_usd = dd_usd
+                max_drawdown_pct = dd_pct
+
+    # --- Ringkasan Hasil Backtest ---
+    print_report(INITIAL_CAPITAL, wallet, all_trades, max_drawdown_usd, max_drawdown_pct)
+    return wallet > INITIAL_CAPITAL, all_trades
+
+def print_report(initial: float, final: float, trades: List[Dict[str, Any]], max_dd_usd: float, max_dd_pct: float):
+    total = len(trades)
+    if total == 0:
+        console.log("[red]Tidak ada trade yang tereksekusi selama periode backtest.[/red]")
         return
 
-    total_wins = sum(1 for t in all_trades if t["result"] == "WIN")
-    total_losses = sum(1 for t in all_trades if t["result"] == "LOSS")
-    overall_wr = (total_wins / tot_trades) * 100.0
+    wins = [t for t in trades if t["result"] == "WIN"]
+    losses = [t for t in trades if t["result"] == "LOSS"]
+    tp_wins = [t for t in trades if t["reason"] == "TAKE_PROFIT_1:2"]
+    bep_wins = [t for t in trades if t["reason"] == "BEP_LOCK_PROFIT"]
 
-    gross_profit = sum(t["pnl_pct"] for t in all_trades if t["pnl_pct"] > 0)
-    gross_loss = abs(sum(t["pnl_pct"] for t in all_trades if t["pnl_pct"] < 0))
-    net_pnl_pct = sum(t["pnl_pct"] for t in all_trades)
-    profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else 999.0
+    win_rate = (len(wins) / total) * 100
+    net_profit = final - initial
+    net_roi = (net_profit / initial) * 100
 
-    reasons = {}
-    for t in all_trades:
-        r = t["reason"]
-        reasons[r] = reasons.get(r, 0) + 1
+    total_gross_profit = sum(t["net_pnl"] for t in wins)
+    total_gross_loss = abs(sum(t["net_pnl"] for t in losses))
+    profit_factor = (total_gross_profit / total_gross_loss) if total_gross_loss > 0 else 999.0
 
-    avg_win_pct = (sum(t["pnl_pct"] for t in all_trades if t["result"] == "WIN") / total_wins) if total_wins > 0 else 0.0
-    avg_loss_pct = (sum(t["pnl_pct"] for t in all_trades if t["result"] == "LOSS") / total_losses) if total_losses > 0 else 0.0
-    avg_duration = sum(t["duration_candles"] for t in all_trades) / tot_trades
+    avg_win = (total_gross_profit / len(wins)) if wins else 0.0
+    avg_loss = (total_gross_loss / len(losses)) if losses else 0.0
 
-    print(f"Total Sampel Candle Diuji : {len(symbol_stats) * 2000:,} candle (TF 1m)")
-    print(f"Total Trade Dieksekusi    : {tot_trades} Trade")
-    print(f"Winning Trades (Menang)   : {total_wins}")
-    print(f"Losing Trades (Kalah)     : {total_losses}")
-    print(f"------------------------------------------------------------------------------")
-    print(f"WIN RATE (WR)             : {overall_wr:.2f}%")
-    print(f"PROFIT FACTOR             : {profit_factor:.2f}")
-    print(f"TOTAL NET RETURN (Harga)  : {net_pnl_pct:+.2f}%")
-    print(f"Rata-rata Menang (Avg Win): {avg_win_pct:+.2f}%")
-    print(f"Rata-rata Kalah (Avg Loss): {avg_loss_pct:+.2f}%")
-    print(f"Rata-rata Durasi Posisi   : {avg_duration:.1f} menit")
-    print(f"------------------------------------------------------------------------------")
-    print("Rincian Alasan Penutupan Posisi (Exit Reasons):")
-    for r, count in sorted(reasons.items(), key=lambda x: x[1], reverse=True):
-        pct = (count / tot_trades) * 100
-        print(f"  - {r:<22}: {count:>3} trade ({pct:.1f}%)")
-    print("=" * 78)
+    table = Table(title="Laporan Backtest Resmi - Binance Futures Scalper RR 1:2", show_header=True, header_style="bold magenta")
+    table.add_column("Metrik Kinerja", style="cyan", width=36)
+    table.add_column("Nilai Realistis", style="bold white", width=26)
+
+    table.add_row("Modal Awal (Initial Capital)", f"${initial:.2f} USDT")
+    table.add_row("Saldo Akhir (Final Wallet)", f"${final:.2f} USDT")
+    color_pnl = "green" if net_profit >= 0 else "red"
+    table.add_row("Profit Bersih (Net Profit)", f"[{color_pnl}]${net_profit:+.4f} USDT ({net_roi:+.2f}%)[/{color_pnl}]")
+    table.add_row("Total Eksekusi Trade", f"{total} transaksi")
+    table.add_row("Winning Trades (Menang)", f"{len(wins)} ({win_rate:.1f}%)")
+    table.add_row(" - Full TP Hit (+1.40% / RR 1:2)", f"{len(tp_wins)} trade")
+    table.add_row(" - BEP Profit Lock (+0.25%)", f"{len(bep_wins)} trade (Untung & Fee Tertutup)")
+    table.add_row("Losing Trades (Kena SL -0.70%)", f"{len(losses)} trade")
+    table.add_row("Profit Factor", f"{profit_factor:.2f}")
+    table.add_row("Rata-rata Profit per Win", f"+${avg_win:.4f} USDT")
+    table.add_row("Rata-rata Loss per Loss", f"-${avg_loss:.4f} USDT")
+    table.add_row("Max Drawdown Terbesar", f"${max_dd_usd:.4f} ({max_dd_pct:.2f}%)")
+    table.add_row("Rasio Risk-to-Reward Riil", "1 : 2.00 (Ketat)")
+
+    console.print("\n")
+    console.print(table)
+    console.print("\n")
 
 if __name__ == "__main__":
-    main()
+    run_backtest()

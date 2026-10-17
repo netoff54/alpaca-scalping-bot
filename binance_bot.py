@@ -130,12 +130,14 @@ class BinanceScalper:
                     bep_trigger_price = self.active_position.get("bep_trigger_price", entry_price * (1.0 + config.BEP_PROFIT_TRIGGER if side == "buy" else 1.0 - config.BEP_PROFIT_TRIGGER))
                     bep_activated = self.active_position.get("bep_activated", False)
                     opened_at = self.active_position.get("opened_at", time.time())
+                    pos_leverage = self.active_position.get("leverage", int(pos.get("leverage", config.LEVERAGE)))
                 else:
                     sl_price = entry_price * (1.0 - config.SL_PERCENT) if side == "buy" else entry_price * (1.0 + config.SL_PERCENT)
                     tp_price = entry_price * (1.0 + config.TP_PERCENT) if side == "buy" else entry_price * (1.0 - config.TP_PERCENT)
                     bep_trigger_price = entry_price * (1.0 + config.BEP_PROFIT_TRIGGER) if side == "buy" else entry_price * (1.0 - config.BEP_PROFIT_TRIGGER)
                     bep_activated = False
                     opened_at = time.time()
+                    pos_leverage = int(pos.get("leverage", config.LEVERAGE))
                 
                 self.active_position = {
                     "symbol": symbol,
@@ -147,7 +149,8 @@ class BinanceScalper:
                     "bep_trigger_price": bep_trigger_price,
                     "bep_activated": bep_activated,
                     "opened_at": opened_at,
-                    "notional": notional
+                    "notional": notional,
+                    "leverage": pos_leverage
                 }
                 return self.active_position
             else:
@@ -672,10 +675,10 @@ class BinanceScalper:
         """
         Memantau posisi aktif dengan manajemen risiko ketat Akademi Crypto (Kalimasada):
         1. Target Take Profit penuh: +1.4% (Risk to Reward 1:2).
-        2. Stop Loss awal: -0.7% (Resiko terukur 0.5% portofolio).
+        2. Stop Loss awal: -0.7% (Resiko terukur 1R).
         3. Proteksi Break-Even (BEP): Begitu profit mencapai 1R (+0.7%), SL otomatis digeser
-           ke Break-Even (+0.20% di atas Entry) sehingga menutup semua fee bursa & mengunci untung bersih,
-           menjadikan posisi 100% bebas risiko tanpa potensi rugi.
+           ke Break-Even (+0.25% di atas Entry) sehingga menutup 100% seluruh fee bursa (0.07%)
+           & mengunci untung bersih, menjadikan posisi 100% bebas risiko tanpa potensi rugi.
         """
         if not self.active_position:
             return
@@ -701,7 +704,7 @@ class BinanceScalper:
             if not bep_activated:
                 hit_bep = (current_price >= bep_trigger) if side == "buy" else (current_price <= bep_trigger) if bep_trigger > 0 else (pnl_pct >= config.BEP_PROFIT_TRIGGER)
                 if hit_bep:
-                    bep_lock = getattr(config, "BEP_LOCK_PROFIT", 0.0020) # +0.20% di atas entry
+                    bep_lock = getattr(config, "BEP_LOCK_PROFIT", 0.0025) # +0.25% di atas entry
                     raw_bep = entry_price * (1.0 + bep_lock) if side == "buy" else entry_price * (1.0 - bep_lock)
                     formatted_bep = self.client.format_price(symbol, raw_bep)
                     
@@ -714,7 +717,7 @@ class BinanceScalper:
                         
                     pos["sl_price"] = formatted_bep
                     pos["bep_activated"] = True
-                    console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: Profit mencapai 1R (+0.7%), menggeser Native SL ke {formatted_bep} (Terkunci Untung Bersih)[/bold cyan]")
+                    console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: Profit mencapai 1R (+0.7%), menggeser Native SL ke {formatted_bep} (Terkunci Untung Bersih +0.25% Menutup Seluruh Fee Bursa)[/bold cyan]")
                     
                     # Batalkan Stop Loss lama di Binance & Pasang Native STOP_MARKET baru di harga BEP
                     try:
@@ -846,6 +849,7 @@ class BinanceScalper:
         
         # 2. Inisialisasi Bursa
         self.client.ensure_single_asset_mode()
+        self.client.load_leverage_brackets()
         self.get_futures_balance(max_age_sec=0)
         self.sync_exchange_position()
         
