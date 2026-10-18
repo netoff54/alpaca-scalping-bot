@@ -60,10 +60,10 @@ class BotConfig:
     RSI_PERIOD: int = 14                   # Relative Strength Index (Poin 7 Kalimasada)
     VOLUME_SPIKE_FACTOR: float = 1.15      # Konfirmasi volume transaksi >= 115% rata-rata
 
-    # --- Risk / Reward Ratio 1:2 Terbukti & Proteksi BEP Anti-Flashdump ---
-    SL_PERCENT: float = 0.007              # Stop Loss dasar ketat tepat 0.70% (Resiko 1R)
-    TP_PERCENT: float = 0.014              # Take Profit 1.40% (Risk to Reward 1:2 -> Terbukti Sukses Cuan Konsisten)
-    RR_RATIO: float = 2.00                 # Rasio Risk-to-Reward terbukti 1:2
+    # --- Risk / Reward Ratio 1:2 Bersih (Fee-Adjusted: Net Loss Maks $0.14 & Net Win Min $0.28) ---
+    SL_PERCENT: float = 0.0060             # Stop Loss 0.60% (Gross $0.12 + Fee $0.02 = Net Loss Tepat -$0.14)
+    TP_PERCENT: float = 0.0150             # Take Profit 1.50% (Gross $0.30 - Fee $0.02 = Net Win Tepat +$0.28 -> RR 1:2 Bersih)
+    RR_RATIO: float = 2.00                 # Rasio Risk-to-Reward 1:2 Bersih setelah seluruh fee bursa
     BEP_PROFIT_TRIGGER: float = 0.007      # Saat profit mencapai 1R (+0.70%), geser SL ke BEP
     BEP_LOCK_PROFIT: float = 0.0025        # Kunci profit +0.25% (Menutup 100% fee bursa 0.08% + buffer slippage + garansi cuan bersih > $0.035)
     MAX_SPREAD_PERCENT: float = 0.0008     # Batas maksimal spread bid-ask 0.08% (Anti-Slippage & Anti-Illiquid Books)

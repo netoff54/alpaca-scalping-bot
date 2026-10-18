@@ -831,11 +831,11 @@ class BinanceScalper:
                 fill_p = float(m_res.get("avgPrice", 0.0)) if isinstance(m_res, dict) else 0.0
                 return True, (fill_p if fill_p > 0 else target_price)
 
-            # Batas waktu tunggu: 1.5 detik jika emergency (SL/BEP) agar harga tidak longsor, 6 detik jika Take Profit normal
-            max_wait = 1.5 if is_emergency else 6.0
+            # Batas waktu tunggu singkat (1.0s - 1.2s) agar profit terkunci di pucuk tanpa terkena retrace
+            max_wait = 1.0 if is_emergency else 1.2
             t0 = time.time()
             while time.time() - t0 < max_wait:
-                time.sleep(0.7)
+                time.sleep(0.5)
                 chk = self.client.get_order(symbol, order_id)
                 status = chk.get("status")
                 if status == "FILLED":
@@ -952,7 +952,7 @@ class BinanceScalper:
                     console.log(f"[bold green]Posisi {symbol} telah berhasil ditutup instan di Binance matching engine.[/bold green]")
                     return
 
-                console.log(f"[bold green]🎯 TAKE PROFIT TERCAPAI (RR 1:2 / +1.4%)! (+{pnl_pct*100:.2f}%, PnL: +${pnl_usd:.2f}) pada {symbol}[/bold green]")
+                console.log(f"[bold green]🎯 TAKE PROFIT TERCAPAI (RR 1:2 Bersih / +1.50%)! (+{pnl_pct*100:.2f}%, PnL: +${pnl_usd:.2f}) pada {symbol}[/bold green]")
                 # Batalkan Native SL yang masih terpasang di Binance agar tidak tereksekusi ganda
                 try:
                     self.client.cancel_all_open_orders(symbol)
