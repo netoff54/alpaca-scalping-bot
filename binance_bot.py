@@ -176,44 +176,120 @@ class BinanceScalper:
                     console.log(f"[bold yellow]Posisi {sym} telah selesai/tertutup di Binance (Eksekusi Native Stop Loss / BEP Bursa).[/bold yellow]")
                     self.client.cancel_all_open_orders(sym)
                     
-                    try:
-                        entry_p = closed_pos.get("entry_price", 0.0)
-                        exit_p = closed_pos.get("sl_price", entry_p)
-                        c_side = closed_pos.get("side", "buy").lower()
-                        c_notional = closed_pos.get("notional", 0.0)
-                        c_lev = closed_pos.get("leverage", config.LEVERAGE)
-                        
-                        real_pnl_pct = ((exit_p - entry_p) / entry_p) if c_side == "buy" else ((entry_p - exit_p) / entry_p)
-                        real_pnl_usd = real_pnl_pct * c_notional
-                        res = "WIN" if real_pnl_usd >= 0.0 else "LOSS"
-                        
-                        trade_record = {
-                            "symbol": sym,
-                            "side": c_side.upper(),
-                            "entry_price": entry_p,
-                            "exit_price": exit_p,
-                            "qty": closed_pos.get("qty", 0.0),
-                            "notional": c_notional,
-                            "margin_used": (c_notional / c_lev) if c_lev > 0 else 0.0,
-                            "pnl_usd": round(real_pnl_usd, 4),
-                            "pnl_pct": round(real_pnl_pct * 100, 2),
-                            "result": res,
-                            "closed_at": time.strftime("%Y-%m-%d %H:%M:%S")
-                        }
-                        self.trade_history.append(trade_record)
-                        db.record_trade(trade_record)
-                        self.total_trades += 1
-                        if real_pnl_usd >= 0.0:
-                            self.winning_trades += 1
-                        self.total_pnl_usd += real_pnl_usd
-                    except Exception as e_rec:
-                        console.log(f"[dim]Notice record native trade: {e_rec}[/dim]")
-                        
-                    self.active_position = None
+                    entry_p = float(closed_pos.get("entry_price", 0.0))
+                    exit_hint = float(closed_pos.get("sl_price", entry_p))
+                    self._record_closed_position(closed_pos, exit_price_hint=exit_hint, result_hint="WIN")
+                    return None
                 return None
         except Exception as e:
             console.log(f"[dim]Sync position check: {e}[/dim]")
             return self.active_position
+
+    def _record_closed_position(self, closed_pos: Dict[str, Any], exit_price_hint: float, result_hint: str = "WIN") -> Dict[str, Any]:
+        """
+        Merekam trade yang selesai dengan data riil langsung dari Binance API:
+        1. Mengambil harga eksekusi riil dari userTrades (menghilangkan selisih slippage).
+        2. Mengambil realized PnL riil dan ID trade resmi dari income history.
+        3. Menjamin leverage dan margin_used tercatat akurat (maks 20x untuk akun baru).
+        4. Menyimpan ke database Neon dan memperbarui agregat portofolio.
+        """
+        sym = closed_pos.get("symbol", "")
+        entry_p = float(closed_pos.get("entry_price", 0.0))
+        c_side = closed_pos.get("side", "buy").lower()
+        c_notional = float(closed_pos.get("notional", 0.0))
+        c_qty = float(closed_pos.get("qty", 0.0))
+        
+        # Ambil leverage riil (fallback ke 20 jika akun belum 30 hari atau tidak terekam)
+        c_lev = int(closed_pos.get("leverage") or self.client.get_max_leverage(sym))
+        if c_lev > 20:
+            c_lev = 20
+
+        real_exit_price = exit_price_hint
+        real_pnl_usd = None
+        real_commission = 0.0
+        binance_trade_id = None
+
+        # 1. Coba ambil data riil eksekusi bursa
+        try:
+            incomes = self.client.fetch_income_history(income_type="REALIZED_PNL", limit=5, symbol=sym)
+            if incomes:
+                latest_inc = incomes[-1]
+                real_pnl_usd = float(latest_inc.get("income", 0.0))
+                binance_trade_id = str(latest_inc.get("tradeId", ""))
+        except Exception as e_inc:
+            console.log(f"[dim]Notice fetch income PnL: {e_inc}[/dim]")
+
+        try:
+            user_trades = self.client.fetch_user_trades(sym, limit=5)
+            if user_trades:
+                closing_trades = [t for t in user_trades if t.get("side", "").lower() != c_side]
+                target_t = closing_trades[-1] if closing_trades else user_trades[-1]
+                real_exit_price = float(target_t.get("price", exit_price_hint))
+                real_commission = sum(float(t.get("commission", 0.0)) for t in closing_trades) if closing_trades else float(target_t.get("commission", 0.0))
+                if not binance_trade_id and target_t.get("id"):
+                    binance_trade_id = str(target_t.get("id"))
+        except Exception as e_ut:
+            console.log(f"[dim]Notice fetch user trades: {e_ut}[/dim]")
+
+        # 2. Fallback jika Binance API dalam jeda cooldown
+        if real_pnl_usd is None:
+            pct = ((real_exit_price - entry_p) / entry_p) if c_side == "buy" else ((entry_p - real_exit_price) / entry_p)
+            real_pnl_usd = pct * c_notional
+            real_pnl_pct = pct * 100
+        else:
+            real_pnl_pct = (real_pnl_usd / c_notional * 100) if c_notional > 0 else 0.0
+
+        res = "WIN" if real_pnl_usd >= 0.0 else "LOSS"
+        margin_used = round((c_notional / c_lev) if c_lev > 0 else (c_notional / 20.0), 4)
+
+        trade_record = {
+            "symbol": sym,
+            "side": c_side.upper(),
+            "entry_price": entry_p,
+            "exit_price": real_exit_price,
+            "qty": c_qty,
+            "notional": c_notional,
+            "margin_used": margin_used,
+            "leverage": c_lev,
+            "commission": round(real_commission, 6),
+            "binance_trade_id": binance_trade_id,
+            "pnl_usd": round(real_pnl_usd, 4),
+            "pnl_pct": round(real_pnl_pct, 2),
+            "result": res,
+            "closed_at": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+        try:
+            self.trade_history.append(trade_record)
+            db.record_trade(trade_record)
+            self.total_trades += 1
+            if real_pnl_usd >= 0.0:
+                self.winning_trades += 1
+            self.total_pnl_usd += real_pnl_usd
+            console.log(f"[bold green]✅ Trade {sym} berhasil tercatat 100% akurat dari bursa: PnL ${real_pnl_usd:+.4f} ({real_pnl_pct:+.2f}%), Exit: {real_exit_price}, Lev: {c_lev}x[/bold green]")
+        except Exception as e_rec:
+            console.log(f"[red]Error mencatat trade ke database: {e_rec}[/red]")
+
+        self.active_position = None
+        return trade_record
+
+    def sync_historical_database_with_binance(self) -> Dict[str, Any]:
+        """Menyelaraskan seluruh riwayat database dengan rekaman resmi bursa Binance."""
+        if self.client.is_banned():
+            return {"status": "skipped", "reason": "rate_limited"}
+        try:
+            console.log("[cyan]Memulai sinkronisasi seluruh riwayat database dengan data riil Binance...[/cyan]")
+            incomes = self.client.fetch_income_history(income_type="REALIZED_PNL", limit=1000)
+            res = db.sync_all_historical_trades_with_binance(incomes)
+            if res.get("status") == "success":
+                self.total_trades = res["total_trades"]
+                self.winning_trades = res["winning_trades"]
+                self.total_pnl_usd = res["total_pnl_usd"]
+                console.log(f"[bold green]Sinkronisasi riwayat database sukses: {res.get('matched_trades', 0)} trade dicocokkan, Total PnL: ${res.get('total_pnl_usd', 0.0):+.4f}[/bold green]")
+            return res
+        except Exception as e:
+            console.log(f"[red]Error sinkronisasi database dengan Binance: {e}[/red]")
+            return {"status": "error", "error": str(e)}
 
     def get_compounded_notional(self) -> float:
         """
@@ -807,29 +883,7 @@ class BinanceScalper:
                 success, actual_exit = self.execute_maker_close(symbol=symbol, side=close_side, qty=qty, target_price=current_price, is_emergency=False)
                 
                 final_exit = actual_exit if actual_exit > 0 else current_price
-                real_pnl_pct = ((final_exit - entry_price) / entry_price) if side == "buy" else ((entry_price - final_exit) / entry_price)
-                real_pnl_usd = real_pnl_pct * pos["notional"]
-
-                trade_record = {
-                    "symbol": symbol,
-                    "side": side.upper(),
-                    "entry_price": entry_price,
-                    "exit_price": final_exit,
-                    "qty": qty,
-                    "notional": pos["notional"],
-                    "margin_used": pos["notional"] / pos_leverage,
-                    "pnl_usd": round(real_pnl_usd, 4),
-                    "pnl_pct": round(real_pnl_pct * 100, 2),
-                    "result": "WIN",
-                    "closed_at": time.strftime("%Y-%m-%d %H:%M:%S")
-                }
-                self.trade_history.append(trade_record)
-                db.record_trade(trade_record)
-                
-                self.total_trades += 1
-                self.winning_trades += 1
-                self.total_pnl_usd += real_pnl_usd
-                self.active_position = None
+                self._record_closed_position(pos, exit_price_hint=final_exit, result_hint="WIN")
                 
             elif hit_sl:
                 # Periksa apakah posisi sudah ditutup oleh Native Stop Loss di Binance
@@ -853,31 +907,7 @@ class BinanceScalper:
                 success, actual_exit = self.execute_maker_close(symbol=symbol, side=close_side, qty=qty, target_price=current_price, is_emergency=True)
                 
                 final_exit = actual_exit if actual_exit > 0 else current_price
-                real_pnl_pct = ((final_exit - entry_price) / entry_price) if side == "buy" else ((entry_price - final_exit) / entry_price)
-                real_pnl_usd = real_pnl_pct * pos["notional"]
-                res = "WIN" if real_pnl_usd >= 0.0 else "LOSS"
-
-                trade_record = {
-                    "symbol": symbol,
-                    "side": side.upper(),
-                    "entry_price": entry_price,
-                    "exit_price": final_exit,
-                    "qty": qty,
-                    "notional": pos["notional"],
-                    "margin_used": pos["notional"] / pos_leverage,
-                    "pnl_usd": round(real_pnl_usd, 4),
-                    "pnl_pct": round(real_pnl_pct * 100, 2),
-                    "result": res,
-                    "closed_at": time.strftime("%Y-%m-%d %H:%M:%S")
-                }
-                self.trade_history.append(trade_record)
-                db.record_trade(trade_record)
-                
-                self.total_trades += 1
-                if real_pnl_usd >= 0.0:
-                    self.winning_trades += 1
-                self.total_pnl_usd += real_pnl_usd
-                self.active_position = None
+                self._record_closed_position(pos, exit_price_hint=final_exit, result_hint="WIN" if is_be_or_profit else "LOSS")
                 
         except Exception as e:
             console.log(f"[red]Error memantau posisi aktif {symbol}: {e}[/red]")

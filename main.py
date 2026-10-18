@@ -45,6 +45,19 @@ async def lifespan(app: FastAPI):
     ping_thread = threading.Thread(target=keep_alive_ping_loop, daemon=True)
     ping_thread.start()
 
+    # 3. Jalankan auto-sync database dengan pembukuan bursa Binance saat startup
+    def auto_sync_startup():
+        time.sleep(10)
+        try:
+            print(">>> [Auto-Sync] Menjalankan sinkronisasi database dengan pembukuan resmi Binance...")
+            res = scalper.sync_historical_database_with_binance()
+            print(f">>> [Auto-Sync] Selesai: {res}")
+        except Exception as e_sync:
+            print(f">>> [Auto-Sync] Notice: {e_sync}")
+
+    sync_thread = threading.Thread(target=auto_sync_startup, daemon=True)
+    sync_thread.start()
+
     yield
     print(">>> Menghentikan service Binance Scalper <<<")
 
@@ -58,6 +71,20 @@ def get_outbound_ip():
         return res.json()
     except Exception as e:
         return {"error": str(e)}
+
+@app.get("/sync-database")
+def sync_database():
+    """Endpoint manual untuk menyelaraskan 100% database dengan data riil pembukuan bursa Binance Futures."""
+    res = scalper.sync_historical_database_with_binance()
+    return {
+        "sync_result": res,
+        "bot_stats": {
+            "total_trades": scalper.total_trades,
+            "winning_trades": scalper.winning_trades,
+            "total_pnl_usd": round(scalper.total_pnl_usd, 4),
+            "win_rate_pct": round(scalper.winning_trades / scalper.total_trades * 100, 2) if scalper.total_trades > 0 else 0.0
+        }
+    }
 
 from database import db
 

@@ -680,6 +680,59 @@ class BinanceFuturesClient:
             console.log(f"[dim]Notice cancel all open orders {symbol}: {e}[/dim]")
             return {}
 
+    def fetch_user_trades(self, symbol: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Mengambil riwayat eksekusi trade riil langsung dari Binance Matching Engine."""
+        if self.is_banned():
+            return []
+        try:
+            url = f"{self.base_url}/fapi/v1/userTrades"
+            params = self._sign({"symbol": symbol, "limit": limit})
+            resp = self.session.get(url, params=params, timeout=10)
+            self.check_response_for_ban(resp)
+            data = resp.json()
+            self.check_response_for_ban(data)
+            return data if isinstance(data, list) else []
+        except Exception as e:
+            console.log(f"[dim]Notice fetch user trades {symbol}: {e}[/dim]")
+            return []
+
+    def fetch_income_history(self, income_type: Optional[str] = "REALIZED_PNL", limit: int = 1000, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Mengambil riwayat PnL riil dan komisi langsung dari pembukuan resmi Binance Futures."""
+        if self.is_banned():
+            return []
+        try:
+            url = f"{self.base_url}/fapi/v1/income"
+            params: Dict[str, Any] = {"limit": limit}
+            if income_type:
+                params["incomeType"] = income_type
+            if symbol:
+                params["symbol"] = symbol
+            signed_params = self._sign(params)
+            resp = self.session.get(url, params=signed_params, timeout=10)
+            self.check_response_for_ban(resp)
+            data = resp.json()
+            self.check_response_for_ban(data)
+            return data if isinstance(data, list) else []
+        except Exception as e:
+            console.log(f"[dim]Notice fetch income history: {e}[/dim]")
+            return []
+
+    def fetch_all_orders(self, symbol: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Mengambil seluruh riwayat order koin dari bursa."""
+        if self.is_banned():
+            return []
+        try:
+            url = f"{self.base_url}/fapi/v1/allOrders"
+            params = self._sign({"symbol": symbol, "limit": limit})
+            resp = self.session.get(url, params=params, timeout=10)
+            self.check_response_for_ban(resp)
+            data = resp.json()
+            self.check_response_for_ban(data)
+            return data if isinstance(data, list) else []
+        except Exception as e:
+            console.log(f"[dim]Notice fetch all orders {symbol}: {e}[/dim]")
+            return []
+
     def fetch_price(self, symbol: str) -> float:
         if self.is_banned():
             s_left = self.ban_until - time.time()

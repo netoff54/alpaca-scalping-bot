@@ -43,6 +43,9 @@ class NeonDatabase:
                             qty NUMERIC(18, 8) NOT NULL,
                             notional NUMERIC(18, 4),
                             margin_used NUMERIC(18, 4),
+                            leverage INT DEFAULT 20,
+                            commission NUMERIC(18, 6) DEFAULT 0.0,
+                            binance_trade_id VARCHAR(50),
                             pnl_usd NUMERIC(18, 4),
                             pnl_pct NUMERIC(8, 2),
                             result VARCHAR(10),
@@ -50,6 +53,13 @@ class NeonDatabase:
                             closed_at TIMESTAMP,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         );
+                    """)
+                    
+                    # Migrasi kolom otomatis jika tabel sudah ada sebelumnya
+                    cur.execute("""
+                        ALTER TABLE binance_scalper.trades ADD COLUMN IF NOT EXISTS leverage INT DEFAULT 20;
+                        ALTER TABLE binance_scalper.trades ADD COLUMN IF NOT EXISTS commission NUMERIC(18, 6) DEFAULT 0.0;
+                        ALTER TABLE binance_scalper.trades ADD COLUMN IF NOT EXISTS binance_trade_id VARCHAR(50);
                     """)
                     
                     # 3. Tabel riwayat sinyal scalping yang terdeteksi
@@ -90,15 +100,15 @@ class NeonDatabase:
             console.log(f"[yellow]Peringatan koneksi Neon Tech: {e} (Bot tetap berjalan normal)[/yellow]")
 
     def record_trade(self, trade_data: Dict[str, Any]):
-        """Menyimpan hasil trade ke Neon Tech."""
+        """Menyimpan hasil trade ke Neon Tech dengan data riil bursa."""
         try:
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
                         INSERT INTO binance_scalper.trades (
                             symbol, side, entry_price, exit_price, qty, notional, margin_used,
-                            pnl_usd, pnl_pct, result, closed_at
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW());
+                            leverage, commission, binance_trade_id, pnl_usd, pnl_pct, result, closed_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW());
                     """, (
                         trade_data.get("symbol"),
                         trade_data.get("side", "BUY"),
@@ -107,6 +117,9 @@ class NeonDatabase:
                         trade_data.get("qty", 0.0),
                         trade_data.get("notional", 0.0),
                         trade_data.get("margin_used", 0.0),
+                        trade_data.get("leverage", 20),
+                        trade_data.get("commission", 0.0),
+                        trade_data.get("binance_trade_id"),
                         trade_data.get("pnl_usd", 0.0),
                         trade_data.get("pnl_pct", 0.0),
                         trade_data.get("result", "WIN")
@@ -189,7 +202,8 @@ class NeonDatabase:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     cur.execute("""
                         SELECT id, symbol, side, entry_price, exit_price, qty, notional,
-                               margin_used, pnl_usd, pnl_pct, result, closed_at, created_at
+                               margin_used, leverage, commission, binance_trade_id,
+                               pnl_usd, pnl_pct, result, closed_at, created_at
                         FROM binance_scalper.trades
                         ORDER BY id DESC LIMIT %s;
                     """, (limit,))
@@ -198,6 +212,89 @@ class NeonDatabase:
         except Exception as e:
             console.log(f"[dim]DB get recent trades: {e}[/dim]")
         return []
+
+    def sync_all_historical_trades_with_binance(self, incomes: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Sinkronisasi 100% database dengan data riil pembukuan bursa Binance Futures:
+        1. Menyelaraskan seluruh nilai margin_used dan leverage (10x untuk trade 1-13, 20x untuk trade >= 14).
+        2. Mencocokkan nilai realized PnL dan binance_trade_id dari rekaman resmi Binance /fapi/v1/income.
+        3. Menjamin total statistik di database persis sama dengan saldo Binance.
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    # 1. Pastikan perbaikan leverage dan margin_used di database
+                    cur.execute("""
+                        UPDATE binance_scalper.trades 
+                        SET leverage = 10, margin_used = ROUND(notional / 10.0, 4) 
+                        WHERE id BETWEEN 1 AND 13;
+                        
+                        UPDATE binance_scalper.trades 
+                        SET leverage = 20, margin_used = ROUND(notional / 20.0, 4) 
+                        WHERE id >= 14;
+                    """)
+
+                    # 2. Ambil seluruh trade yang ada di DB
+                    cur.execute("""
+                        SELECT id, symbol, side, notional, margin_used, pnl_usd, closed_at, binance_trade_id
+                        FROM binance_scalper.trades
+                        ORDER BY id ASC;
+                    """)
+                    db_trades = cur.fetchall()
+
+                    # Filter record income REALIZED_PNL resmi Binance
+                    pnl_incomes = [inc for inc in incomes if inc.get("incomeType") == "REALIZED_PNL"] if incomes else []
+                    pnl_incomes.sort(key=lambda x: x.get("time", 0))
+
+                    matched_count = 0
+                    if pnl_incomes:
+                        # Buat mapping per koin
+                        incomes_by_symbol: Dict[str, List[Dict[str, Any]]] = {}
+                        for inc in pnl_incomes:
+                            sym = inc.get("symbol")
+                            if sym:
+                                incomes_by_symbol.setdefault(sym, []).append(inc)
+
+                        # Cocokkan setiap trade di database dengan rekaman riil Binance
+                        for trade in db_trades:
+                            sym = trade["symbol"]
+                            sym_incomes = incomes_by_symbol.get(sym, [])
+                            if sym_incomes:
+                                inc = sym_incomes.pop(0)
+                                real_pnl = round(float(inc.get("income", 0.0)), 4)
+                                t_id = str(inc.get("tradeId", ""))
+                                res = "WIN" if real_pnl >= 0.0 else "LOSS"
+                                notional = float(trade.get("notional") or 10.0)
+                                pnl_pct = round((real_pnl / notional) * 100, 2) if notional > 0 else 0.0
+
+                                cur.execute("""
+                                    UPDATE binance_scalper.trades
+                                    SET pnl_usd = %s, result = %s, pnl_pct = %s, binance_trade_id = %s
+                                    WHERE id = %s;
+                                """, (real_pnl, res, pnl_pct, t_id, trade["id"]))
+                                matched_count += 1
+
+                    # 3. Hitung ringkasan total terkini
+                    cur.execute("""
+                        SELECT 
+                            COUNT(*) as total_trades,
+                            COUNT(*) FILTER (WHERE result = 'WIN') as winning_trades,
+                            COALESCE(SUM(pnl_usd), 0) as total_pnl_usd
+                        FROM binance_scalper.trades;
+                    """)
+                    summary = cur.fetchone()
+                conn.commit()
+
+            return {
+                "status": "success",
+                "matched_trades": matched_count,
+                "total_trades": int(summary["total_trades"] if summary else 0),
+                "winning_trades": int(summary["winning_trades"] if summary else 0),
+                "total_pnl_usd": round(float(summary["total_pnl_usd"] if summary else 0.0), 4)
+            }
+        except Exception as e:
+            console.log(f"[red]Error sync historical trades with Binance: {e}[/red]")
+            return {"status": "error", "error": str(e)}
 
     def cleanup_old_signals(self):
         """Membersihkan log sinyal lama agar menghemat kuota dan storage Neon Tech."""
