@@ -86,6 +86,20 @@ def sync_database():
         }
     }
 
+@app.get("/leverage-stats")
+def leverage_stats():
+    """Mengambil statistik ketersediaan leverage resmi Binance untuk seluruh koin."""
+    lev_map = scalper.client._symbols_max_leverage
+    distribution = {}
+    for sym, lev in lev_map.items():
+        distribution[lev] = distribution.get(lev, 0) + 1
+    return {
+        "total_symbols_with_brackets": len(lev_map),
+        "distribution": sorted([{"leverage": f"{k}x", "count": v} for k, v in distribution.items()], key=lambda x: int(x["leverage"][:-1]), reverse=True),
+        "ge_50x_count": sum(v for k, v in distribution.items() if k >= 50),
+        "examples_50x": [s for s, l in lev_map.items() if l >= 50][:30]
+    }
+
 from database import db
 
 @app.api_route("/", methods=["GET", "HEAD"])

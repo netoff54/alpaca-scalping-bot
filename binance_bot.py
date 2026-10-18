@@ -536,6 +536,17 @@ class BinanceScalper:
             )
             self._configured_symbols.add(symbol)
             
+            # Saring koin dengan leverage di bawah 20x agar seluruh trade seragam & tidak timpang
+            if actual_leverage < 20:
+                console.log(
+                    f"[bold yellow]🛡️ Filter Leverage Rendah: {symbol} hanya mendukung {actual_leverage}x (< 20x). "
+                    f"Melewati koin agar seluruh trade tetap seimbang, seragam, dan likuid.[/bold yellow]"
+                )
+                self.active_order = None
+                self.active_signals = [s for s in self.active_signals if s.get("symbol") != symbol]
+                self._symbol_order_cooldown[symbol] = time.time() + 600
+                return False
+
             # Hitung target margin sesuai portofolio terkini
             bal = self.get_futures_balance()
             avail = bal["available"] if bal["available"] >= 1.0 else config.DEFAULT_CAPITAL
