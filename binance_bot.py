@@ -218,17 +218,17 @@ class BinanceScalper:
     def get_compounded_notional(self) -> float:
         """
         Menghitung ukuran notional posisi berdasarkan aturan margin bertingkat:
-        - Saldo < $100: gunakan margin $0.50 (Notional $25.00 pada 50x / $10.00 pada 20x)
-        - Saldo >= $100: gunakan 1.0% margin per posisi dari total saldo (Compounding)
+        - Saldo < $100: gunakan margin tepat $1.00 (Maksimal ketat $1.00)
+        - Saldo >= $100: gunakan 1.0% margin fleksibel dari total saldo (Compounding)
         """
         bal = self.get_futures_balance()
         avail = bal["available"]
         base_wallet = avail if avail >= 1.0 else config.DEFAULT_CAPITAL
         
         if base_wallet < config.BALANCE_THRESHOLD_SCALING:
-            target_margin = config.FIXED_MARGIN_LOW_BALANCE
+            target_margin = config.FIXED_MARGIN_LOW_BALANCE  # Tepat $1.00
         else:
-            target_margin = base_wallet * config.RISK_PORTFOLIO_PERCENT
+            target_margin = base_wallet * config.RISK_PORTFOLIO_PERCENT  # 1.0% fleksibel
 
         raw_notional = target_margin * config.LEVERAGE
         notional = raw_notional
@@ -290,8 +290,8 @@ class BinanceScalper:
                     if (min_q * last_price) > config.MAX_ORDER_NOTIONAL:
                         continue
 
-                    # Filter jika koin tidak bisa mencapai minimum order ($5.00) dengan margin $0.50 pada leverage maksimalnya
-                    # Dengan margin $0.50, koin dengan leverage >= 10x ($0.50 * 10 = $5.00) sudah memenuhi minimum order
+                    # Filter jika koin tidak bisa mencapai minimum order ($5.00) dengan margin $1.00 pada leverage maksimalnya
+                    # Dengan margin $1.00, koin dengan leverage >= 5x ($1.00 * 5 = $5.00) sudah memenuhi minimum order
                     bal_avail = self._cached_balance.get("available", 0.0)
                     active_margin = config.FIXED_MARGIN_LOW_BALANCE if bal_avail < config.BALANCE_THRESHOLD_SCALING else (bal_avail * config.RISK_PORTFOLIO_PERCENT)
                     max_sym_lev = self.client.get_max_leverage(sym)
@@ -464,9 +464,11 @@ class BinanceScalper:
             bal = self.get_futures_balance()
             avail = bal["available"] if bal["available"] >= 1.0 else config.DEFAULT_CAPITAL
             if avail < config.BALANCE_THRESHOLD_SCALING:
-                target_margin = config.FIXED_MARGIN_LOW_BALANCE  # Tepat $0.50 (saldo < $100)
+                target_margin = config.FIXED_MARGIN_LOW_BALANCE  # Tepat $1.00 jika saldo < $100
+                max_margin_cap = config.MAX_MARGIN_LOW_BALANCE   # Batas maksimal ketat $1.00 jika saldo < $100
             else:
-                target_margin = avail * config.RISK_PORTFOLIO_PERCENT  # 0.5% dari saldo (saldo >= $100, misal $101 -> $0.505)
+                target_margin = avail * config.RISK_PORTFOLIO_PERCENT  # 1.0% fleksibel compounding jika saldo >= $100
+                max_margin_cap = target_margin * 1.08  # Toleransi 8% untuk presisi lot size
 
             target_notional = target_margin * actual_leverage
 
@@ -503,13 +505,35 @@ class BinanceScalper:
                 
             effective_notional = formatted_qty * formatted_price
             margin_used = effective_notional / actual_leverage
+
+            # Jika margin_used sedikit melebihi cap akibat pembulatan lot size (math.ceil),
+            # coba turunkan 1 step lot size jika notional tetap >= MIN_NOTIONAL ($5.00)
+            rules = self.client._symbols_rules.get(symbol, {})
+            step = rules.get("step_size", 0.0)
+            if margin_used > (max_margin_cap + 0.005) and step > 0:
+                reduced_qty = self.client.format_qty(symbol, formatted_qty - step)
+                if (reduced_qty * formatted_price) >= config.MIN_NOTIONAL:
+                    formatted_qty = reduced_qty
+                    effective_notional = formatted_qty * formatted_price
+                    margin_used = effective_notional / actual_leverage
+
+            # Filter ketat batas maksimal margin per posisi
+            # Saldo < $100: Maksimal ketat $1.00 (tidak boleh lebih dari $1.00)
+            # Saldo >= $100: Fleksibel 1.0% dari saldo (maks target_margin * 1.08)
+            if margin_used > (max_margin_cap + 0.005):
+                console.log(
+                    f"[bold yellow]🛡️ Filter Margin Ketat: Margin terhitung ${margin_used:.2f} melebihi batas maksimal "
+                    f"${max_margin_cap:.2f} untuk {symbol}. Melewati koin agar modal tetap aman.[/bold yellow]"
+                )
+                return False
+
             max_allowed_notional = config.MAX_ORDER_NOTIONAL if avail < config.BALANCE_THRESHOLD_SCALING else max(config.MAX_ORDER_NOTIONAL, target_notional * 1.5)
             if effective_notional > max_allowed_notional:
                 console.log(f"[bold yellow]🛡️ Filter Ukuran Akun: Minimum order {symbol} bernilai ${effective_notional:.2f} (Margin: ${margin_used:.2f}). Melewati agar margin tetap aman (Maks Notional: ${max_allowed_notional:.2f}).[/bold yellow]")
                 return False
 
             if effective_notional < config.MIN_NOTIONAL:
-                console.log(f"[bold yellow]🛡️ Notional terhitung ${effective_notional:.2f} < ${config.MIN_NOTIONAL:.2f}. Melewati {symbol} agar margin tetap ${target_margin:.2f}.[/bold yellow]")
+                console.log(f"[bold yellow]🛡️ Notional terhitung ${effective_notional:.2f} < ${config.MIN_NOTIONAL:.2f}. Melewati {symbol} agar margin tetap sesuai aturan.[/bold yellow]")
                 return False
 
             console.log(f"[bold cyan]Dispatching Maker Limit Order (Risk: ${sig.get('risk_usd', 0.05):.3f}, Leverage: {actual_leverage}x): {side} {formatted_qty} {symbol} @ {formatted_price} (Notional: ${effective_notional:.2f}, Margin: ${margin_used:.2f})[/bold cyan]")

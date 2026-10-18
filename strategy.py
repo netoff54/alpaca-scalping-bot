@@ -464,18 +464,18 @@ def analyze_coin_comprehensive(
         bep_trigger_price = entry_price + sl_dist if signal_side == "BUY" else entry_price - sl_dist
 
         # Aturan Margin Bertingkat Fleksibel:
-        # - Jika saldo < $100: margin per posisi dikunci tetap $0.50
-        # - Jika saldo >= $100: margin per posisi 0.5% dari total saldo portofolio
+        # - Jika saldo < $100: margin per posisi dikunci tetap $1.00 (maksimal ketat $1.00)
+        # - Jika saldo >= $100: margin per posisi 1.0% dari total saldo portofolio (fleksibel compounding)
         if available_capital < config.BALANCE_THRESHOLD_SCALING:
-            target_margin_usd = config.FIXED_MARGIN_LOW_BALANCE  # $0.50
+            target_margin_usd = config.FIXED_MARGIN_LOW_BALANCE  # Tepat $1.00
         else:
-            target_margin_usd = available_capital * config.RISK_PORTFOLIO_PERCENT  # 0.5%
+            target_margin_usd = available_capital * config.RISK_PORTFOLIO_PERCENT  # 1.0% fleksibel
 
         raw_notional = target_margin_usd * effective_leverage
 
         # Pengecekan Batas Minimum Order Binance ($5.00)
-        # Pada margin $0.50, koin dengan leverage 20x menghasilkan notional $10.00 (lolos batas Binance $5.00).
-        # Jika koin dengan leverage sangat rendah (< 10x) menghasilkan notional < $5.00, lewati koin tersebut.
+        # Pada margin $1.00, koin dengan leverage 20x menghasilkan notional $20.00 (lolos batas Binance $5.00).
+        # Jika koin dengan leverage sangat rendah (< 5x) menghasilkan notional < $5.00, lewati koin tersebut.
         if raw_notional < config.MIN_NOTIONAL:
             executable_signal = None
         else:

@@ -6,8 +6,8 @@ Sesuai Sistem Live & Blueprint Akademi Crypto Kalimasada:
 - Timeframe Eksekusi: 5m | Struktur Pasar: 15m
 - Rasio Risk-to-Reward: 1:2.00 (SL -0.70%, TP +1.40%)
 - Proteksi BEP: Aktif saat menyentuh 1R (+0.70%), Kunci Profit Bersih +0.25% (Fee tertutup 100% + cuan aman)
-- Margin Modal Mikro: Tepat $0.50 USDT per posisi (Saldo < $100) / 0.5% Compounding (Saldo >= $100)
-- Leverage: 50x (Notional $25.00 pada margin $0.50)
+- Margin Modal Mikro: Tepat $1.00 USDT per posisi (Saldo < $100) / 1.0% Compounding (Saldo >= $100)
+- Leverage: 50x (Notional $50.00 pada margin $1.00)
 - Fee Bursa Riil: Maker 0.02% (Entry & TP Limit), Taker 0.05% (SL & BEP Market Stop)
 - Model Eksekusi:
   1. Akun Riil Portofolio (1 Bot, Modal $11.11, Maksimal 1 Posisi Terbuka pada Satu Waktu)
