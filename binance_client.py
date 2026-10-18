@@ -642,8 +642,8 @@ class BinanceFuturesClient:
     def create_stop_loss_order(self, symbol: str, side: str, stop_price: float, qty: Optional[float] = None) -> Dict[str, Any]:
         """
         Memasang Native Stop Loss (STOP_MARKET) langsung di server Matching Engine Binance Futures.
-        Menggunakan closePosition=true sehingga seluruh posisi otomatis ditutup instan di bursa
-        tanpa delay polling dan kebal terhadap flash dump / slippage liar.
+        Menggunakan closePosition=true dan workingType=MARK_PRICE sehingga seluruh posisi otomatis
+        ditutup instan di bursa, kebal terhadap manipulasi wick jarum (flashdump order book lokal).
         """
         if self.is_banned():
             return {}
@@ -657,7 +657,7 @@ class BinanceFuturesClient:
             "type": "STOP_MARKET",
             "stopPrice": formatted_stop,
             "closePosition": "true",
-            "workingType": "CONTRACT_PRICE"
+            "workingType": "MARK_PRICE"
         })
         try:
             resp = self.session.post(url, params=params, timeout=10)
@@ -665,7 +665,7 @@ class BinanceFuturesClient:
             data = resp.json()
             self.check_response_for_ban(data)
             if isinstance(data, dict) and "orderId" in data:
-                console.log(f"[bold green]🛡️ NATIVE STOP LOSS TERPASANG DI BINANCE: {side} {symbol} @ {formatted_stop} (closePosition=true)[/bold green]")
+                console.log(f"[bold green]🛡️ NATIVE STOP LOSS TERPASANG DI BINANCE: {side} {symbol} @ {formatted_stop} (MARK_PRICE / closePosition=true)[/bold green]")
                 return data
             
             # 2. Fallback: jika closePosition ditolak, gunakan quantity + reduceOnly
@@ -677,17 +677,68 @@ class BinanceFuturesClient:
                     "stopPrice": formatted_stop,
                     "quantity": qty,
                     "reduceOnly": "true",
-                    "workingType": "CONTRACT_PRICE"
+                    "workingType": "MARK_PRICE"
                 })
                 r2 = self.session.post(url, params=p2, timeout=10)
                 d2 = r2.json()
                 if isinstance(d2, dict) and "orderId" in d2:
-                    console.log(f"[bold green]🛡️ NATIVE STOP LOSS TERPASANG DI BINANCE: {side} {qty} {symbol} @ {formatted_stop} (reduceOnly=true)[/bold green]")
+                    console.log(f"[bold green]🛡️ NATIVE STOP LOSS TERPASANG DI BINANCE: {side} {qty} {symbol} @ {formatted_stop} (MARK_PRICE / reduceOnly=true)[/bold green]")
                     return d2
             console.log(f"[yellow]Peringatan pasang native SL: {data}[/yellow]")
             return data if isinstance(data, dict) else {}
         except Exception as e:
             console.log(f"[red]Gagal memasang native SL di Binance: {e}[/red]")
+            return {}
+
+    def create_take_profit_order(self, symbol: str, side: str, stop_price: float, qty: Optional[float] = None) -> Dict[str, Any]:
+        """
+        Memasang Native Take Profit (TAKE_PROFIT_MARKET) langsung di server Matching Engine Binance Futures.
+        Menggunakan closePosition=true dan workingType=MARK_PRICE sehingga seluruh posisi otomatis
+        terkunci penuh seketika saat menyentuh target profit (+1.40%) tanpa delay polling dan tanpa slippage.
+        """
+        if self.is_banned():
+            return {}
+        url = f"{self.base_url}/fapi/v1/order"
+        formatted_stop = self.format_price(symbol, stop_price)
+        
+        # 1. Coba closePosition=true terlebih dahulu
+        params = self._sign({
+            "symbol": symbol,
+            "side": side.upper(),
+            "type": "TAKE_PROFIT_MARKET",
+            "stopPrice": formatted_stop,
+            "closePosition": "true",
+            "workingType": "MARK_PRICE"
+        })
+        try:
+            resp = self.session.post(url, params=params, timeout=10)
+            self.check_response_for_ban(resp)
+            data = resp.json()
+            self.check_response_for_ban(data)
+            if isinstance(data, dict) and "orderId" in data:
+                console.log(f"[bold green]🎯 NATIVE TAKE PROFIT TERPASANG DI BINANCE: {side} {symbol} @ {formatted_stop} (MARK_PRICE / closePosition=true)[/bold green]")
+                return data
+            
+            # 2. Fallback: jika closePosition ditolak, gunakan quantity + reduceOnly
+            if qty and qty > 0:
+                p2 = self._sign({
+                    "symbol": symbol,
+                    "side": side.upper(),
+                    "type": "TAKE_PROFIT_MARKET",
+                    "stopPrice": formatted_stop,
+                    "quantity": qty,
+                    "reduceOnly": "true",
+                    "workingType": "MARK_PRICE"
+                })
+                r2 = self.session.post(url, params=p2, timeout=10)
+                d2 = r2.json()
+                if isinstance(d2, dict) and "orderId" in d2:
+                    console.log(f"[bold green]🎯 NATIVE TAKE PROFIT TERPASANG DI BINANCE: {side} {qty} {symbol} @ {formatted_stop} (MARK_PRICE / reduceOnly=true)[/bold green]")
+                    return d2
+            console.log(f"[yellow]Peringatan pasang native TP: {data}[/yellow]")
+            return data if isinstance(data, dict) else {}
+        except Exception as e:
+            console.log(f"[red]Gagal memasang native TP di Binance: {e}[/red]")
             return {}
 
     def cancel_all_open_orders(self, symbol: str) -> Dict[str, Any]:

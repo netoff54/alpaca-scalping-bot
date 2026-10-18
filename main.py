@@ -10,6 +10,7 @@ import uvicorn
 
 from binance_bot import BinanceScalper
 from config import config
+from database import db
 
 scalper = BinanceScalper()
 bot_thread = None
@@ -107,8 +108,6 @@ def trade_history(limit: int = 100):
         "total_returned": len(trades),
         "trades": trades
     }
-
-from database import db
 
 @app.api_route("/", methods=["GET", "HEAD"])
 def index():

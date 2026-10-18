@@ -173,11 +173,11 @@ class BinanceScalper:
                 if not self.client.is_banned() and self.active_position is not None:
                     closed_pos = self.active_position
                     sym = closed_pos.get("symbol")
-                    console.log(f"[bold yellow]Posisi {sym} telah selesai/tertutup di Binance (Eksekusi Native Stop Loss / BEP Bursa).[/bold yellow]")
+                    console.log(f"[bold yellow]Posisi {sym} telah selesai/tertutup di Binance (Eksekusi Native Stop Loss / Take Profit / BEP Bursa).[/bold yellow]")
                     self.client.cancel_all_open_orders(sym)
                     
                     entry_p = float(closed_pos.get("entry_price", 0.0))
-                    exit_hint = float(closed_pos.get("sl_price", entry_p))
+                    exit_hint = float(closed_pos.get("tp_price", entry_p))
                     self._record_closed_position(closed_pos, exit_price_hint=exit_hint, result_hint="WIN")
                     return None
                 return None
@@ -207,25 +207,43 @@ class BinanceScalper:
         real_commission = 0.0
         binance_trade_id = None
 
-        # 1. Coba ambil data riil eksekusi bursa
+        # 1. Coba ambil data riil eksekusi bursa dengan clustering multi-fill
         try:
-            incomes = self.client.fetch_income_history(income_type="REALIZED_PNL", limit=5, symbol=sym)
+            incomes = self.client.fetch_income_history(income_type="REALIZED_PNL", limit=10, symbol=sym)
             if incomes:
-                latest_inc = incomes[-1]
-                real_pnl_usd = float(latest_inc.get("income", 0.0))
-                binance_trade_id = str(latest_inc.get("tradeId", ""))
+                sym_incomes = [inc for inc in incomes if inc.get("symbol") == sym]
+                if sym_incomes:
+                    # Ambil cluster trade penutupan terbaru (menyatukan multi-fill dalam selang 120s)
+                    last_time = int(sym_incomes[-1].get("time", 0))
+                    cluster = [inc for inc in sym_incomes if abs(int(inc.get("time", 0)) - last_time) <= 120000]
+                    real_pnl_usd = round(sum(float(inc.get("income", 0.0)) for inc in cluster), 4)
+                    binance_trade_id = str(cluster[-1].get("tradeId", ""))
         except Exception as e_inc:
             console.log(f"[dim]Notice fetch income PnL: {e_inc}[/dim]")
 
         try:
-            user_trades = self.client.fetch_user_trades(sym, limit=5)
+            user_trades = self.client.fetch_user_trades(sym, limit=10)
             if user_trades:
                 closing_trades = [t for t in user_trades if t.get("side", "").lower() != c_side]
-                target_t = closing_trades[-1] if closing_trades else user_trades[-1]
-                real_exit_price = float(target_t.get("price", exit_price_hint))
-                real_commission = sum(float(t.get("commission", 0.0)) for t in closing_trades) if closing_trades else float(target_t.get("commission", 0.0))
-                if not binance_trade_id and target_t.get("id"):
-                    binance_trade_id = str(target_t.get("id"))
+                if closing_trades:
+                    # Ambil cluster eksekusi penutupan terbaru dalam rentang 120s
+                    last_trade_time = int(closing_trades[-1].get("time", 0))
+                    recent_closing = [t for t in closing_trades if abs(int(t.get("time", 0)) - last_trade_time) <= 120000]
+                    
+                    total_qty = sum(float(t.get("qty", 0.0)) for t in recent_closing)
+                    if total_qty > 0:
+                        vwap_price = sum(float(t.get("price", 0.0)) * float(t.get("qty", 0.0)) for t in recent_closing) / total_qty
+                        real_exit_price = self.client.format_price(sym, vwap_price)
+                    else:
+                        real_exit_price = float(recent_closing[-1].get("price", exit_price_hint))
+                    
+                    real_commission = sum(float(t.get("commission", 0.0)) for t in recent_closing)
+                    if not binance_trade_id and recent_closing[-1].get("id"):
+                        binance_trade_id = str(recent_closing[-1].get("id"))
+                else:
+                    target_t = user_trades[-1]
+                    real_exit_price = float(target_t.get("price", exit_price_hint))
+                    real_commission = float(target_t.get("commission", 0.0))
         except Exception as e_ut:
             console.log(f"[dim]Notice fetch user trades: {e_ut}[/dim]")
 
@@ -573,12 +591,26 @@ class BinanceScalper:
                 self._symbol_order_cooldown[symbol] = time.time() + 600
                 return False
 
-            # 2. Ambil best bid/ask untuk harga Maker
+            # 2. Ambil best bid/ask untuk harga Maker dan validasi likuiditas buku order
             depth = self.client.fetch_best_bid_ask(symbol)
+            bid_p = depth.get("bid", 0.0)
+            ask_p = depth.get("ask", 0.0)
+            if bid_p > 0 and ask_p > 0:
+                spread_pct = (ask_p - bid_p) / bid_p
+                if spread_pct > config.MAX_SPREAD_PERCENT:
+                    console.log(
+                        f"[bold yellow]🛡️ Filter Spread Ketat: Spread {symbol} sebesar {spread_pct*100:.3f}% "
+                        f"melebihi batas maksimal {config.MAX_SPREAD_PERCENT*100:.2f}%. Melewati koin ini untuk mencegah slippage & flashdump.[/bold yellow]"
+                    )
+                    self.active_order = None
+                    self.active_signals = [s for s in self.active_signals if s.get("symbol") != symbol]
+                    self._symbol_order_cooldown[symbol] = time.time() + 300
+                    return False
+
             if side == "BUY":
-                best_price = depth["bid"] if depth.get("bid", 0.0) > 0 else target_price
+                best_price = bid_p if bid_p > 0 else target_price
             else:
-                best_price = depth["ask"] if depth.get("ask", 0.0) > 0 else target_price
+                best_price = ask_p if ask_p > 0 else target_price
                 
             formatted_price = self.client.format_price(symbol, best_price)
             if formatted_price <= 0:
@@ -696,6 +728,16 @@ class BinanceScalper:
                             self._record_closed_position(temp_pos, exit_price_hint=fill_p, result_hint="LOSS")
                             return False
 
+                        # 2. Pasang Native Take Profit (TAKE_PROFIT_MARKET) langsung di Matching Engine Binance
+                        # Menjamin Take Profit terkunci seketika di bursa tanpa slippage dan tanpa delay polling
+                        native_tp = self.client.create_take_profit_order(
+                            symbol=symbol,
+                            side=sl_side,
+                            stop_price=actual_tp,
+                            qty=formatted_qty
+                        )
+                        native_tp_id = native_tp.get("orderId") if isinstance(native_tp, dict) else None
+
                         self.active_position = {
                             "symbol": symbol,
                             "side": side.lower(),
@@ -706,6 +748,7 @@ class BinanceScalper:
                             "bep_trigger_price": actual_bep,
                             "bep_activated": False,
                             "native_sl_order_id": native_sl_id,
+                            "native_tp_order_id": native_tp_id,
                             "leverage": actual_leverage,
                             "risk_usd": formatted_qty * formatted_price * config.SL_PERCENT,
                             "reward_usd": formatted_qty * formatted_price * config.TP_PERCENT,
@@ -855,7 +898,7 @@ class BinanceScalper:
             if not bep_activated:
                 hit_bep = (current_price >= bep_trigger) if side == "buy" else (current_price <= bep_trigger) if bep_trigger > 0 else (pnl_pct >= config.BEP_PROFIT_TRIGGER)
                 if hit_bep:
-                    bep_lock = getattr(config, "BEP_LOCK_PROFIT", 0.0015) # +0.15% di atas entry
+                    bep_lock = getattr(config, "BEP_LOCK_PROFIT", 0.0025) # +0.25% di atas entry
                     raw_bep = entry_price * (1.0 + bep_lock) if side == "buy" else entry_price * (1.0 - bep_lock)
                     formatted_bep = self.client.format_price(symbol, raw_bep)
                     
@@ -868,18 +911,17 @@ class BinanceScalper:
                         
                     pos["sl_price"] = formatted_bep
                     pos["bep_activated"] = True
-                    console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: Profit mencapai 1R (+0.7%), menggeser Native SL ke {formatted_bep} (Terkunci Untung Bersih +0.15% Menutup Seluruh Fee Bursa)[/bold cyan]")
+                    console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: Profit mencapai 1R (+0.7%), menggeser Native SL ke {formatted_bep} (Terkunci Untung Bersih +{bep_lock*100:.2f}% Menutup Seluruh Fee Bursa)[/bold cyan]")
                     
                     # Batalkan Stop Loss lama di Binance & Pasang Native STOP_MARKET baru di harga BEP
+                    # Catatan: Native TP tetap aktif di bursa untuk menangkap target profit penuh +1.40%
                     try:
                         old_sl_id = pos.get("native_sl_order_id")
                         if old_sl_id:
                             try:
                                 self.client.cancel_order(symbol, old_sl_id)
                             except Exception:
-                                self.client.cancel_all_open_orders(symbol)
-                        else:
-                            self.client.cancel_all_open_orders(symbol)
+                                pass
 
                         sl_side = "SELL" if side == "buy" else "BUY"
                         new_sl = self.client.create_stop_loss_order(

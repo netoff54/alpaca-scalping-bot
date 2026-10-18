@@ -248,21 +248,41 @@ class NeonDatabase:
 
                     matched_count = 0
                     if pnl_incomes:
-                        # Buat mapping per koin
+                        # Buat mapping per koin dengan clustering waktu
+                        # Fills yang terjadi berurutan dalam 120s digabung jadi 1 transaksi riil (menyatukan multi-fill market order)
                         incomes_by_symbol: Dict[str, List[Dict[str, Any]]] = {}
                         for inc in pnl_incomes:
                             sym = inc.get("symbol")
                             if sym:
                                 incomes_by_symbol.setdefault(sym, []).append(inc)
 
+                        clustered_by_symbol: Dict[str, List[Dict[str, Any]]] = {}
+                        for sym, s_incs in incomes_by_symbol.items():
+                            clustered: List[Dict[str, Any]] = []
+                            for inc in s_incs:
+                                inc_time = int(inc.get("time", 0))
+                                inc_val = float(inc.get("income", 0.0))
+                                trade_id = str(inc.get("tradeId", ""))
+                                if clustered and abs(inc_time - clustered[-1]["time"]) <= 120000:
+                                    clustered[-1]["income"] += inc_val
+                                    clustered[-1]["tradeId"] = trade_id
+                                    clustered[-1]["time"] = inc_time
+                                else:
+                                    clustered.append({
+                                        "income": inc_val,
+                                        "tradeId": trade_id,
+                                        "time": inc_time
+                                    })
+                            clustered_by_symbol[sym] = clustered
+
                         # Cocokkan setiap trade di database dengan rekaman riil Binance
                         for trade in db_trades:
                             sym = trade["symbol"]
-                            sym_incomes = incomes_by_symbol.get(sym, [])
+                            sym_incomes = clustered_by_symbol.get(sym, [])
                             if sym_incomes:
                                 inc = sym_incomes.pop(0)
-                                real_pnl = round(float(inc.get("income", 0.0)), 4)
-                                t_id = str(inc.get("tradeId", ""))
+                                real_pnl = round(float(inc["income"]), 4)
+                                t_id = str(inc["tradeId"])
                                 res = "WIN" if real_pnl >= 0.0 else "LOSS"
                                 notional = float(trade.get("notional") or 10.0)
                                 pnl_pct = round((real_pnl / notional) * 100, 2) if notional > 0 else 0.0
