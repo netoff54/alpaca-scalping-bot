@@ -660,12 +660,18 @@ class BinanceScalper:
                     if status == "FILLED":
                         console.log(f"[bold green]LIMIT ORDER TERISI PENUH! ({symbol} @ {formatted_price})[/bold green]")
                         
-                        # 1. Pasang Native Stop Loss (STOP_MARKET) langsung di Matching Engine Binance
+                        # Hitung ulang level SL, TP, dan BEP presisi dari harga keterisian riil (formatted_price)
+                        # Menjamin rasio RR 1:2 (SL tepat 0.70%, TP tepat 1.40%) selalu dihitung dari harga eksekusi riil
                         sl_side = "SELL" if side.lower() == "buy" else "BUY"
+                        actual_sl = self.client.format_price(symbol, formatted_price * (1.0 - config.SL_PERCENT) if side.lower() == "buy" else formatted_price * (1.0 + config.SL_PERCENT))
+                        actual_tp = self.client.format_price(symbol, formatted_price * (1.0 + config.TP_PERCENT) if side.lower() == "buy" else formatted_price * (1.0 - config.TP_PERCENT))
+                        actual_bep = self.client.format_price(symbol, formatted_price * (1.0 + config.BEP_PROFIT_TRIGGER) if side.lower() == "buy" else formatted_price * (1.0 - config.BEP_PROFIT_TRIGGER))
+
+                        # 1. Pasang Native Stop Loss (STOP_MARKET) langsung di Matching Engine Binance
                         native_sl = self.client.create_stop_loss_order(
                             symbol=symbol,
                             side=sl_side,
-                            stop_price=sig["sl_price"],
+                            stop_price=actual_sl,
                             qty=formatted_qty
                         )
                         native_sl_id = native_sl.get("orderId") if isinstance(native_sl, dict) else None
@@ -685,7 +691,7 @@ class BinanceScalper:
                                 "qty": formatted_qty,
                                 "notional": formatted_qty * formatted_price,
                                 "leverage": actual_leverage,
-                                "sl_price": sig["sl_price"]
+                                "sl_price": actual_sl
                             }
                             self._record_closed_position(temp_pos, exit_price_hint=fill_p, result_hint="LOSS")
                             return False
@@ -695,14 +701,14 @@ class BinanceScalper:
                             "side": side.lower(),
                             "entry_price": formatted_price,
                             "qty": formatted_qty,
-                            "sl_price": sig["sl_price"],
-                            "tp_price": sig["tp_price"],
-                            "bep_trigger_price": sig.get("bep_trigger_price", 0.0),
+                            "sl_price": actual_sl,
+                            "tp_price": actual_tp,
+                            "bep_trigger_price": actual_bep,
                             "bep_activated": False,
                             "native_sl_order_id": native_sl_id,
                             "leverage": actual_leverage,
-                            "risk_usd": sig.get("risk_usd", 0.05),
-                            "reward_usd": sig.get("reward_usd", 0.10),
+                            "risk_usd": formatted_qty * formatted_price * config.SL_PERCENT,
+                            "reward_usd": formatted_qty * formatted_price * config.TP_PERCENT,
                             "opened_at": time.time(),
                             "notional": formatted_qty * formatted_price
                         }
