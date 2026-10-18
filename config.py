@@ -65,7 +65,7 @@ class BotConfig:
     TP_PERCENT: float = 0.014              # Take Profit 1.40% (Risk to Reward 1:2 -> Terbukti Sukses Cuan Konsisten)
     RR_RATIO: float = 2.00                 # Rasio Risk-to-Reward terbukti 1:2
     BEP_PROFIT_TRIGGER: float = 0.007      # Saat profit mencapai 1R (+0.70%), geser SL ke BEP
-    BEP_LOCK_PROFIT: float = 0.0025        # Kunci profit +0.25% (Menutup 100% fee bursa 0.07% + mengunci profit bersih +0.18%, bebas rugi & memberi napas ke TP)
+    BEP_LOCK_PROFIT: float = 0.0015        # Kunci profit +0.15% (Menutup 100% fee bursa 0.07% + buffer slippage flashdump 0.03% + untung bersih, memberi ruang napas ke TP)
     MAKER_FEE_RATE: float = 0.0002         # 0.02% maker fee pada Binance Futures
 
 config = BotConfig()

@@ -714,8 +714,8 @@ class BinanceScalper:
         1. Target Take Profit penuh: +1.4% (Risk to Reward 1:2).
         2. Stop Loss awal: -0.7% (Resiko terukur 1R).
         3. Proteksi Break-Even (BEP): Begitu profit mencapai 1R (+0.7%), SL otomatis digeser
-           ke Break-Even (+0.25% di atas Entry) sehingga menutup 100% seluruh fee bursa (0.07%)
-           & mengunci untung bersih, menjadikan posisi 100% bebas risiko tanpa potensi rugi.
+           ke Break-Even (+0.15% di atas Entry) sehingga menutup 100% seluruh fee bursa (0.07%)
+           + buffer slippage flashdump (0.03%) & mengunci untung bersih, memberi ruang napas ke TP.
         """
         if not self.active_position:
             return
@@ -741,7 +741,7 @@ class BinanceScalper:
             if not bep_activated:
                 hit_bep = (current_price >= bep_trigger) if side == "buy" else (current_price <= bep_trigger) if bep_trigger > 0 else (pnl_pct >= config.BEP_PROFIT_TRIGGER)
                 if hit_bep:
-                    bep_lock = getattr(config, "BEP_LOCK_PROFIT", 0.0025) # +0.25% di atas entry
+                    bep_lock = getattr(config, "BEP_LOCK_PROFIT", 0.0015) # +0.15% di atas entry
                     raw_bep = entry_price * (1.0 + bep_lock) if side == "buy" else entry_price * (1.0 - bep_lock)
                     formatted_bep = self.client.format_price(symbol, raw_bep)
                     
@@ -754,7 +754,7 @@ class BinanceScalper:
                         
                     pos["sl_price"] = formatted_bep
                     pos["bep_activated"] = True
-                    console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: Profit mencapai 1R (+0.7%), menggeser Native SL ke {formatted_bep} (Terkunci Untung Bersih +0.25% Menutup Seluruh Fee Bursa)[/bold cyan]")
+                    console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: Profit mencapai 1R (+0.7%), menggeser Native SL ke {formatted_bep} (Terkunci Untung Bersih +0.15% Menutup Seluruh Fee Bursa)[/bold cyan]")
                     
                     # Batalkan Stop Loss lama di Binance & Pasang Native STOP_MARKET baru di harga BEP
                     try:
@@ -790,6 +790,12 @@ class BinanceScalper:
             console.log(f"[dim]Pemantauan 2.5s: {symbol} @ {current_price} | PnL: {pnl_pct*100:+.2f}% (${pnl_usd:+.2f}) | TP: {tp_price:.4f} | SL: {sl_price:.4f} | BEP: {'AKTIF' if pos.get('bep_activated') else 'MENUNGGU 1R'}[/dim]")
             
             if hit_tp:
+                # Periksa apakah posisi sudah ditutup oleh Native SL / BEP di Binance sebelum execute close
+                pos_check = self.sync_exchange_position(force=True)
+                if not pos_check:
+                    console.log(f"[bold green]Posisi {symbol} telah berhasil ditutup instan di Binance matching engine.[/bold green]")
+                    return
+
                 console.log(f"[bold green]🎯 TAKE PROFIT TERCAPAI (RR 1:2 / +1.4%)! (+{pnl_pct*100:.2f}%, PnL: +${pnl_usd:.2f}) pada {symbol}[/bold green]")
                 # Batalkan Native SL yang masih terpasang di Binance agar tidak tereksekusi ganda
                 try:

@@ -5,7 +5,7 @@ Sesuai Sistem Live & Blueprint Akademi Crypto Kalimasada:
 - Periode Data: ~7 Hari (2.000 Candle 5m per Koin dari Binance Vision API)
 - Timeframe Eksekusi: 5m | Struktur Pasar: 15m
 - Rasio Risk-to-Reward: 1:2.00 (SL -0.70%, TP +1.40%)
-- Proteksi BEP: Aktif saat menyentuh 1R (+0.70%), Kunci Profit Bersih +0.25% (Fee tertutup 100% + cuan aman)
+- Proteksi BEP: Aktif saat menyentuh 1R (+0.70%), Kunci Profit Bersih +0.15% (Fee tertutup 100% + cuan aman)
 - Margin Modal Mikro: Tepat $1.00 USDT per posisi (Saldo < $100) / 1.0% Compounding (Saldo >= $100)
 - Leverage: 50x (Notional $50.00 pada margin $1.00)
 - Fee Bursa Riil: Maker 0.02% (Entry & TP Limit), Taker 0.05% (SL & BEP Market Stop)
@@ -135,7 +135,7 @@ def run_portfolio_simulation(klines_data: Dict[str, List[List[float]]]) -> Tuple
             if not active_pos["bep_activated"]:
                 hit_bep = (c_high >= active_pos["bep_trigger_price"]) if side == "BUY" else (c_low <= active_pos["bep_trigger_price"])
                 if hit_bep:
-                    bep_lock = config.BEP_LOCK_PROFIT  # +0.25%
+                    bep_lock = config.BEP_LOCK_PROFIT  # +0.15%
                     new_sl = entry_p * (1.0 + bep_lock) if side == "BUY" else entry_p * (1.0 - bep_lock)
                     active_pos["sl_price"] = new_sl
                     active_pos["bep_activated"] = True
@@ -436,7 +436,7 @@ def print_final_report(final_wallet: float, trades: List[Dict[str, Any]], meta: 
     t1.add_row("Frekuensi Rata-rata per Hari", f"{total / meta['duration_days']:.1f} posisi / hari")
     t1.add_row("Total Menang (Winning Trades)", f"{len(wins)} posisi ({win_rate:.1f}%)")
     t1.add_row(" - Full TP Hit (+1.40% / RR 1:2.0)", f"{len(tp_wins)} posisi ({pure_tp_wr:.1f}%)")
-    t1.add_row(" - BEP Profit Lock (+0.25%)", f"{len(bep_wins)} posisi (Semua Fee Tertutup + Untung Bersih)")
+    t1.add_row(" - BEP Profit Lock (+0.15%)", f"{len(bep_wins)} posisi (Semua Fee Tertutup + Untung Bersih)")
     t1.add_row("Total Kalah (Kena SL -0.70%)", f"{len(losses)} posisi ({(len(losses)/total*100):.1f}%)" if total > 0 else "0")
     t1.add_row("Win Rate Total (TP + BEP Lock)", f"[{color_pnl}]{win_rate:.1f}%[/{color_pnl}]")
     t1.add_row("Profit Factor", f"{profit_factor:.2f}")
@@ -482,7 +482,7 @@ def print_final_report(final_wallet: float, trades: List[Dict[str, Any]], meta: 
     t3.add_column("Simbol Koin", style="cyan", width=12)
     t3.add_column("Total Sinyal", width=12)
     t3.add_column("Full TP (+1.40%)", width=16)
-    t3.add_column("BEP Lock (+0.25%)", width=16)
+    t3.add_column("BEP Lock (+0.15%)", width=16)
     t3.add_column("Kena SL (-0.70%)", width=16)
     t3.add_column("Win Rate (%)", width=14)
     t3.add_column("Net PnL ($)", width=14)
