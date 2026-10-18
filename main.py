@@ -99,6 +99,14 @@ def leverage_stats():
         "ge_50x_count": sum(v for k, v in distribution.items() if k >= 50),
         "examples_50x": [s for s, l in lev_map.items() if l >= 50][:30]
     }
+@app.get("/trade-history")
+def trade_history(limit: int = 100):
+    """Mengambil riwayat trade terakhir langsung dari database Neon Tech."""
+    trades = db.get_recent_trades(limit)
+    return {
+        "total_returned": len(trades),
+        "trades": trades
+    }
 
 from database import db
 

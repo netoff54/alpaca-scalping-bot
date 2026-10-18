@@ -649,11 +649,11 @@ class BinanceScalper:
                 "placed_at": time.time()
             }
             
-            # 4. Loop Pemantauan 30 Detik (Anti-FOMO Auto-Cancel)
+            # 4. Loop Pemantauan 30 Detik (Anti-FOMO Auto-Cancel dengan Fast 0.5s Polling)
             console.log(f"[yellow]Menunggu limit order terisi (maks 30 detik)...[/yellow]")
             t_start = time.time()
             while time.time() - t_start < config.LIMIT_TIMEOUT_SECONDS:
-                time.sleep(2)
+                time.sleep(0.5)  # Polling cepat 0.5s (bukan 2s) agar mendeteksi fill seketika
                 try:
                     chk = self.client.get_order(symbol, order_id)
                     status = chk.get("status")
@@ -669,6 +669,26 @@ class BinanceScalper:
                             qty=formatted_qty
                         )
                         native_sl_id = native_sl.get("orderId") if isinstance(native_sl, dict) else None
+
+                        # Jika harga melompat agresif dan SL ditolak karena sudah terlewati (-2021 Order would immediately trigger):
+                        # Langsung eksekusi Market Close darurat DETIK ITU JUGA agar modal terlindungi seketika!
+                        if not native_sl_id and isinstance(native_sl, dict) and native_sl.get("code") == -2021:
+                            console.log(f"[bold red]🚨 Flash Spike Terdeteksi! Harga telah melompati level SL. Menutup posisi seketika dengan market close...[/bold red]")
+                            m_res = self.client.create_market_close_order(symbol, sl_side, formatted_qty)
+                            fill_p = float(m_res.get("avgPrice", 0.0)) if isinstance(m_res, dict) else formatted_price
+                            self.active_order = None
+                            self.active_signals = [s for s in self.active_signals if s.get("symbol") != symbol]
+                            temp_pos = {
+                                "symbol": symbol,
+                                "side": side.lower(),
+                                "entry_price": formatted_price,
+                                "qty": formatted_qty,
+                                "notional": formatted_qty * formatted_price,
+                                "leverage": actual_leverage,
+                                "sl_price": sig["sl_price"]
+                            }
+                            self._record_closed_position(temp_pos, exit_price_hint=fill_p, result_hint="LOSS")
+                            return False
 
                         self.active_position = {
                             "symbol": symbol,
@@ -916,7 +936,16 @@ class BinanceScalper:
                     pass
 
                 close_side = "SELL" if side == "buy" else "BUY"
-                success, actual_exit = self.execute_maker_close(symbol=symbol, side=close_side, qty=qty, target_price=current_price, is_emergency=True)
+                
+                # PROTEKSI KETAT: Jika Stop Loss darurat (bukan BEP profit), LANGSUNG eksekusi Market Close instan!
+                # DILARANG mencoba Maker Close yang menunggu 1.5 detik karena akan memperparah slippage saat flash dump/spike!
+                if not is_be_or_profit:
+                    console.log(f"[bold red]🛑 Eksekusi Instan Market Stop Loss untuk {symbol} demi mencegah slippage tambahan...[/bold red]")
+                    m_res = self.client.create_market_close_order(symbol, close_side, qty)
+                    actual_exit = float(m_res.get("avgPrice", 0.0)) if isinstance(m_res, dict) else current_price
+                    success = True
+                else:
+                    success, actual_exit = self.execute_maker_close(symbol=symbol, side=close_side, qty=qty, target_price=current_price, is_emergency=True)
                 
                 final_exit = actual_exit if actual_exit > 0 else current_price
                 self._record_closed_position(pos, exit_price_hint=final_exit, result_hint="WIN" if is_be_or_profit else "LOSS")
