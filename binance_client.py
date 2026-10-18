@@ -367,12 +367,12 @@ class BinanceFuturesClient:
         """Mengembalikan leverage maksimal resmi koin (default 50 jika belum termuat)."""
         return self._symbols_max_leverage.get(symbol, 50)
 
-    def set_leverage(self, symbol: str, target_leverage: int = 50, min_leverage: int = 20) -> int:
+    def set_leverage(self, symbol: str, target_leverage: int = 50, min_leverage: int = 10) -> int:
         """
-        Mengatur leverage dengan sistem Range Stepping Probing [50x down to 20x]:
+        Mengatur leverage dengan sistem Range Stepping Probing [50x down to 10x]:
         1. Mencoba target_leverage (50x) terlebih dahulu.
-        2. Jika ditolak bursa/koin/akun (misal akun 20 hari atau koin dibatasi 40x),
-           secara berurutan mencoba 49x, 48x, ... hingga 20x untuk memastikan leverage
+        2. Jika ditolak bursa/koin/akun (misal akun 20 hari atau koin dibatasi 20x/10x),
+           secara berurutan mencoba 49x, 48x, ... hingga 10x untuk memastikan leverage
            maksimal yang tersedia terpakai.
         3. Menjamin bot selalu menggunakan leverage tertinggi yang tersedia (maksimal yang diizinkan).
         4. Menyimpan hasil sukses ke cache agar tidak perlu probing berulang pada trade berikutnya.
@@ -414,7 +414,7 @@ class BinanceFuturesClient:
         except Exception as e:
             console.log(f"[dim]Pemeriksaan awal leverage {start_lev}x {symbol}: {e}[/dim]")
 
-        # 2. Stepping turun berurutan dari 49x ke 20x sesuai instruksi pengguna
+        # 2. Stepping turun berurutan dari 49x ke 10x sesuai instruksi pengguna
         console.log(f"[yellow]Mencari leverage tertinggi yang tersedia untuk {symbol} (Range {start_lev-1}x s/d {min_leverage}x berurutan)...[/yellow]")
         for lev in range(start_lev - 1, min_leverage - 1, -1):
             try:
@@ -425,10 +425,25 @@ class BinanceFuturesClient:
                 if isinstance(data, dict) and "leverage" in data:
                     actual = int(data["leverage"])
                     self._symbols_max_leverage[symbol] = actual
-                    console.log(f"[bold green]Ditemukan leverage maksimal untuk {symbol}: {actual}x (Range 50x-20x)![/bold green]")
+                    console.log(f"[bold green]Ditemukan leverage maksimal untuk {symbol}: {actual}x (Range 50x-{min_leverage}x)![/bold green]")
                     return actual
             except Exception:
                 continue
+
+        # 3. Jika probing belum terdaftar, periksa leverage aktif bursa melalui positionRisk
+        try:
+            url_risk = f"{self.base_url}/fapi/v2/positionRisk"
+            params_risk = self._sign({"symbol": symbol})
+            resp_risk = self.session.get(url_risk, params=params_risk, timeout=5)
+            self.check_response_for_ban(resp_risk)
+            data_risk = resp_risk.json()
+            if isinstance(data_risk, list) and len(data_risk) > 0:
+                act = int(data_risk[0].get("leverage", min_leverage))
+                self._symbols_max_leverage[symbol] = act
+                console.log(f"[bold green]Leverage aktif riil Binance untuk {symbol}: {act}x[/bold green]")
+                return act
+        except Exception:
+            pass
 
         return min_leverage
 
