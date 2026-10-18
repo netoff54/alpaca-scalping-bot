@@ -8,3 +8,5 @@ extract_*.py
 get_*.py
 yt_*.txt
 yt_*.png
+klines_cache.json
+*.jsonl

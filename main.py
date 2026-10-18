@@ -95,7 +95,6 @@ def index():
             "available_usdt": bal["available"],
             "trade_size_notional": scalper.get_compounded_notional(),
             "database": "Neon Tech PostgreSQL (Schema: binance_scalper)",
-            "db_trade_summary": db_summary,
             "monitored_top_coins": len(scalper.ranked_pairs),
             "last_scan_time": scalper.last_scan_time,
             "last_scan_duration_sec": scalper.last_scan_duration_sec,
@@ -109,7 +108,13 @@ def index():
             "active_order": scalper.active_order,
             "total_trades": scalper.total_trades,
             "winning_trades": scalper.winning_trades,
+            "win_rate_pct": round(scalper.winning_trades / scalper.total_trades * 100, 2) if scalper.total_trades > 0 else 0.0,
             "total_pnl_usd": round(scalper.total_pnl_usd, 4),
+            "db_trade_summary": {
+                "total_trades": scalper.total_trades,
+                "winning_trades": scalper.winning_trades,
+                "total_pnl_usd": round(scalper.total_pnl_usd, 4)
+            },
             "last_error": scalper.last_error
         }
     except Exception as e:

@@ -66,6 +66,21 @@ class BinanceScalper:
         self._last_reversal_check_time: float = 0.0
         self.last_error: Optional[str] = None
         self._symbol_order_cooldown: Dict[str, float] = {}
+        
+        # Muat riwayat transaksi kumulatif dari Neon Tech agar tidak reset saat restart/redeploy
+        self.load_history_from_db()
+
+    def load_history_from_db(self):
+        """Memuat riwayat transaksi kumulatif dari Neon Tech agar statistik tidak reset dari 0 saat restart/redeploy."""
+        try:
+            summary = db.get_trade_summary()
+            self.total_trades = summary.get("total_trades", 0)
+            self.winning_trades = summary.get("winning_trades", 0)
+            self.total_pnl_usd = summary.get("total_pnl_usd", 0.0)
+            self.trade_history = db.get_recent_trades(50)
+            console.log(f"[bold green]Riwayat database Neon Tech dimuat: {self.total_trades} trade kumulatif ({self.winning_trades} win, Total PnL: +${self.total_pnl_usd:.4f} USDT)[/bold green]")
+        except Exception as e:
+            console.log(f"[dim]DB load history notice: {e}[/dim]")
 
     @property
     def _ban_until(self) -> float:
@@ -204,7 +219,7 @@ class BinanceScalper:
         """
         Menghitung ukuran notional posisi berdasarkan aturan margin bertingkat:
         - Saldo < $100: gunakan margin $0.50 (Notional $25.00 pada 50x / $10.00 pada 20x)
-        - Saldo >= $100: kembali ke 0.5% margin per posisi dari total saldo
+        - Saldo >= $100: gunakan 1.0% margin per posisi dari total saldo (Compounding)
         """
         bal = self.get_futures_balance()
         avail = bal["available"]
@@ -401,11 +416,8 @@ class BinanceScalper:
             # Maju ke rotasi berikutnya
             self._current_rotation_index = (self._current_rotation_index + 1) % total_univ
             
-            # Rekam sinyal dan snapshot saldo ke Neon Tech
-            if self.active_signals:
-                db.record_signals(self.active_signals)
-                
-            if now - self._last_wallet_db_snapshot > 300:
+            # Snapshot saldo ke Neon Tech secara berkala (setiap 1 jam agar hemat kuota compute)
+            if now - self._last_wallet_db_snapshot > 3600:
                 db.record_wallet_snapshot(
                     total_wallet=bal["total_wallet"],
                     available=bal["available"],
@@ -491,8 +503,9 @@ class BinanceScalper:
                 
             effective_notional = formatted_qty * formatted_price
             margin_used = effective_notional / actual_leverage
-            if effective_notional > config.MAX_ORDER_NOTIONAL:
-                console.log(f"[bold yellow]🛡️ Filter Ukuran Akun: Minimum order {symbol} bernilai ${effective_notional:.2f} (Margin: ${margin_used:.2f}). Melewati agar margin tetap aman (Maks Notional: ${config.MAX_ORDER_NOTIONAL:.2f}).[/bold yellow]")
+            max_allowed_notional = config.MAX_ORDER_NOTIONAL if avail < config.BALANCE_THRESHOLD_SCALING else max(config.MAX_ORDER_NOTIONAL, target_notional * 1.5)
+            if effective_notional > max_allowed_notional:
+                console.log(f"[bold yellow]🛡️ Filter Ukuran Akun: Minimum order {symbol} bernilai ${effective_notional:.2f} (Margin: ${margin_used:.2f}). Melewati agar margin tetap aman (Maks Notional: ${max_allowed_notional:.2f}).[/bold yellow]")
                 return False
 
             if effective_notional < config.MIN_NOTIONAL:

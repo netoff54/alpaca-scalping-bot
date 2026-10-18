@@ -30,8 +30,8 @@ class BotConfig:
     # --- Account & Risk-Budget Management (Leverage Range 50x -> 20x) ---
     DEFAULT_CAPITAL: float = 10.0          # Modal dasar $10
     FIXED_MARGIN_LOW_BALANCE: float = 0.50 # Margin $0.50 jika saldo < $100 (Notional $10 - $25)
-    BALANCE_THRESHOLD_SCALING: float = 100.0# Batas ambang $100 untuk beralih ke 0.5% margin per posisi dari total saldo
-    RISK_PORTFOLIO_PERCENT: float = 0.005  # 0.5% margin dari total portofolio per posisi jika saldo >= $100 (Compounding)
+    BALANCE_THRESHOLD_SCALING: float = 100.0# Batas ambang $100 untuk beralih ke 1.0% margin per posisi dari total saldo
+    RISK_PORTFOLIO_PERCENT: float = 0.01   # 1.0% margin dari total portofolio per posisi jika saldo >= $100 (Compounding)
     COMPOUNDING_ENABLED: bool = True       # Compounding dinamis berdasarkan saldo
     LEVERAGE: int = 50                     # Leverage 50x target utama
     LEVERAGE_MAX: int = 50                 # Batas atas leverage (50x diutamakan)

@@ -182,4 +182,32 @@ class NeonDatabase:
             console.log(f"[dim]DB summary error: {e}[/dim]")
         return {"total_trades": 0, "winning_trades": 0, "total_pnl_usd": 0.0}
 
+    def get_recent_trades(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Mengambil riwayat trade terakhir dari Neon Tech agar memori bot tidak reset saat restart/redeploy."""
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("""
+                        SELECT id, symbol, side, entry_price, exit_price, qty, notional,
+                               margin_used, pnl_usd, pnl_pct, result, closed_at, created_at
+                        FROM binance_scalper.trades
+                        ORDER BY id DESC LIMIT %s;
+                    """, (limit,))
+                    rows = cur.fetchall()
+                    return [dict(r) for r in rows] if rows else []
+        except Exception as e:
+            console.log(f"[dim]DB get recent trades: {e}[/dim]")
+        return []
+
+    def cleanup_old_signals(self):
+        """Membersihkan log sinyal lama agar menghemat kuota dan storage Neon Tech."""
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("TRUNCATE TABLE binance_scalper.signals;")
+                conn.commit()
+            console.log("[green]Log sinyal lama Neon Tech berhasil dibersihkan untuk menghemat kuota.[/green]")
+        except Exception as e:
+            console.log(f"[dim]DB cleanup signals: {e}[/dim]")
+
 db = NeonDatabase()
