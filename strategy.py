@@ -448,11 +448,11 @@ def analyze_coin_comprehensive(
     target_leverage = config.LEVERAGE_MAX
     min_leverage = config.LEVERAGE_MIN
     effective_leverage = min(target_leverage, max_symbol_leverage) if max_symbol_leverage > 0 else target_leverage
-    effective_leverage = max(min_leverage, effective_leverage)
 
     # Manajemen Risiko Ketat RR 1:2 (Take Profit 2x Lipat Resiko)
+    # Saring ketat: Jika koin tidak mendukung leverage minimal 20x (misal 10x), lewati (skip) koin!
     executable_signal = None
-    if signal_side and final_score >= config.MIN_SETUP_SCORE:
+    if signal_side and final_score >= config.MIN_SETUP_SCORE and effective_leverage >= min_leverage:
         sl_percent = config.SL_PERCENT  # 0.70%
         tp_percent = config.TP_PERCENT  # 1.40% (RR 1:2)
         entry_price = latest_price
@@ -475,7 +475,6 @@ def analyze_coin_comprehensive(
 
         # Pengecekan Batas Minimum Order Binance ($5.00)
         # Pada margin $1.00, koin dengan leverage 20x menghasilkan notional $20.00 (lolos batas Binance $5.00).
-        # Jika koin dengan leverage sangat rendah (< 5x) menghasilkan notional < $5.00, lewati koin tersebut.
         if raw_notional < config.MIN_NOTIONAL:
             executable_signal = None
         else:
@@ -543,24 +542,3 @@ def analyze_coin_comprehensive(
         "score": final_score,
         "signal": executable_signal
     }
-
-def check_signal_from_ohlcv(
-    ohlcv: List[List[float]],
-    available_capital: float = 10.0,
-    leverage: int = 10,
-    derivatives_data: Optional[Dict[str, Any]] = None,
-    ls_data: Optional[Dict[str, Any]] = None
-) -> Optional[Dict[str, Any]]:
-    """Kompatibilitas wrapper untuk evaluasi sinyal native."""
-    deriv = derivatives_data or ls_data
-    analysis = analyze_coin_comprehensive("PAIR", ohlcv, ohlcv, deriv, available_capital, leverage)
-    return analysis.get("signal")
-
-def check_signal(
-    ohlcv: List[List[float]],
-    available_capital: float = 10.0,
-    leverage: int = 10,
-    ls_data: Optional[Dict[str, float]] = None
-) -> Optional[Dict[str, Any]]:
-    """Alias kompatibilitas ke check_signal_from_ohlcv."""
-    return check_signal_from_ohlcv(ohlcv, available_capital, leverage, derivatives_data=ls_data)

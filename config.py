@@ -36,7 +36,7 @@ class BotConfig:
     COMPOUNDING_ENABLED: bool = True       # Compounding dinamis berdasarkan saldo
     LEVERAGE: int = 50                     # Leverage 50x target utama
     LEVERAGE_MAX: int = 50                 # Batas atas leverage (50x diutamakan)
-    LEVERAGE_MIN: int = 10                 # Batas bawah probing leverage (10x agar koin bermodal/leverage rendah tetap akurat)
+    LEVERAGE_MIN: int = 20                 # Batas bawah leverage (20x ketat: koin di bawah 20x langsung di-skip demi mencegah pembengkakan margin)
     MARGIN_MODE: str = "ISOLATED"          # WAJIB ISOLATED MARGIN
     ORDER_TYPE: str = "LIMIT"              # WAJIB LIMIT ORDER (Maker Only - Fee Rendah)
     CLOSE_ORDER_TYPE: str = "LIMIT"        # WAJIB LIMIT ORDER KELUAR (Maker Close - Post Only GTX)

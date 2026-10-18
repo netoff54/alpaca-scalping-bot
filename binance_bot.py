@@ -198,11 +198,9 @@ class BinanceScalper:
         c_side = closed_pos.get("side", "buy").lower()
         c_notional = float(closed_pos.get("notional", 0.0))
         c_qty = float(closed_pos.get("qty", 0.0))
-        
-        # Ambil leverage riil (fallback ke 20 jika akun belum 30 hari atau tidak terekam)
+        # Ambil leverage riil (rentang 20x s/d 50x)
         c_lev = int(closed_pos.get("leverage") or self.client.get_max_leverage(sym))
-        if c_lev > 20:
-            c_lev = 20
+        c_lev = max(config.LEVERAGE_MIN, min(c_lev, config.LEVERAGE_MAX))
 
         real_exit_price = exit_price_hint
         real_pnl_usd = None
@@ -366,11 +364,14 @@ class BinanceScalper:
                     if (min_q * last_price) > config.MAX_ORDER_NOTIONAL:
                         continue
 
-                    # Filter jika koin tidak bisa mencapai minimum order ($5.00) dengan margin $1.00 pada leverage maksimalnya
-                    # Dengan margin $1.00, koin dengan leverage >= 5x ($1.00 * 5 = $5.00) sudah memenuhi minimum order
+                    # Filter koin dengan leverage maksimal < 20x (misal AVAUSDT 10x) agar semesta 500 koin hanya berisi koin likuid & seragam
+                    max_sym_lev = self.client.get_max_leverage(sym)
+                    if max_sym_lev < config.LEVERAGE_MIN:
+                        continue
+
+                    # Filter jika koin tidak bisa mencapai minimum order ($5.00) dengan margin yang diizinkan
                     bal_avail = self._cached_balance.get("available", 0.0)
                     active_margin = config.FIXED_MARGIN_LOW_BALANCE if bal_avail < config.BALANCE_THRESHOLD_SCALING else (bal_avail * config.RISK_PORTFOLIO_PERCENT)
-                    max_sym_lev = self.client.get_max_leverage(sym)
                     if (active_margin * max_sym_lev) < config.MIN_NOTIONAL:
                         continue
 
@@ -537,9 +538,9 @@ class BinanceScalper:
             self._configured_symbols.add(symbol)
             
             # Saring koin dengan leverage di bawah 20x agar seluruh trade seragam & tidak timpang
-            if actual_leverage < 20:
+            if actual_leverage < config.LEVERAGE_MIN:
                 console.log(
-                    f"[bold yellow]🛡️ Filter Leverage Rendah: {symbol} hanya mendukung {actual_leverage}x (< 20x). "
+                    f"[bold yellow]🛡️ Filter Leverage Rendah: {symbol} hanya mendukung {actual_leverage}x (< {config.LEVERAGE_MIN}x). "
                     f"Melewati koin agar seluruh trade tetap seimbang, seragam, dan likuid.[/bold yellow]"
                 )
                 self.active_order = None
@@ -983,7 +984,7 @@ class BinanceScalper:
                         self.active_signals = [s for s in self.active_signals if s.get("symbol") != sym]
                     else:
                         console.log(f"[bold green]Sinyal terbaik terdeteksi:[/bold green] {best_signal['side']} {best_signal['symbol']} (Skor: {best_signal.get('score', 0)})")
-                        min_req = config.MIN_NOTIONAL / config.LEVERAGE
+                        min_req = config.FIXED_MARGIN_LOW_BALANCE if avail_usdt < config.BALANCE_THRESHOLD_SCALING else (avail_usdt * config.RISK_PORTFOLIO_PERCENT)
                         if avail_usdt >= min_req:
                             self.execute_limit_order(best_signal)
                         else:

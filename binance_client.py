@@ -367,20 +367,27 @@ class BinanceFuturesClient:
         """Mengembalikan leverage maksimal resmi koin (default 50 jika belum termuat)."""
         return self._symbols_max_leverage.get(symbol, 50)
 
-    def set_leverage(self, symbol: str, target_leverage: int = 50, min_leverage: int = 10) -> int:
+    def set_leverage(self, symbol: str, target_leverage: int = 50, min_leverage: int = 20) -> int:
         """
-        Mengatur leverage dengan sistem Range Stepping Probing [50x down to 10x]:
-        1. Mencoba target_leverage (50x) terlebih dahulu.
-        2. Jika ditolak bursa/koin/akun (misal akun 20 hari atau koin dibatasi 20x/10x),
-           secara berurutan mencoba 49x, 48x, ... hingga 10x untuk memastikan leverage
+        Mengatur leverage dengan sistem Range Stepping Probing [50x down to 20x]:
+        1. Jika dari leverage brackets koin < 20x (misal AVAUSDT 10x), langsung kembalikan < 20x agar di-skip.
+        2. Mencoba target_leverage (50x) terlebih dahulu.
+        3. Jika ditolak bursa/koin/akun (misal akun baru atau koin dibatasi 20x-49x),
+           secara berurutan mencoba 49x, 48x, ... hingga 20x untuk memastikan leverage
            maksimal yang tersedia terpakai.
-        3. Menjamin bot selalu menggunakan leverage tertinggi yang tersedia (maksimal yang diizinkan).
-        4. Menyimpan hasil sukses ke cache agar tidak perlu probing berulang pada trade berikutnya.
+        4. Jika koin tidak bisa mencapai minimal 20x, kembalikan nilai aslinya (< 20) agar bot
+           langsung men-skip koin demi mencegah pembengkakan margin di atas 1%.
         """
         if self.is_banned():
             return max(min_leverage, min(target_leverage, self.get_max_leverage(symbol)))
         
         cached_lev = self._symbols_max_leverage.get(symbol)
+        
+        # Fast Skip: jika batas resmi koin sudah diketahui < 20x (misal AVAUSDT 10x), hemat request & langsung skip
+        if cached_lev is not None and cached_lev < min_leverage:
+            console.log(f"[bold yellow]Batas leverage resmi {symbol} hanya {cached_lev}x (< {min_leverage}x). Melewati probing agar koin di-skip.[/bold yellow]")
+            return cached_lev
+
         start_lev = min(target_leverage, cached_lev if cached_lev and cached_lev >= min_leverage else target_leverage)
         
         url = f"{self.base_url}/fapi/v1/leverage"
@@ -411,10 +418,14 @@ class BinanceFuturesClient:
                         self._symbols_max_leverage[symbol] = actual
                         console.log(f"[bold green]Leverage {symbol} berhasil diset ke {actual}x (Sesuai batas resmi akun/koin: {actual}x).[/bold green]")
                         return actual
+                elif suggested_max < min_leverage:
+                    self._symbols_max_leverage[symbol] = suggested_max
+                    console.log(f"[bold yellow]Batas leverage akun/koin untuk {symbol} hanya {suggested_max}x (< {min_leverage}x).[/bold yellow]")
+                    return suggested_max
         except Exception as e:
             console.log(f"[dim]Pemeriksaan awal leverage {start_lev}x {symbol}: {e}[/dim]")
 
-        # 2. Stepping turun berurutan dari 49x ke 10x sesuai instruksi pengguna
+        # 2. Stepping turun berurutan dari (start_lev - 1) ke 20x
         console.log(f"[yellow]Mencari leverage tertinggi yang tersedia untuk {symbol} (Range {start_lev-1}x s/d {min_leverage}x berurutan)...[/yellow]")
         for lev in range(start_lev - 1, min_leverage - 1, -1):
             try:
@@ -438,14 +449,14 @@ class BinanceFuturesClient:
             self.check_response_for_ban(resp_risk)
             data_risk = resp_risk.json()
             if isinstance(data_risk, list) and len(data_risk) > 0:
-                act = int(data_risk[0].get("leverage", min_leverage))
+                act = int(data_risk[0].get("leverage", 1))
                 self._symbols_max_leverage[symbol] = act
                 console.log(f"[bold green]Leverage aktif riil Binance untuk {symbol}: {act}x[/bold green]")
                 return act
         except Exception:
             pass
 
-        return min_leverage
+        return cached_lev if (cached_lev and cached_lev < min_leverage) else 1
 
     def fetch_best_bid_ask(self, symbol: str) -> Dict[str, float]:
         if self.is_banned():
@@ -732,21 +743,6 @@ class BinanceFuturesClient:
             console.log(f"[dim]Notice fetch income history: {e}[/dim]")
             return []
 
-    def fetch_all_orders(self, symbol: str, limit: int = 50) -> List[Dict[str, Any]]:
-        """Mengambil seluruh riwayat order koin dari bursa."""
-        if self.is_banned():
-            return []
-        try:
-            url = f"{self.base_url}/fapi/v1/allOrders"
-            params = self._sign({"symbol": symbol, "limit": limit})
-            resp = self.session.get(url, params=params, timeout=10)
-            self.check_response_for_ban(resp)
-            data = resp.json()
-            self.check_response_for_ban(data)
-            return data if isinstance(data, list) else []
-        except Exception as e:
-            console.log(f"[dim]Notice fetch all orders {symbol}: {e}[/dim]")
-            return []
 
     def fetch_price(self, symbol: str) -> float:
         if self.is_banned():
