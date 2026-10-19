@@ -93,6 +93,32 @@ class NeonDatabase:
                         );
                     """)
                     
+                    # 5. Tabel pemisahan modal pokok riil (P2P Deposit / Withdrawal / Capital Injection)
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS binance_scalper.capital_history (
+                            id SERIAL PRIMARY KEY,
+                            event_type VARCHAR(30) NOT NULL,
+                            amount NUMERIC(18, 4) NOT NULL,
+                            tran_id VARCHAR(64) UNIQUE,
+                            notes TEXT,
+                            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        );
+                    """)
+                    cur.execute("""
+                        ALTER TABLE binance_scalper.capital_history ADD COLUMN IF NOT EXISTS tran_id VARCHAR(64) UNIQUE;
+                    """)
+                    # Pastikan modal awal tersimpan tepat $101.15 sesuai arahan pengguna
+                    cur.execute("""
+                        INSERT INTO binance_scalper.capital_history (event_type, amount, notes)
+                        SELECT 'INITIAL_CAPITAL', 101.15, 'Modal awal riil pengguna di Binance Futures ($101.15)'
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM binance_scalper.capital_history WHERE event_type = 'INITIAL_CAPITAL'
+                        );
+                        UPDATE binance_scalper.capital_history 
+                        SET amount = 101.15, notes = 'Modal awal riil pengguna di Binance Futures ($101.15)'
+                        WHERE event_type = 'INITIAL_CAPITAL';
+                    """)
+                    
                 conn.commit()
             self._is_connected = True
             console.log("[bold green]Database Neon Tech (schema: binance_scalper) berhasil diinisialisasi terpisah dari Bitget.[/bold green]")
@@ -315,6 +341,108 @@ class NeonDatabase:
         except Exception as e:
             console.log(f"[red]Error sync historical trades with Binance: {e}[/red]")
             return {"status": "error", "error": str(e)}
+
+    def sync_capital_transfers(self, transfers: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Sinkronisasi otomatis riwayat transfer masuk/keluar (P2P / Spot <-> Futures):
+        - Jika income > 0: Penambahan modal (Deposit / Transfer IN) -> Menambah Modal Pokok (BUKAN Profit)
+        - Jika income < 0: Penarikan modal (Withdrawal / Transfer OUT) -> Mengurangi Modal Pokok (BUKAN Loss)
+        """
+        if not transfers:
+            return {"status": "empty", "new_transfers": 0}
+        new_count = 0
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    for tr in transfers:
+                        t_id = str(tr.get("tranId") or tr.get("id") or "")
+                        if not t_id:
+                            continue
+                        amt = float(tr.get("income", 0.0))
+                        e_type = "DEPOSIT_P2P" if amt > 0 else "WITHDRAWAL_P2P"
+                        notes = f"Transfer {'Masuk (Tambah Modal)' if amt > 0 else 'Keluar (Tarik Saldo)'} via Binance Futures (TranID: {t_id})"
+                        
+                        cur.execute("""
+                            INSERT INTO binance_scalper.capital_history (event_type, amount, tran_id, notes)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (tran_id) DO NOTHING;
+                        """, (e_type, amt, t_id, notes))
+                        if cur.rowcount > 0:
+                            new_count += 1
+                conn.commit()
+            return {"status": "success", "new_transfers": new_count}
+        except Exception as e:
+            console.log(f"[dim]DB sync capital transfers: {e}[/dim]")
+            return {"status": "error", "error": str(e)}
+
+    def get_capital_summary(self) -> Dict[str, Any]:
+        """
+        Mengambil rekapitulasi modal pokok dan memisahkannya dari PnL hasil trading:
+        - Modal Awal Terdaftar ($101.15)
+        - Total Tambah Modal (Deposit P2P / Transfer IN)
+        - Total Tarik Saldo (Withdrawal P2P / Transfer OUT)
+        - Net Modal Pokok
+        - Total PnL Murni Trading
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    # Ambil modal awal
+                    cur.execute("SELECT amount FROM binance_scalper.capital_history WHERE event_type = 'INITIAL_CAPITAL' LIMIT 1;")
+                    init_row = cur.fetchone()
+                    initial_cap = float(init_row["amount"]) if init_row else 101.15
+
+                    # Ambil total deposit dan withdrawal
+                    cur.execute("""
+                        SELECT 
+                            COALESCE(SUM(amount) FILTER (WHERE event_type = 'DEPOSIT_P2P'), 0) as total_deposits,
+                            COALESCE(SUM(ABS(amount)) FILTER (WHERE event_type = 'WITHDRAWAL_P2P'), 0) as total_withdrawals
+                        FROM binance_scalper.capital_history;
+                    """)
+                    cap_row = cur.fetchone()
+                    total_deposits = float(cap_row["total_deposits"]) if cap_row else 0.0
+                    total_withdrawals = float(cap_row["total_withdrawals"]) if cap_row else 0.0
+                    net_capital_invested = round(initial_cap + total_deposits - total_withdrawals, 4)
+
+                    # Ambil summary trading murni
+                    cur.execute("""
+                        SELECT 
+                            COUNT(*) as total_trades,
+                            COUNT(*) FILTER (WHERE result = 'WIN') as winning_trades,
+                            COALESCE(SUM(pnl_usd), 0) as total_pnl_usd,
+                            COALESCE(SUM(commission), 0) as total_commission
+                        FROM binance_scalper.trades;
+                    """)
+                    tr_row = cur.fetchone()
+                    total_trades = int(tr_row["total_trades"] or 0) if tr_row else 0
+                    winning_trades = int(tr_row["winning_trades"] or 0) if tr_row else 0
+                    pure_trading_pnl = round(float(tr_row["total_pnl_usd"] or 0.0), 4) if tr_row else 0.0
+                    total_commission = round(float(tr_row["total_commission"] or 0.0), 4) if tr_row else 0.0
+
+                    return {
+                        "initial_capital": initial_cap,
+                        "total_deposits_added": total_deposits,
+                        "total_withdrawals": total_withdrawals,
+                        "net_capital_invested": net_capital_invested,
+                        "pure_trading_pnl": pure_trading_pnl,
+                        "total_commission_paid": total_commission,
+                        "total_trades": total_trades,
+                        "winning_trades": winning_trades,
+                        "win_rate_pct": round(winning_trades / total_trades * 100, 2) if total_trades > 0 else 0.0
+                    }
+        except Exception as e:
+            console.log(f"[dim]DB capital summary error: {e}[/dim]")
+            return {
+                "initial_capital": 101.15,
+                "total_deposits_added": 0.0,
+                "total_withdrawals": 0.0,
+                "net_capital_invested": 101.15,
+                "pure_trading_pnl": 0.0,
+                "total_commission_paid": 0.0,
+                "total_trades": 0,
+                "winning_trades": 0,
+                "win_rate_pct": 0.0
+            }
 
     def cleanup_old_signals(self):
         """Membersihkan log sinyal lama agar menghemat kuota dan storage Neon Tech."""

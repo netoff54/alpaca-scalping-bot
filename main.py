@@ -51,6 +51,10 @@ async def lifespan(app: FastAPI):
     def auto_sync_startup():
         time.sleep(10)
         try:
+            print(">>> [Auto-Sync] Menjalankan inisialisasi tabel modal & database...")
+            db.init_db()
+            transfers = scalper.client.fetch_income_history(income_type="TRANSFER", limit=1000)
+            db.sync_capital_transfers(transfers)
             print(">>> [Auto-Sync] Menjalankan sinkronisasi database dengan pembukuan resmi Binance...")
             res = scalper.sync_historical_database_with_binance()
             print(f">>> [Auto-Sync] Selesai: {res}")
@@ -73,6 +77,46 @@ def get_outbound_ip():
         return res.json()
     except Exception as e:
         return {"error": str(e)}
+
+@app.get("/capital-audit")
+def capital_audit():
+    """
+    Audit Pemisahan Modal Pokok vs Hasil Trading (P2P Deposit / Withdrawal Detection):
+    - Melacak transfer masuk/keluar resmi bursa Binance (Funding/Spot <-> Futures)
+    - Menjamin penarikan saldo TIDAK dianggap minus akibat trading
+    - Menjamin penambahan modal TIDAK terkontaminasi sebagai profit trading
+    """
+    db.init_db()
+    transfers = scalper.client.fetch_income_history(income_type="TRANSFER", limit=1000)
+    sync_res = db.sync_capital_transfers(transfers)
+    cap_summary = db.get_capital_summary()
+    bal = scalper.get_futures_balance()
+    wallet_now = bal["total_wallet"]
+    net_invested = cap_summary["net_capital_invested"]
+    
+    net_performance_usd = round(wallet_now - net_invested, 4)
+    roi_pct = round((net_performance_usd / net_invested) * 100, 2) if net_invested > 0 else 0.0
+    status = "PROFIT" if net_performance_usd >= 0 else "LOSS"
+    
+    return {
+        "status": status,
+        "modal_awal_resmi": cap_summary["initial_capital"],
+        "total_tambah_modal_p2p": cap_summary["total_deposits_added"],
+        "total_tarik_saldo_p2p": cap_summary["total_withdrawals"],
+        "net_modal_pokok_disetor": net_invested,
+        "saldo_dompet_saat_ini": wallet_now,
+        "hasil_bersih_trading_usd": net_performance_usd,
+        "roi_persentase": f"{roi_pct:+.2f}%",
+        "detail_trading": {
+            "total_trades": cap_summary["total_trades"],
+            "winning_trades": cap_summary["winning_trades"],
+            "win_rate_pct": f"{cap_summary['win_rate_pct']:.2f}%",
+            "gross_realized_pnl": cap_summary["pure_trading_pnl"],
+            "total_commission_paid": cap_summary["total_commission_paid"]
+        },
+        "raw_transfers_detected_count": len(transfers),
+        "new_transfers_synced": sync_res.get("new_transfers", 0)
+    }
 
 @app.get("/sync-database")
 def sync_database():
@@ -215,6 +259,15 @@ def index():
                 "total_trades": scalper.total_trades,
                 "winning_trades": scalper.winning_trades,
                 "total_pnl_usd": round(scalper.total_pnl_usd, 4)
+            },
+            "capital_tracking": {
+                "initial_capital": db.get_capital_summary()["initial_capital"],
+                "total_deposits_added": db.get_capital_summary()["total_deposits_added"],
+                "total_withdrawals": db.get_capital_summary()["total_withdrawals"],
+                "net_capital_invested": db.get_capital_summary()["net_capital_invested"],
+                "current_wallet_balance": bal["total_wallet"],
+                "net_trading_pnl_usd": round(bal["total_wallet"] - db.get_capital_summary()["net_capital_invested"], 4),
+                "roi_pct": f"{round((bal['total_wallet'] - db.get_capital_summary()['net_capital_invested']) / db.get_capital_summary()['net_capital_invested'] * 100, 2):+.2f}%" if db.get_capital_summary()["net_capital_invested"] > 0 else "0.00%"
             },
             "last_error": scalper.last_error
         }
