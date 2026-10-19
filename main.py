@@ -114,6 +114,7 @@ def capital_audit():
             "gross_realized_pnl": cap_summary["pure_trading_pnl"],
             "total_commission_paid": cap_summary["total_commission_paid"]
         },
+        "raw_transfers": transfers,
         "raw_transfers_detected_count": len(transfers),
         "new_transfers_synced": sync_res.get("new_transfers", 0)
     }
