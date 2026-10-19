@@ -101,7 +101,8 @@ def capital_audit():
     return {
         "status": status,
         "modal_awal_resmi": cap_summary["initial_capital"],
-        "total_tambah_modal_p2p": cap_summary["total_deposits_added"],
+        "total_tambah_modal_baru_p2p": cap_summary["extra_deposits_added"],
+        "total_seluruh_setoran_p2p": cap_summary["total_deposits_all"],
         "total_tarik_saldo_p2p": cap_summary["total_withdrawals"],
         "net_modal_pokok_disetor": net_invested,
         "saldo_dompet_saat_ini": wallet_now,
@@ -262,8 +263,8 @@ def index():
                 "total_pnl_usd": round(scalper.total_pnl_usd, 4)
             },
             "capital_tracking": {
-                "initial_capital": db.get_capital_summary()["initial_capital"],
-                "total_deposits_added": db.get_capital_summary()["total_deposits_added"],
+                "initial_capital": 101.15,
+                "extra_deposits_added": db.get_capital_summary()["extra_deposits_added"],
                 "total_withdrawals": db.get_capital_summary()["total_withdrawals"],
                 "net_capital_invested": db.get_capital_summary()["net_capital_invested"],
                 "current_wallet_balance": bal["total_wallet"],

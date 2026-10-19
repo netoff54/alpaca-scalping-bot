@@ -107,16 +107,9 @@ class NeonDatabase:
                     cur.execute("""
                         ALTER TABLE binance_scalper.capital_history ADD COLUMN IF NOT EXISTS tran_id VARCHAR(64) UNIQUE;
                     """)
-                    # Pastikan modal awal tersimpan tepat $101.15 sesuai arahan pengguna
+                    # Hapus seeding manual agar tidak terjadi duplikasi ganda dengan transfer resmi Binance
                     cur.execute("""
-                        INSERT INTO binance_scalper.capital_history (event_type, amount, notes)
-                        SELECT 'INITIAL_CAPITAL', 101.15, 'Modal awal riil pengguna di Binance Futures ($101.15)'
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM binance_scalper.capital_history WHERE event_type = 'INITIAL_CAPITAL'
-                        );
-                        UPDATE binance_scalper.capital_history 
-                        SET amount = 101.15, notes = 'Modal awal riil pengguna di Binance Futures ($101.15)'
-                        WHERE event_type = 'INITIAL_CAPITAL';
+                        DELETE FROM binance_scalper.capital_history WHERE event_type = 'INITIAL_CAPITAL';
                     """)
                     
                 conn.commit()
@@ -387,12 +380,7 @@ class NeonDatabase:
         try:
             with self.get_connection() as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    # Ambil modal awal
-                    cur.execute("SELECT amount FROM binance_scalper.capital_history WHERE event_type = 'INITIAL_CAPITAL' LIMIT 1;")
-                    init_row = cur.fetchone()
-                    initial_cap = float(init_row["amount"]) if init_row else 101.15
-
-                    # Ambil total deposit dan withdrawal
+                    # Ambil total transfer masuk (DEPOSIT_P2P) dan transfer keluar (WITHDRAWAL_P2P)
                     cur.execute("""
                         SELECT 
                             COALESCE(SUM(amount) FILTER (WHERE event_type = 'DEPOSIT_P2P'), 0) as total_deposits,
@@ -400,9 +388,12 @@ class NeonDatabase:
                         FROM binance_scalper.capital_history;
                     """)
                     cap_row = cur.fetchone()
-                    total_deposits = float(cap_row["total_deposits"]) if cap_row else 0.0
+                    raw_deposits = float(cap_row["total_deposits"]) if cap_row and float(cap_row["total_deposits"]) > 0 else 101.15
                     total_withdrawals = float(cap_row["total_withdrawals"]) if cap_row else 0.0
-                    net_capital_invested = round(initial_cap + total_deposits - total_withdrawals, 4)
+                    
+                    initial_cap = 101.15
+                    extra_deposits = round(max(0.0, raw_deposits - initial_cap), 4)
+                    net_capital_invested = round(raw_deposits - total_withdrawals, 4)
 
                     # Ambil summary trading murni
                     cur.execute("""
@@ -421,7 +412,8 @@ class NeonDatabase:
 
                     return {
                         "initial_capital": initial_cap,
-                        "total_deposits_added": total_deposits,
+                        "total_deposits_all": raw_deposits,
+                        "extra_deposits_added": extra_deposits,
                         "total_withdrawals": total_withdrawals,
                         "net_capital_invested": net_capital_invested,
                         "pure_trading_pnl": pure_trading_pnl,
