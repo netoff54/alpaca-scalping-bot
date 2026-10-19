@@ -693,7 +693,7 @@ class BinanceScalper:
                         console.log(f"[bold green]LIMIT ORDER TERISI PENUH! ({symbol} @ {formatted_price})[/bold green]")
                         
                         # Hitung ulang level SL, TP, dan BEP presisi dari harga keterisian riil (formatted_price)
-                        # Menjamin rasio RR 1:2 (SL tepat 0.70%, TP tepat 1.40%) selalu dihitung dari harga eksekusi riil
+                        # Menjamin rasio RR 1:2 (SL config.SL_PERCENT, TP config.TP_PERCENT) selalu dihitung dari harga eksekusi riil
                         sl_side = "SELL" if side.lower() == "buy" else "BUY"
                         actual_sl = self.client.format_price(symbol, formatted_price * (1.0 - config.SL_PERCENT) if side.lower() == "buy" else formatted_price * (1.0 + config.SL_PERCENT))
                         actual_tp = self.client.format_price(symbol, formatted_price * (1.0 + config.TP_PERCENT) if side.lower() == "buy" else formatted_price * (1.0 - config.TP_PERCENT))
@@ -914,7 +914,7 @@ class BinanceScalper:
                     console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: Profit mencapai 1R (+{config.BEP_PROFIT_TRIGGER*100:.2f}%), menggeser Native SL ke {formatted_bep} (Terkunci Untung Bersih +{bep_lock*100:.2f}% Menutup Seluruh Fee Bursa)[/bold cyan]")
                     
                     # Batalkan Stop Loss lama di Binance & Pasang Native STOP_MARKET baru di harga BEP
-                    # Catatan: Native TP tetap aktif di bursa untuk menangkap target profit penuh +1.77%
+                    # Catatan: Native TP tetap aktif di bursa untuk menangkap target profit penuh +2.00%
                     try:
                         old_sl_id = pos.get("native_sl_order_id")
                         if old_sl_id:

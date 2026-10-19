@@ -60,10 +60,10 @@ class BotConfig:
     RSI_PERIOD: int = 14                   # Relative Strength Index (Poin 7 Kalimasada)
     VOLUME_SPIKE_FACTOR: float = 1.15      # Konfirmasi volume transaksi >= 115% rata-rata
 
-    # --- Risk / Reward Ratio Presisi Dollar 1:2 (SL 0.75% & TP 1.77% Fee-Adjusted) ---
-    SL_PERCENT: float = 0.0075             # Stop Loss 0.75% (Gross -$0.150 + Fee -$0.018 = Net Loss -$0.168 / 1R Risiko)
-    TP_PERCENT: float = 0.0177             # Take Profit 1.77% (Gross +$0.354 - Fee -$0.018 = Net Win +$0.336 / 2R Untung Tepat 2x $SL)
-    RR_RATIO: float = 2.00                 # Rasio Risk-to-Reward 1:2 Murni Seimbang Dollar
+    # --- Risk / Reward Ratio Presisi Dollar 1:2 Riil (SL 0.75% -> Net ~$0.19 & TP 2.00% -> Net ~$0.38+) ---
+    SL_PERCENT: float = 0.0075             # Stop Loss 0.75% (Gross -$0.150 + Fee & Slippage = Net Loss Riil -$0.18 s/d -$0.19 / 1R Risiko)
+    TP_PERCENT: float = 0.0200             # Take Profit 2.00% (Gross +$0.400 - Fee ~$0.018 = Net Win Riil +$0.38 s/d +$0.40 / 2R Untung Tepat 2x $SL)
+    RR_RATIO: float = 2.00                 # Rasio Risk-to-Reward 1:2 Murni Seimbang Dollar Riil Dompet
     BEP_PROFIT_TRIGGER: float = 0.0075     # Saat profit mencapai 1R (+0.75%), geser SL ke BEP
     BEP_LOCK_PROFIT: float = 0.0025        # Kunci profit +0.25% (Menutup 100% fee bursa 0.08% + buffer slippage + garansi cuan bersih > $0.035)
     MAX_SPREAD_PERCENT: float = 0.0008     # Batas maksimal spread bid-ask 0.08% (Anti-Slippage & Anti-Illiquid Books)
