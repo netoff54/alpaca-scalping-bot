@@ -289,6 +289,7 @@ def health_check():
         return {
             "status": "healthy",
             "exchange": "Binance Futures",
+            "candle_scan_depth": config.CANDLE_LIMIT,
             "rate_limit_status": cooldown_info,
             "compounding": "ACTIVE",
             "futures_wallet_usdt": bal["total_wallet"],

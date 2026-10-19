@@ -949,12 +949,12 @@ class BinanceFuturesClient:
 
         return res
 
-    def fetch_klines(self, symbol: str, interval: str = "5m", limit: int = 220) -> Optional[List[List[float]]]:
+    def fetch_klines(self, symbol: str, interval: str = "5m", limit: int = 1000) -> Optional[List[List[float]]]:
         if self.is_banned() or self.is_scan_throttled():
             return None
         try:
             url = f"{self.base_url}/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
-            resp = self.session.get(url, timeout=5)
+            resp = self.session.get(url, timeout=10)
             self.check_response_for_ban(resp)
             data = resp.json()
             self.check_response_for_ban(data)

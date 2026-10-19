@@ -24,7 +24,7 @@ class BotConfig:
     SCAN_INTERVAL_SECONDS: int = 3         # Siklus 3 detik per koin (500 koin = 25 menit 1 siklus penuh)
     TIMEFRAME: str = "5m"                  # Timeframe eksekusi scalping 5 menit (Sesuai Akademi Crypto)
     STRUCTURE_TIMEFRAME: str = "15m"       # Timeframe struktur pasar, S&R teruji, & Area Likuidasi 15 menit
-    CANDLE_LIMIT: int = 150                # 150 candle untuk perhitungan EMA 13/21/200 yang presisi
+    CANDLE_LIMIT: int = 1000               # 1000 candle untuk minimalkan noise & validasi S&R / EMA presisi
     MIN_SETUP_SCORE: float = 80.0          # Skor minimal agar sinyal dieksekusi (hanya setup matang)
 
     # --- Account & Risk-Budget Management (Leverage Range 50x -> 20x) ---

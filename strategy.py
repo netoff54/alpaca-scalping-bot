@@ -133,10 +133,10 @@ def detect_market_structure(highs: List[float], lows: List[float], closes: List[
     if n < 30:
         return {"structure": "SIDEWAYS", "bias": "NEUTRAL", "desc": "Data bar kurang"}
 
-    # Identifikasi swing highs dan swing lows dalam 30 bar terakhir (window = 2)
+    # Identifikasi swing highs dan swing lows dalam hingga 60 bar terakhir (window = 2)
     swing_highs = []
     swing_lows = []
-    for i in range(n - 28, n - 2):
+    for i in range(max(2, n - 60), n - 2):
         if highs[i] > highs[i - 1] and highs[i] > highs[i - 2] and highs[i] > highs[i + 1] and highs[i] > highs[i + 2]:
             swing_highs.append(highs[i])
         if lows[i] < lows[i - 1] and lows[i] < lows[i - 2] and lows[i] < lows[i + 1] and lows[i] < lows[i + 2]:
@@ -162,6 +162,7 @@ def find_tested_support_resistance(
     Menemukan level Support & Resistance yang valid sesuai materi video Poin 2:
     - Level yang sudah pernah disentuh / diuji beberapa kali (minimal 2 kali)
       dan terbukti memicu reaksi pembalikan arah.
+    - Memindai hingga 1.000 candle untuk menghilangkan noise dan mendeteksi S&R multi-hari teruji.
     """
     n = len(closes)
     tested_supports = []
@@ -173,7 +174,8 @@ def find_tested_support_resistance(
 
     low_touches = []
     high_touches = []
-    for i in range(max(0, n - 80), n - 2):
+    scan_start = max(1, n - 1000)
+    for i in range(scan_start, n - 2):
         if lows[i] <= lows[i - 1] and lows[i] <= lows[i + 1]:
             low_touches.append(lows[i])
         if highs[i] >= highs[i - 1] and highs[i] >= highs[i + 1]:
@@ -514,7 +516,9 @@ def analyze_coin_comprehensive(
                 "oi_trend": oi_trend,
                 "taker_ratio": taker_ratio,
                 "ls_ratio": ls_ratio,
-                "vol_ratio": round(c_vol / avg_vol, 2) if avg_vol > 0 else 1.0
+                "vol_ratio": round(c_vol / avg_vol, 2) if avg_vol > 0 else 1.0,
+                "scanned_candles_htf": len(ohlcv_htf),
+                "scanned_candles_ltf": len(ohlcv_ltf)
             }
 
     return {
@@ -522,6 +526,8 @@ def analyze_coin_comprehensive(
         "price": latest_price,
         "structure_timeframe": config.STRUCTURE_TIMEFRAME,
         "execution_timeframe": config.TIMEFRAME,
+        "scanned_candles_htf": len(ohlcv_htf),
+        "scanned_candles_ltf": len(ohlcv_ltf),
         "market_structure": structure,
         "structure_desc": structure_info.get("desc", ""),
         "trend_bias": structure_info.get("bias", "NEUTRAL"),
