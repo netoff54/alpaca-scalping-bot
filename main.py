@@ -147,44 +147,33 @@ def binance_position_side():
 def test_sl(symbol: str = "BTCUSDT", side: str = "SELL", stop_price: float = 60000.0, qty: float = 0.001):
     """Mengetes format order Stop Loss di Binance dan mengembalikan respon resmi bursa."""
     try:
-        url = f"{scalper.client.base_url}/fapi/v1/order"
-        formatted_stop = scalper.client.format_price(symbol, stop_price)
-        formatted_qty = scalper.client.format_qty(symbol, qty)
-        
-        p1 = scalper.client._sign({
+        url_algo = f"{scalper.client.base_url}/fapi/v1/algoOrder"
+        p_algo1 = scalper.client._sign({
+            "algoType": "CONDITIONAL",
             "symbol": symbol,
             "side": side.upper(),
             "type": "STOP_MARKET",
-            "stopPrice": formatted_stop,
+            "triggerPrice": formatted_stop,
             "closePosition": "true",
             "workingType": "MARK_PRICE"
         })
-        r1 = scalper.client.session.post(url, params=p1, timeout=10)
-        
-        p2 = scalper.client._sign({
+        r_algo1 = scalper.client.session.post(url_algo, params=p_algo1, timeout=10)
+
+        p_algo2 = scalper.client._sign({
+            "algoType": "CONDITIONAL",
             "symbol": symbol,
             "side": side.upper(),
             "type": "STOP_MARKET",
-            "stopPrice": formatted_stop,
+            "triggerPrice": formatted_stop,
             "quantity": formatted_qty,
             "reduceOnly": "true",
             "workingType": "MARK_PRICE"
         })
-        r2 = scalper.client.session.post(url, params=p2, timeout=10)
-
-        p3 = scalper.client._sign({
-            "symbol": symbol,
-            "side": side.upper(),
-            "type": "STOP_MARKET",
-            "stopPrice": formatted_stop,
-            "closePosition": "true"
-        })
-        r3 = scalper.client.session.post(url, params=p3, timeout=10)
+        r_algo2 = scalper.client.session.post(url_algo, params=p_algo2, timeout=10)
 
         return {
-            "test_closePosition_mark": {"status": r1.status_code, "data": r1.json()},
-            "test_reduceOnly_mark": {"status": r2.status_code, "data": r2.json()},
-            "test_closePosition_no_workingType": {"status": r3.status_code, "data": r3.json()}
+            "algo_closePosition": {"status": r_algo1.status_code, "data": r_algo1.json()},
+            "algo_reduceOnly": {"status": r_algo2.status_code, "data": r_algo2.json()}
         }
     except Exception as e:
         return {"error": str(e)}
