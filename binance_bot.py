@@ -146,6 +146,8 @@ class BinanceScalper:
                     bep_activated = self.active_position.get("bep_activated", False)
                     opened_at = self.active_position.get("opened_at", time.time())
                     pos_leverage = self.active_position.get("leverage", int(pos.get("leverage", config.LEVERAGE)))
+                    native_sl_id = self.active_position.get("native_sl_order_id")
+                    native_tp_id = self.active_position.get("native_tp_order_id")
                 else:
                     sl_price = entry_price * (1.0 - config.SL_PERCENT) if side == "buy" else entry_price * (1.0 + config.SL_PERCENT)
                     tp_price = entry_price * (1.0 + config.TP_PERCENT) if side == "buy" else entry_price * (1.0 - config.TP_PERCENT)
@@ -153,6 +155,29 @@ class BinanceScalper:
                     bep_activated = False
                     opened_at = time.time()
                     pos_leverage = int(pos.get("leverage", config.LEVERAGE))
+                    native_sl_id = None
+                    native_tp_id = None
+
+                # JAMINAN KETAT: Jika Native SL belum ada di bursa Binance (misal restart/redeploy), pasang seketika!
+                if not native_sl_id and not self.client.is_banned():
+                    try:
+                        sl_side = "SELL" if side == "buy" else "BUY"
+                        res_sl = self.client.create_stop_loss_order(symbol, sl_side, sl_price, contracts)
+                        if isinstance(res_sl, dict) and res_sl.get("orderId"):
+                            native_sl_id = res_sl.get("orderId")
+                            console.log(f"[bold green]🛡️ NATIVE STOP LOSS TERPASANG DI BURSA BINANCE pada {symbol} @ {sl_price}[/bold green]")
+                    except Exception as e_sl_rec:
+                        console.log(f"[yellow]Peringatan pasang native SL bursa: {e_sl_rec}[/yellow]")
+
+                if not native_tp_id and not self.client.is_banned():
+                    try:
+                        tp_side = "SELL" if side == "buy" else "BUY"
+                        res_tp = self.client.create_take_profit_order(symbol, tp_side, tp_price, contracts)
+                        if isinstance(res_tp, dict) and res_tp.get("orderId"):
+                            native_tp_id = res_tp.get("orderId")
+                            console.log(f"[bold green]🎯 NATIVE TAKE PROFIT TERPASANG DI BURSA BINANCE pada {symbol} @ {tp_price}[/bold green]")
+                    except Exception as e_tp_rec:
+                        console.log(f"[yellow]Peringatan pasang native TP bursa: {e_tp_rec}[/yellow]")
                 
                 self.active_position = {
                     "symbol": symbol,
@@ -165,7 +190,9 @@ class BinanceScalper:
                     "bep_activated": bep_activated,
                     "opened_at": opened_at,
                     "notional": notional,
-                    "leverage": pos_leverage
+                    "leverage": pos_leverage,
+                    "native_sl_order_id": native_sl_id,
+                    "native_tp_order_id": native_tp_id
                 }
                 return self.active_position
             else:

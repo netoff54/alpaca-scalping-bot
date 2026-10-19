@@ -670,19 +670,20 @@ class BinanceFuturesClient:
             
             # 2. Fallback: jika closePosition ditolak, gunakan quantity + reduceOnly
             if qty and qty > 0:
+                formatted_qty = self.format_quantity(symbol, qty)
                 p2 = self._sign({
                     "symbol": symbol,
                     "side": side.upper(),
                     "type": "STOP_MARKET",
                     "stopPrice": formatted_stop,
-                    "quantity": qty,
+                    "quantity": formatted_qty,
                     "reduceOnly": "true",
                     "workingType": "MARK_PRICE"
                 })
                 r2 = self.session.post(url, params=p2, timeout=10)
                 d2 = r2.json()
                 if isinstance(d2, dict) and "orderId" in d2:
-                    console.log(f"[bold green]🛡️ NATIVE STOP LOSS TERPASANG DI BINANCE: {side} {qty} {symbol} @ {formatted_stop} (MARK_PRICE / reduceOnly=true)[/bold green]")
+                    console.log(f"[bold green]🛡️ NATIVE STOP LOSS TERPASANG DI BINANCE: {side} {formatted_qty} {symbol} @ {formatted_stop} (MARK_PRICE / reduceOnly=true)[/bold green]")
                     return d2
             console.log(f"[yellow]Peringatan pasang native SL: {data}[/yellow]")
             return data if isinstance(data, dict) else {}
@@ -721,19 +722,20 @@ class BinanceFuturesClient:
             
             # 2. Fallback: jika closePosition ditolak, gunakan quantity + reduceOnly
             if qty and qty > 0:
+                formatted_qty = self.format_quantity(symbol, qty)
                 p2 = self._sign({
                     "symbol": symbol,
                     "side": side.upper(),
                     "type": "TAKE_PROFIT_MARKET",
                     "stopPrice": formatted_stop,
-                    "quantity": qty,
+                    "quantity": formatted_qty,
                     "reduceOnly": "true",
                     "workingType": "MARK_PRICE"
                 })
                 r2 = self.session.post(url, params=p2, timeout=10)
                 d2 = r2.json()
                 if isinstance(d2, dict) and "orderId" in d2:
-                    console.log(f"[bold green]🎯 NATIVE TAKE PROFIT TERPASANG DI BINANCE: {side} {qty} {symbol} @ {formatted_stop} (MARK_PRICE / reduceOnly=true)[/bold green]")
+                    console.log(f"[bold green]🎯 NATIVE TAKE PROFIT TERPASANG DI BINANCE: {side} {formatted_qty} {symbol} @ {formatted_stop} (MARK_PRICE / reduceOnly=true)[/bold green]")
                     return d2
             console.log(f"[yellow]Peringatan pasang native TP: {data}[/yellow]")
             return data if isinstance(data, dict) else {}

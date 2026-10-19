@@ -4,6 +4,7 @@ import time
 import requests
 import threading
 from contextlib import asynccontextmanager
+from typing import Optional
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 import uvicorn
@@ -107,6 +108,31 @@ def trade_history(limit: int = 100):
     return {
         "total_returned": len(trades),
         "trades": trades
+    }
+
+@app.get("/binance-orders")
+def binance_orders(symbol: Optional[str] = None):
+    """Mengambil seluruh pesanan terbuka (termasuk Stop Order / Trigger Order) langsung dari Binance Futures."""
+    url = f"{scalper.client.base_url}/fapi/v1/openOrders"
+    params = {"symbol": symbol} if symbol else {}
+    signed = scalper.client._sign(params)
+    resp = scalper.client.session.get(url, params=signed, timeout=10)
+    return {
+        "status": resp.status_code,
+        "orders": resp.json()
+    }
+
+@app.get("/binance-all-orders")
+def binance_all_orders(symbol: str, limit: int = 15):
+    """Mengambil riwayat seluruh order (LIMIT, STOP_MARKET, MARKET) untuk koin tertentu langsung dari Binance."""
+    url = f"{scalper.client.base_url}/fapi/v1/allOrders"
+    params = {"symbol": symbol, "limit": limit}
+    signed = scalper.client._sign(params)
+    resp = scalper.client.session.get(url, params=signed, timeout=10)
+    return {
+        "status": resp.status_code,
+        "symbol": symbol,
+        "orders": resp.json()
     }
 
 @app.api_route("/", methods=["GET", "HEAD"])
