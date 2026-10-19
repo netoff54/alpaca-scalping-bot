@@ -128,15 +128,22 @@ def binance_orders(symbol: Optional[str] = None):
 
 @app.get("/binance-all-orders")
 def binance_all_orders(symbol: str, limit: int = 15):
-    """Mengambil riwayat seluruh order (LIMIT, STOP_MARKET, MARKET) untuk koin tertentu langsung dari Binance."""
+    """Mengambil riwayat seluruh order (LIMIT, STOP_MARKET, MARKET, dan Algo Orders) untuk koin tertentu langsung dari Binance."""
     url = f"{scalper.client.base_url}/fapi/v1/allOrders"
     params = {"symbol": symbol, "limit": limit}
     signed = scalper.client._sign(params)
     resp = scalper.client.session.get(url, params=signed, timeout=10)
+    
+    url_algo = f"{scalper.client.base_url}/fapi/v1/allAlgoOrders"
+    params_algo = {"symbol": symbol, "limit": limit}
+    signed_algo = scalper.client._sign(params_algo)
+    resp_algo = scalper.client.session.get(url_algo, params=signed_algo, timeout=10)
+    
     return {
         "status": resp.status_code,
         "symbol": symbol,
-        "orders": resp.json()
+        "orders": resp.json() if resp.status_code == 200 else [],
+        "algo_orders": resp_algo.json() if resp_algo.status_code == 200 else {"status": resp_algo.status_code, "msg": resp_algo.text}
     }
 
 @app.get("/clean-algo-orders")
