@@ -146,45 +146,48 @@ def binance_position_side():
 @app.get("/test-sl")
 def test_sl(symbol: str = "BTCUSDT", side: str = "SELL", stop_price: float = 60000.0, qty: float = 0.001):
     """Mengetes format order Stop Loss di Binance dan mengembalikan respon resmi bursa."""
-    url = f"{scalper.client.base_url}/fapi/v1/order"
-    formatted_stop = scalper.client.format_price(symbol, stop_price)
-    formatted_qty = scalper.client.format_quantity(symbol, qty)
-    
-    p1 = scalper.client._sign({
-        "symbol": symbol,
-        "side": side.upper(),
-        "type": "STOP_MARKET",
-        "stopPrice": formatted_stop,
-        "closePosition": "true",
-        "workingType": "MARK_PRICE"
-    })
-    r1 = scalper.client.session.post(url, params=p1, timeout=10)
-    
-    p2 = scalper.client._sign({
-        "symbol": symbol,
-        "side": side.upper(),
-        "type": "STOP_MARKET",
-        "stopPrice": formatted_stop,
-        "quantity": formatted_qty,
-        "reduceOnly": "true",
-        "workingType": "MARK_PRICE"
-    })
-    r2 = scalper.client.session.post(url, params=p2, timeout=10)
+    try:
+        url = f"{scalper.client.base_url}/fapi/v1/order"
+        formatted_stop = scalper.client.format_price(symbol, stop_price)
+        formatted_qty = scalper.client.format_qty(symbol, qty)
+        
+        p1 = scalper.client._sign({
+            "symbol": symbol,
+            "side": side.upper(),
+            "type": "STOP_MARKET",
+            "stopPrice": formatted_stop,
+            "closePosition": "true",
+            "workingType": "MARK_PRICE"
+        })
+        r1 = scalper.client.session.post(url, params=p1, timeout=10)
+        
+        p2 = scalper.client._sign({
+            "symbol": symbol,
+            "side": side.upper(),
+            "type": "STOP_MARKET",
+            "stopPrice": formatted_stop,
+            "quantity": formatted_qty,
+            "reduceOnly": "true",
+            "workingType": "MARK_PRICE"
+        })
+        r2 = scalper.client.session.post(url, params=p2, timeout=10)
 
-    p3 = scalper.client._sign({
-        "symbol": symbol,
-        "side": side.upper(),
-        "type": "STOP_MARKET",
-        "stopPrice": formatted_stop,
-        "closePosition": "true"
-    })
-    r3 = scalper.client.session.post(url, params=p3, timeout=10)
+        p3 = scalper.client._sign({
+            "symbol": symbol,
+            "side": side.upper(),
+            "type": "STOP_MARKET",
+            "stopPrice": formatted_stop,
+            "closePosition": "true"
+        })
+        r3 = scalper.client.session.post(url, params=p3, timeout=10)
 
-    return {
-        "test_closePosition_mark": {"status": r1.status_code, "data": r1.json()},
-        "test_reduceOnly_mark": {"status": r2.status_code, "data": r2.json()},
-        "test_closePosition_no_workingType": {"status": r3.status_code, "data": r3.json()}
-    }
+        return {
+            "test_closePosition_mark": {"status": r1.status_code, "data": r1.json()},
+            "test_reduceOnly_mark": {"status": r2.status_code, "data": r2.json()},
+            "test_closePosition_no_workingType": {"status": r3.status_code, "data": r3.json()}
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.api_route("/", methods=["GET", "HEAD"])
 def index():

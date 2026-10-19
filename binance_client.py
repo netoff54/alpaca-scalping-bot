@@ -227,6 +227,8 @@ class BinanceFuturesClient:
         val = math.floor(qty / step) * step
         return float(f"{val:.{prec}f}")
 
+    format_quantity = format_qty
+
     def calculate_order_qty(self, symbol: str, target_notional: float, price: float) -> float:
         """
         Menghitung kuantitas order yang dijamin:
