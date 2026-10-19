@@ -633,61 +633,64 @@ class BinanceFuturesClient:
     def cancel_order(self, symbol: str, order_id: Any) -> Dict[str, Any]:
         if self.is_banned():
             return {}
+        # 1. Coba batalkan order reguler di /fapi/v1/order
         url = f"{self.base_url}/fapi/v1/order"
         params = self._sign({"symbol": symbol, "orderId": order_id})
-        resp = self.session.delete(url, params=params, timeout=10)
-        self.check_response_for_ban(resp)
-        data = resp.json()
-        self.check_response_for_ban(data)
-        return data if isinstance(data, dict) else {}
+        try:
+            resp = self.session.delete(url, params=params, timeout=10)
+            data = resp.json()
+            if isinstance(data, dict) and data.get("orderId"):
+                return data
+            # 2. Jika kode -2011 Unknown Order, coba batalkan sebagai Algo Order
+            if isinstance(data, dict) and data.get("code") in (-2011, -4120):
+                url_algo = f"{self.base_url}/fapi/v1/algoOrder"
+                p_algo = self._sign({"symbol": symbol, "algoId": order_id})
+                r_algo = self.session.delete(url_algo, params=p_algo, timeout=10)
+                d_algo = r_algo.json()
+                if isinstance(d_algo, dict) and "algoId" in d_algo:
+                    return d_algo
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
 
     def create_stop_loss_order(self, symbol: str, side: str, stop_price: float, qty: Optional[float] = None) -> Dict[str, Any]:
         """
-        Memasang Native Stop Loss (STOP_MARKET) langsung di server Matching Engine Binance Futures.
-        Menggunakan closePosition=true dan workingType=MARK_PRICE sehingga seluruh posisi otomatis
-        ditutup instan di bursa, kebal terhadap manipulasi wick jarum (flashdump order book lokal).
+        Memasang Native Stop Loss (STOP_MARKET) langsung di server Matching Engine Binance Futures
+        menggunakan endpoint resmi Algo Service (POST /fapi/v1/algoOrder).
+        Menjamin pesanan Stop Loss resmi muncul di tab 'Pesanan Terbuka' -> 'Pesanan Pemicu' / TP/SL posisi di aplikasi Binance.
         """
         if self.is_banned():
             return {}
-        url = f"{self.base_url}/fapi/v1/order"
+        url_algo = f"{self.base_url}/fapi/v1/algoOrder"
         formatted_stop = self.format_price(symbol, stop_price)
-        
-        # 1. Coba closePosition=true terlebih dahulu (Metode resmi standar emas Binance)
-        params = self._sign({
+        formatted_qty = self.format_qty(symbol, qty) if qty and qty > 0 else None
+
+        payload: Dict[str, Any] = {
+            "algoType": "CONDITIONAL",
             "symbol": symbol,
             "side": side.upper(),
             "type": "STOP_MARKET",
-            "stopPrice": formatted_stop,
-            "closePosition": "true",
+            "triggerPrice": formatted_stop,
             "workingType": "MARK_PRICE"
-        })
+        }
+        if formatted_qty:
+            payload["quantity"] = formatted_qty
+            payload["reduceOnly"] = "true"
+        else:
+            payload["closePosition"] = "true"
+
+        params = self._sign(payload)
         try:
-            resp = self.session.post(url, params=params, timeout=10)
+            resp = self.session.post(url_algo, params=params, timeout=10)
             self.check_response_for_ban(resp)
             data = resp.json()
             self.check_response_for_ban(data)
-            if isinstance(data, dict) and "orderId" in data:
-                console.log(f"[bold green]🛡️ NATIVE STOP LOSS TERPASANG DI BINANCE: {side} {symbol} @ {formatted_stop} (MARK_PRICE / closePosition=true)[/bold green]")
-                return data
-            
-            # 2. Fallback: jika closePosition ditolak, gunakan quantity + reduceOnly
-            if qty and qty > 0:
-                formatted_qty = self.format_quantity(symbol, qty)
-                p2 = self._sign({
-                    "symbol": symbol,
-                    "side": side.upper(),
-                    "type": "STOP_MARKET",
-                    "stopPrice": formatted_stop,
-                    "quantity": formatted_qty,
-                    "reduceOnly": "true",
-                    "workingType": "MARK_PRICE"
-                })
-                r2 = self.session.post(url, params=p2, timeout=10)
-                d2 = r2.json()
-                if isinstance(d2, dict) and "orderId" in d2:
-                    console.log(f"[bold green]🛡️ NATIVE STOP LOSS TERPASANG DI BINANCE: {side} {formatted_qty} {symbol} @ {formatted_stop} (MARK_PRICE / reduceOnly=true)[/bold green]")
-                    return d2
-            console.log(f"[yellow]Peringatan pasang native SL: {data}[/yellow]")
+            algo_id = data.get("algoId") if isinstance(data, dict) else None
+            if algo_id:
+                console.log(f"[bold green]🛡️ NATIVE STOP LOSS TERPASANG RESMI DI BINANCE: {side} {formatted_qty} {symbol} @ {formatted_stop} (Algo ID: {algo_id})[/bold green]")
+                return {"orderId": algo_id, "algoId": algo_id, **data}
+
+            console.log(f"[yellow]Peringatan pasang native SL Algo: {data}[/yellow]")
             return data if isinstance(data, dict) else {}
         except Exception as e:
             console.log(f"[red]Gagal memasang native SL di Binance: {e}[/red]")
@@ -695,71 +698,71 @@ class BinanceFuturesClient:
 
     def create_take_profit_order(self, symbol: str, side: str, stop_price: float, qty: Optional[float] = None) -> Dict[str, Any]:
         """
-        Memasang Native Take Profit (TAKE_PROFIT_MARKET) langsung di server Matching Engine Binance Futures.
-        Menggunakan closePosition=true dan workingType=MARK_PRICE sehingga seluruh posisi otomatis
-        terkunci penuh seketika saat menyentuh target profit (+1.40%) tanpa delay polling dan tanpa slippage.
+        Memasang Native Take Profit (TAKE_PROFIT_MARKET) langsung di server Matching Engine Binance Futures
+        menggunakan endpoint resmi Algo Service (POST /fapi/v1/algoOrder).
         """
         if self.is_banned():
             return {}
-        url = f"{self.base_url}/fapi/v1/order"
+        url_algo = f"{self.base_url}/fapi/v1/algoOrder"
         formatted_stop = self.format_price(symbol, stop_price)
-        
-        # 1. Coba closePosition=true terlebih dahulu
-        params = self._sign({
+        formatted_qty = self.format_qty(symbol, qty) if qty and qty > 0 else None
+
+        payload: Dict[str, Any] = {
+            "algoType": "CONDITIONAL",
             "symbol": symbol,
             "side": side.upper(),
             "type": "TAKE_PROFIT_MARKET",
-            "stopPrice": formatted_stop,
-            "closePosition": "true",
+            "triggerPrice": formatted_stop,
             "workingType": "MARK_PRICE"
-        })
+        }
+        if formatted_qty:
+            payload["quantity"] = formatted_qty
+            payload["reduceOnly"] = "true"
+        else:
+            payload["closePosition"] = "true"
+
+        params = self._sign(payload)
         try:
-            resp = self.session.post(url, params=params, timeout=10)
+            resp = self.session.post(url_algo, params=params, timeout=10)
             self.check_response_for_ban(resp)
             data = resp.json()
             self.check_response_for_ban(data)
-            if isinstance(data, dict) and "orderId" in data:
-                console.log(f"[bold green]🎯 NATIVE TAKE PROFIT TERPASANG DI BINANCE: {side} {symbol} @ {formatted_stop} (MARK_PRICE / closePosition=true)[/bold green]")
-                return data
-            
-            # 2. Fallback: jika closePosition ditolak, gunakan quantity + reduceOnly
-            if qty and qty > 0:
-                formatted_qty = self.format_quantity(symbol, qty)
-                p2 = self._sign({
-                    "symbol": symbol,
-                    "side": side.upper(),
-                    "type": "TAKE_PROFIT_MARKET",
-                    "stopPrice": formatted_stop,
-                    "quantity": formatted_qty,
-                    "reduceOnly": "true",
-                    "workingType": "MARK_PRICE"
-                })
-                r2 = self.session.post(url, params=p2, timeout=10)
-                d2 = r2.json()
-                if isinstance(d2, dict) and "orderId" in d2:
-                    console.log(f"[bold green]🎯 NATIVE TAKE PROFIT TERPASANG DI BINANCE: {side} {formatted_qty} {symbol} @ {formatted_stop} (MARK_PRICE / reduceOnly=true)[/bold green]")
-                    return d2
-            console.log(f"[yellow]Peringatan pasang native TP: {data}[/yellow]")
+            algo_id = data.get("algoId") if isinstance(data, dict) else None
+            if algo_id:
+                console.log(f"[bold green]🎯 NATIVE TAKE PROFIT TERPASANG RESMI DI BINANCE: {side} {formatted_qty} {symbol} @ {formatted_stop} (Algo ID: {algo_id})[/bold green]")
+                return {"orderId": algo_id, "algoId": algo_id, **data}
+
+            console.log(f"[yellow]Peringatan pasang native TP Algo: {data}[/yellow]")
             return data if isinstance(data, dict) else {}
         except Exception as e:
             console.log(f"[red]Gagal memasang native TP di Binance: {e}[/red]")
             return {}
 
     def cancel_all_open_orders(self, symbol: str) -> Dict[str, Any]:
-        """Membatalkan seluruh order aktif pada koin (misal membersihkan sisa order Stop Loss setelah TP)."""
+        """Membatalkan seluruh order aktif pada koin (pesanan limit biasa & seluruh algo SL/TP)."""
         if self.is_banned():
             return {}
-        url = f"{self.base_url}/fapi/v1/allOpenOrders"
-        params = self._sign({"symbol": symbol})
+        res = {}
+        # 1. Batalkan pesanan reguler (Limit / Market)
         try:
+            url = f"{self.base_url}/fapi/v1/allOpenOrders"
+            params = self._sign({"symbol": symbol})
             resp = self.session.delete(url, params=params, timeout=10)
             self.check_response_for_ban(resp)
-            data = resp.json()
-            self.check_response_for_ban(data)
-            return data if isinstance(data, dict) else {}
+            res = resp.json()
         except Exception as e:
-            console.log(f"[dim]Notice cancel all open orders {symbol}: {e}[/dim]")
-            return {}
+            console.log(f"[dim]Notice cancel regular orders {symbol}: {e}[/dim]")
+            
+        # 2. Batalkan pesanan Algo Service (Native Stop Loss & Take Profit)
+        try:
+            url_algo = f"{self.base_url}/fapi/v1/algoOpenOrders"
+            p_algo = self._sign({"symbol": symbol})
+            r_algo = self.session.delete(url_algo, params=p_algo, timeout=10)
+            self.check_response_for_ban(r_algo)
+        except Exception as e_a:
+            console.log(f"[dim]Notice cancel algo orders {symbol}: {e_a}[/dim]")
+
+        return res if isinstance(res, dict) else {}
 
     def fetch_user_trades(self, symbol: str, limit: int = 50) -> List[Dict[str, Any]]:
         """Mengambil riwayat eksekusi trade riil langsung dari Binance Matching Engine."""

@@ -112,14 +112,18 @@ def trade_history(limit: int = 100):
 
 @app.get("/binance-orders")
 def binance_orders(symbol: Optional[str] = None):
-    """Mengambil seluruh pesanan terbuka (termasuk Stop Order / Trigger Order) langsung dari Binance Futures."""
-    url = f"{scalper.client.base_url}/fapi/v1/openOrders"
+    """Mengambil seluruh pesanan terbuka (Limit & Stop / Trigger Algo) langsung dari Binance Futures."""
+    url_reg = f"{scalper.client.base_url}/fapi/v1/openOrders"
+    url_algo = f"{scalper.client.base_url}/fapi/v1/openAlgoOrders"
     params = {"symbol": symbol} if symbol else {}
     signed = scalper.client._sign(params)
-    resp = scalper.client.session.get(url, params=signed, timeout=10)
+    
+    resp_reg = scalper.client.session.get(url_reg, params=signed, timeout=10)
+    resp_algo = scalper.client.session.get(url_algo, params=signed, timeout=10)
+    
     return {
-        "status": resp.status_code,
-        "orders": resp.json()
+        "regular_orders": resp_reg.json() if resp_reg.status_code == 200 else [],
+        "algo_stop_orders": resp_algo.json() if resp_algo.status_code == 200 else []
     }
 
 @app.get("/binance-all-orders")
@@ -142,43 +146,6 @@ def binance_position_side():
     signed = scalper.client._sign({})
     resp = scalper.client.session.get(url, params=signed, timeout=10)
     return resp.json()
-
-@app.get("/test-sl")
-def test_sl(symbol: str = "BTCUSDT", side: str = "SELL", stop_price: float = 60000.0, qty: float = 0.001):
-    """Mengetes format order Stop Loss di Binance dan mengembalikan respon resmi bursa."""
-    try:
-        formatted_stop = scalper.client.format_price(symbol, stop_price)
-        formatted_qty = scalper.client.format_qty(symbol, qty)
-        url_algo = f"{scalper.client.base_url}/fapi/v1/algoOrder"
-        p_algo1 = scalper.client._sign({
-            "algoType": "CONDITIONAL",
-            "symbol": symbol,
-            "side": side.upper(),
-            "type": "STOP_MARKET",
-            "triggerPrice": formatted_stop,
-            "closePosition": "true",
-            "workingType": "MARK_PRICE"
-        })
-        r_algo1 = scalper.client.session.post(url_algo, params=p_algo1, timeout=10)
-
-        p_algo2 = scalper.client._sign({
-            "algoType": "CONDITIONAL",
-            "symbol": symbol,
-            "side": side.upper(),
-            "type": "STOP_MARKET",
-            "triggerPrice": formatted_stop,
-            "quantity": formatted_qty,
-            "reduceOnly": "true",
-            "workingType": "MARK_PRICE"
-        })
-        r_algo2 = scalper.client.session.post(url_algo, params=p_algo2, timeout=10)
-
-        return {
-            "algo_closePosition": {"status": r_algo1.status_code, "data": r_algo1.json()},
-            "algo_reduceOnly": {"status": r_algo2.status_code, "data": r_algo2.json()}
-        }
-    except Exception as e:
-        return {"error": str(e)}
 
 @app.api_route("/", methods=["GET", "HEAD"])
 def index():
