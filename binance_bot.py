@@ -911,10 +911,10 @@ class BinanceScalper:
                         
                     pos["sl_price"] = formatted_bep
                     pos["bep_activated"] = True
-                    console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: Profit mencapai 1R (+0.7%), menggeser Native SL ke {formatted_bep} (Terkunci Untung Bersih +{bep_lock*100:.2f}% Menutup Seluruh Fee Bursa)[/bold cyan]")
+                    console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: Profit mencapai 1R (+{config.BEP_PROFIT_TRIGGER*100:.2f}%), menggeser Native SL ke {formatted_bep} (Terkunci Untung Bersih +{bep_lock*100:.2f}% Menutup Seluruh Fee Bursa)[/bold cyan]")
                     
                     # Batalkan Stop Loss lama di Binance & Pasang Native STOP_MARKET baru di harga BEP
-                    # Catatan: Native TP tetap aktif di bursa untuk menangkap target profit penuh +1.40%
+                    # Catatan: Native TP tetap aktif di bursa untuk menangkap target profit penuh +1.77%
                     try:
                         old_sl_id = pos.get("native_sl_order_id")
                         if old_sl_id:
@@ -952,7 +952,7 @@ class BinanceScalper:
                     console.log(f"[bold green]Posisi {symbol} telah berhasil ditutup instan di Binance matching engine.[/bold green]")
                     return
 
-                console.log(f"[bold green]🎯 TAKE PROFIT TERCAPAI (RR 1:2 Bersih / +1.50%)! (+{pnl_pct*100:.2f}%, PnL: +${pnl_usd:.2f}) pada {symbol}[/bold green]")
+                console.log(f"[bold green]🎯 TAKE PROFIT TERCAPAI (RR 1:2 Bersih Dollar / +{config.TP_PERCENT*100:.2f}%)! (+{pnl_pct*100:.2f}%, PnL: +${pnl_usd:.2f}) pada {symbol}[/bold green]")
                 # Batalkan Native SL yang masih terpasang di Binance agar tidak tereksekusi ganda
                 try:
                     self.client.cancel_all_open_orders(symbol)

@@ -138,7 +138,7 @@ def index():
             "rotation_status": scalper.current_rotation_info,
             "universe_total_coins": len(scalper._cached_universe_symbols),
             "current_coin_deep_analysis": scalper.current_coin_analysis,
-            "risk_model": f"Margin ${config.FIXED_MARGIN_LOW_BALANCE:.2f} (< ${config.BALANCE_THRESHOLD_SCALING:.0f}) / {config.RISK_PORTFOLIO_PERCENT*100:.1f}% (>= ${config.BALANCE_THRESHOLD_SCALING:.0f} Compounding) + Leverage Range Stepping [{config.LEVERAGE_MAX}x -> {config.LEVERAGE_MIN}x] + Ketat RRR 1:2 (TP +{config.TP_PERCENT*100:.1f}%, SL -{config.SL_PERCENT*100:.1f}%) + BEP Lock +{config.BEP_LOCK_PROFIT*100:.2f}% (Bebas Rugi & Fee)",
+            "risk_model": f"Margin ${config.FIXED_MARGIN_LOW_BALANCE:.2f} (< ${config.BALANCE_THRESHOLD_SCALING:.0f}) / {config.RISK_PORTFOLIO_PERCENT*100:.1f}% (>= ${config.BALANCE_THRESHOLD_SCALING:.0f} Compounding) + Leverage Range Stepping [{config.LEVERAGE_MAX}x -> {config.LEVERAGE_MIN}x] + Ketat RRR 1:2 (TP +{config.TP_PERCENT*100:.2f}%, SL -{config.SL_PERCENT*100:.2f}%) + BEP Lock +{config.BEP_LOCK_PROFIT*100:.2f}% (Bebas Rugi & Fee)",
             "futures_wallet_usdt": bal["total_wallet"],
             "available_usdt": bal["available"],
             "trade_size_notional": scalper.get_compounded_notional(),

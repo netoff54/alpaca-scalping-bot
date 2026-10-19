@@ -249,9 +249,9 @@ def run_portfolio_simulation(klines_data: Dict[str, List[List[float]]]) -> Tuple
                 notional = margin * lev
                 qty = notional / entry_p
 
-                sl_dist = entry_p * config.SL_PERCENT      # 0.70%
-                tp_dist = entry_p * config.TP_PERCENT      # 1.40% (RR 1:2)
-                bep_trigger_dist = entry_p * config.BEP_PROFIT_TRIGGER  # 0.70% (1R)
+                sl_dist = entry_p * config.SL_PERCENT
+                tp_dist = entry_p * config.TP_PERCENT
+                bep_trigger_dist = entry_p * config.BEP_PROFIT_TRIGGER
 
                 sl_p = entry_p - sl_dist if side == "BUY" else entry_p + sl_dist
                 tp_p = entry_p + tp_dist if side == "BUY" else entry_p - tp_dist

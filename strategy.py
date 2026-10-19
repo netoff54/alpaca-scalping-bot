@@ -453,15 +453,17 @@ def analyze_coin_comprehensive(
     # Saring ketat: Jika koin tidak mendukung leverage minimal 20x (misal 10x), lewati (skip) koin!
     executable_signal = None
     if signal_side and final_score >= config.MIN_SETUP_SCORE and effective_leverage >= min_leverage:
-        sl_percent = config.SL_PERCENT  # 0.70%
-        tp_percent = config.TP_PERCENT  # 1.40% (RR 1:2)
+        sl_percent = config.SL_PERCENT
+        tp_percent = config.TP_PERCENT
+        bep_trigger_percent = config.BEP_PROFIT_TRIGGER
         entry_price = latest_price
         sl_dist = entry_price * sl_percent
         tp_dist = entry_price * tp_percent
+        bep_trigger_dist = entry_price * bep_trigger_percent
 
         sl_price = entry_price - sl_dist if signal_side == "BUY" else entry_price + sl_dist
         tp_price = entry_price + tp_dist if signal_side == "BUY" else entry_price - tp_dist
-        bep_trigger_price = entry_price + sl_dist if signal_side == "BUY" else entry_price - sl_dist
+        bep_trigger_price = entry_price + bep_trigger_dist if signal_side == "BUY" else entry_price - bep_trigger_dist
 
         # Aturan Margin Bertingkat Fleksibel:
         # - Jika saldo < $100: margin per posisi dikunci tetap $1.00 (maksimal ketat $1.00)
