@@ -313,7 +313,24 @@ class NeonDatabase:
                                 """, (real_pnl, res, pnl_pct, t_id, trade["id"]))
                                 matched_count += 1
 
-                    # 3. Hitung ringkasan total terkini
+                        # 3. Sisipkan trade penutupan yang belum ada di database (misal trade yang selesai saat redeploy Render)
+                        for sym, remaining in clustered_by_symbol.items():
+                            for rem_inc in remaining:
+                                real_pnl = round(float(rem_inc["income"]), 4)
+                                t_id = str(rem_inc["tradeId"])
+                                res = "WIN" if real_pnl >= 0.0 else "LOSS"
+                                t_time = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(rem_inc["time"] / 1000 + 7 * 3600))
+                                notional = 20.0
+                                pnl_pct = round((real_pnl / notional) * 100, 2)
+                                cur.execute("""
+                                    INSERT INTO binance_scalper.trades (
+                                        symbol, side, entry_price, exit_price, qty, notional, margin_used,
+                                        leverage, commission, binance_trade_id, pnl_usd, pnl_pct, result, closed_at
+                                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                                """, (sym, "BUY", 0.0, 0.0, 0.0, notional, 1.0, 20, 0.01, t_id, real_pnl, pnl_pct, res, t_time))
+                                matched_count += 1
+
+                    # 4. Hitung ringkasan total terkini
                     cur.execute("""
                         SELECT 
                             COUNT(*) as total_trades,

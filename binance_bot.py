@@ -158,6 +158,31 @@ class BinanceScalper:
                     native_sl_id = None
                     native_tp_id = None
 
+                # PROTEKSI ANTI-DUPLIKASI: Periksa apakah Native SL / TP sudah aktif di server Binance!
+                if not self.client.is_banned():
+                    try:
+                        existing_algos = self.client.fetch_open_algo_orders(symbol)
+                        sl_orders = [o for o in existing_algos if o.get("orderType") == "STOP_MARKET" or o.get("type") == "STOP_MARKET"]
+                        tp_orders = [o for o in existing_algos if o.get("orderType") == "TAKE_PROFIT_MARKET" or o.get("type") == "TAKE_PROFIT_MARKET"]
+                        
+                        if sl_orders:
+                            native_sl_id = sl_orders[0].get("algoId")
+                            # Batalkan order SL duplikat jika ada lebih dari 1
+                            for dup_sl in sl_orders[1:]:
+                                dup_id = dup_sl.get("algoId")
+                                if dup_id:
+                                    self.client.cancel_order(symbol, dup_id)
+                        
+                        if tp_orders:
+                            native_tp_id = tp_orders[0].get("algoId")
+                            # Batalkan order TP duplikat jika ada lebih dari 1
+                            for dup_tp in tp_orders[1:]:
+                                dup_id = dup_tp.get("algoId")
+                                if dup_id:
+                                    self.client.cancel_order(symbol, dup_id)
+                    except Exception as e_chk:
+                        console.log(f"[dim]Notice check existing algo orders: {e_chk}[/dim]")
+
                 # JAMINAN KETAT: Jika Native SL belum ada di bursa Binance (misal restart/redeploy), pasang seketika!
                 if not native_sl_id and not self.client.is_banned():
                     try:
@@ -196,7 +221,20 @@ class BinanceScalper:
                 }
                 return self.active_position
             else:
-                # Pastikan tidak dalam cooldown sebelum menyatakan posisi telah tertutup
+                # 1. PEMBERSIH OTOMATIS: Jika posisi terbuka di bursa sudah 0, pastikan TIDAK ADA order pemicu yang tertinggal/menggantung!
+                if not self.client.is_banned():
+                    try:
+                        dangling_algos = self.client.fetch_open_algo_orders()
+                        if dangling_algos:
+                            for d_order in dangling_algos:
+                                d_sym = d_order.get("symbol")
+                                if d_sym:
+                                    console.log(f"[bold yellow]🧹 Membersihkan pesanan bersyarat menggantung pada {d_sym} karena posisi terbuka sudah 0.[/bold yellow]")
+                                    self.client.cancel_all_open_orders(d_sym)
+                    except Exception as e_clean:
+                        pass
+
+                # 2. Rekam posisi yang baru saja tertutup
                 if not self.client.is_banned() and self.active_position is not None:
                     closed_pos = self.active_position
                     sym = closed_pos.get("symbol")

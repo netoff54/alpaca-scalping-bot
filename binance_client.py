@@ -764,6 +764,37 @@ class BinanceFuturesClient:
 
         return res if isinstance(res, dict) else {}
 
+    def fetch_open_algo_orders(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Mengambil seluruh pesanan Algo pemicu (STOP_MARKET & TAKE_PROFIT_MARKET) yang sedang aktif di Binance."""
+        if self.is_banned():
+            return []
+        try:
+            url = f"{self.base_url}/fapi/v1/openAlgoOrders"
+            params = {"symbol": symbol} if symbol else {}
+            signed = self._sign(params)
+            resp = self.session.get(url, params=signed, timeout=10)
+            self.check_response_for_ban(resp)
+            data = resp.json()
+            return data if isinstance(data, list) else []
+        except Exception as e:
+            console.log(f"[dim]Notice fetch open algo orders: {e}[/dim]")
+            return []
+
+    def cancel_all_algo_orders(self, symbol: Optional[str] = None) -> Dict[str, Any]:
+        """Membersihkan seluruh pesanan Algo pemicu yang menggantung di Binance."""
+        if self.is_banned():
+            return {}
+        try:
+            url = f"{self.base_url}/fapi/v1/algoOpenOrders"
+            params = {"symbol": symbol} if symbol else {}
+            signed = self._sign(params)
+            resp = self.session.delete(url, params=signed, timeout=10)
+            self.check_response_for_ban(resp)
+            return resp.json() if resp.status_code == 200 else {}
+        except Exception as e:
+            console.log(f"[dim]Notice cancel all algo orders: {e}[/dim]")
+            return {}
+
     def fetch_user_trades(self, symbol: str, limit: int = 50) -> List[Dict[str, Any]]:
         """Mengambil riwayat eksekusi trade riil langsung dari Binance Matching Engine."""
         if self.is_banned():
