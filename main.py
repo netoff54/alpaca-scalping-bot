@@ -147,6 +147,8 @@ def binance_position_side():
 def test_sl(symbol: str = "BTCUSDT", side: str = "SELL", stop_price: float = 60000.0, qty: float = 0.001):
     """Mengetes format order Stop Loss di Binance dan mengembalikan respon resmi bursa."""
     try:
+        formatted_stop = scalper.client.format_price(symbol, stop_price)
+        formatted_qty = scalper.client.format_qty(symbol, qty)
         url_algo = f"{scalper.client.base_url}/fapi/v1/algoOrder"
         p_algo1 = scalper.client._sign({
             "algoType": "CONDITIONAL",
