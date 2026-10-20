@@ -458,7 +458,7 @@ class BinanceScalper:
                     rules = self.client._symbols_rules.get(sym, {})
                     min_q = rules.get("min_qty", 0.0)
                     min_notional_req = min_q * last_price
-                    if (min_notional_req / max_sym_lev) > (allowed_margin * 1.08):
+                    if (min_notional_req / max_sym_lev) > (allowed_margin * 1.01):
                         continue
 
                     filtered.append({
@@ -645,7 +645,7 @@ class BinanceScalper:
                 max_margin_cap = config.MAX_MARGIN_LOW_BALANCE   # Batas maksimal ketat $1.00 jika saldo < $100
             else:
                 target_margin = avail * config.RISK_PORTFOLIO_PERCENT  # 1.0% fleksibel compounding jika saldo >= $100
-                max_margin_cap = target_margin * 1.08  # Toleransi 8% untuk presisi lot size
+                max_margin_cap = target_margin  # Batas maksimal ketat 1.0% jika saldo >= $100 (tidak boleh lebih dari 1%)
 
             target_notional = target_margin * actual_leverage
 
@@ -710,7 +710,7 @@ class BinanceScalper:
 
             # Filter ketat batas maksimal margin per posisi
             # Saldo < $100: Maksimal ketat $1.00 (tidak boleh lebih dari $1.00)
-            # Saldo >= $100: Fleksibel 1.0% dari saldo (maks target_margin * 1.08)
+            # Saldo >= $100: Maksimal ketat 1.0% dari saldo (tidak boleh lebih dari 1.0%)
             if margin_used > (max_margin_cap + 0.005):
                 console.log(
                     f"[bold yellow]🛡️ Filter Margin Ketat: Margin terhitung ${margin_used:.2f} melebihi batas maksimal "
