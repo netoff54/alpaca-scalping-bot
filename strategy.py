@@ -91,14 +91,14 @@ def detect_candlestick_reversal(
     lower_wick_ratio = lower_wick / rng
     upper_wick_ratio = upper_wick / rng
 
-    is_hammer = (lower_wick_ratio >= 0.38) and (upper_wick_ratio <= 0.25)
-    is_shooting_star = (upper_wick_ratio >= 0.38) and (lower_wick_ratio <= 0.25)
+    is_hammer = (lower_wick_ratio >= 0.38) and (upper_wick_ratio <= 0.25) and (c > o)
+    is_shooting_star = (upper_wick_ratio >= 0.38) and (lower_wick_ratio <= 0.25) and (c < o)
 
     is_bullish_engulfing = (prev_c < prev_o) and (c > o) and (c >= prev_o) and (o <= prev_c)
     is_bearish_engulfing = (prev_c > prev_o) and (c < o) and (c <= prev_o) and (o >= prev_c)
 
-    is_bullish_reversal = is_hammer or is_bullish_engulfing or (c > o and lower_wick_ratio >= 0.30)
-    is_bearish_reversal = is_shooting_star or is_bearish_engulfing or (c < o and upper_wick_ratio >= 0.30)
+    is_bullish_reversal = is_hammer or is_bullish_engulfing
+    is_bearish_reversal = is_shooting_star or is_bearish_engulfing
 
     pattern_name = "NONE"
     if is_hammer:
@@ -159,45 +159,28 @@ def find_tested_support_resistance(
     highs: List[float], lows: List[float], closes: List[float], current_price: float
 ) -> Tuple[List[float], List[float]]:
     """
-    Menemukan level Support & Resistance yang valid sesuai materi video Poin 2:
-    - Level yang sudah pernah disentuh / diuji beberapa kali (minimal 2 kali)
-      dan terbukti memicu reaksi pembalikan arah.
-    - Memindai hingga 1.000 candle untuk menghilangkan noise dan mendeteksi S&R multi-hari teruji.
+    Menemukan level Support & Resistance kunci yang teruji sesuai Poin 2 Kalimasada:
+    - Mengidentifikasi swing pivots institusi (window=3) pada timeframe struktur 1h.
+    - Mengambil level teruji paling relevan dari rentang swing terkini.
     """
     n = len(closes)
-    tested_supports = []
-    tested_resistances = []
-    if n < 40 or current_price <= 0:
-        return tested_supports, tested_resistances
+    if n < 10 or current_price <= 0:
+        return [current_price * 0.985], [current_price * 1.015]
 
-    tolerance = current_price * 0.0030  # Toleransi clustering 0.30%
+    low_pivots = []
+    high_pivots = []
+    for i in range(3, n - 3):
+        if all(lows[i] <= lows[i + d] for d in [-3, -2, -1, 1, 2, 3]):
+            low_pivots.append(lows[i])
+        if all(highs[i] >= highs[i + d] for d in [-3, -2, -1, 1, 2, 3]):
+            high_pivots.append(highs[i])
 
-    low_touches = []
-    high_touches = []
-    scan_start = max(1, n - 1000)
-    for i in range(scan_start, n - 2):
-        if lows[i] <= lows[i - 1] and lows[i] <= lows[i + 1]:
-            low_touches.append(lows[i])
-        if highs[i] >= highs[i - 1] and highs[i] >= highs[i + 1]:
-            high_touches.append(highs[i])
+    valid_lows = [l for l in low_pivots if l < current_price]
+    valid_highs = [h for h in high_pivots if h > current_price]
 
-    # Cluster level support yang diuji >= 2 kali di bawah harga saat ini
-    for l in low_touches:
-        if l < current_price:
-            count = sum(1 for other in low_touches if abs(other - l) <= tolerance)
-            if count >= 2 and not any(abs(s - l) <= tolerance for s in tested_supports):
-                tested_supports.append(l)
-
-    # Cluster level resistance yang diuji >= 2 kali di atas harga saat ini
-    for h in high_touches:
-        if h > current_price:
-            count = sum(1 for other in high_touches if abs(other - h) <= tolerance)
-            if count >= 2 and not any(abs(r - h) <= tolerance for r in tested_resistances):
-                tested_resistances.append(h)
-
-    tested_supports.sort(reverse=True)   # Terdekat ke harga saat ini
-    tested_resistances.sort()            # Terdekat ke harga saat ini
-    return tested_supports, tested_resistances
+    s = max(valid_lows[-5:]) if valid_lows else (current_price * 0.985)
+    r = min(valid_highs[-5:]) if valid_highs else (current_price * 1.015)
+    return [s], [r]
 
 def calculate_liquidation_pools(
     nearest_support: float, nearest_resistance: float, current_price: float
@@ -325,27 +308,27 @@ def analyze_coin_comprehensive(
     atr_series = calculate_atr_series(ltf_highs, ltf_lows, ltf_closes, config.ATR_PERIOD)
     rsi_series = calculate_rsi_series(ltf_closes, config.RSI_PERIOD)
 
-    c_open = ltf_opens[-2]
-    c_high = ltf_highs[-2]
-    c_low = ltf_lows[-2]
-    c_close = ltf_closes[-2]
-    c_vol = ltf_volumes[-2]
+    c_open = ltf_opens[-1]
+    c_high = ltf_highs[-1]
+    c_low = ltf_lows[-1]
+    c_close = ltf_closes[-1]
+    c_vol = ltf_volumes[-1]
 
-    p_open = ltf_opens[-3]
-    p_close = ltf_closes[-3]
-    p_high = ltf_highs[-3]
-    p_low = ltf_lows[-3]
+    p_open = ltf_opens[-2]
+    p_close = ltf_closes[-2]
+    p_high = ltf_highs[-2]
+    p_low = ltf_lows[-2]
 
-    ema13 = ema13_series[-2]
-    ema21 = ema21_series[-2]
-    atr = atr_series[-2] if len(atr_series) >= 2 else (latest_price * 0.005)
-    rsi_val = rsi_series[-2] if len(rsi_series) >= 2 else 50.0
+    ema13 = ema13_series[-1]
+    ema21 = ema21_series[-1]
+    atr = atr_series[-1] if len(atr_series) >= 1 else (c_close * 0.005)
+    rsi_val = rsi_series[-1] if len(rsi_series) >= 1 else 50.0
 
     c_range = c_high - c_low if (c_high - c_low) > 0 else 0.0001
     lower_wick = min(c_open, c_close) - c_low
     upper_wick = c_high - max(c_open, c_close)
 
-    avg_vol = sum(ltf_volumes[-22:-2]) / 20.0 if len(ltf_volumes) >= 22 else c_vol
+    avg_vol = sum(ltf_volumes[-21:-1]) / 20.0 if len(ltf_volumes) >= 21 else c_vol
     has_volume_expansion = (c_vol >= avg_vol * 1.0)
     has_strong_volume = (c_vol >= avg_vol * config.VOLUME_SPIKE_FACTOR)
 
@@ -374,72 +357,31 @@ def analyze_coin_comprehensive(
     dist_to_resistance_pct = ((nearest_resistance - c_close) / c_close) if nearest_resistance > c_close else 0.0
     dist_to_support_pct = ((c_close - nearest_support) / c_close) if c_close > nearest_support else 0.0
 
-    # Minimal jarak ke S&R berikutnya adalah 1.80% (cukup untuk target TP 2.00% tanpa langsung terbentur tembok)
-    has_room_for_buy = dist_to_resistance_pct >= 0.018
-    has_room_for_sell = dist_to_support_pct >= 0.018
+    # Minimal jarak ke S&R berikutnya adalah 1.50% (cukup untuk target TP 2.33% tanpa langsung terbentur tembok)
+    has_room_for_buy = dist_to_resistance_pct >= 0.015
+    has_room_for_sell = dist_to_support_pct >= 0.015
 
-    long_liq_max = liq_pools["long_liquidation_zone"][1]
-    short_liq_min = liq_pools["short_liquidation_zone"][0]
+    # Filter RSI Confluence (Poin 7 Kalimasada: Hindari overbought saat BUY & oversold saat SELL)
+    rsi_ok_buy = (rsi_val <= 68.0)
+    rsi_ok_sell = (rsi_val >= 32.0)
 
     # =========================================================================
     # SETUP 1: LIQUIDITY SWEEP & RECLAIM (Poin 8 Kalimasada - SMC Validasi Lilin Reversal)
+    # Institutional Stop Hunt di bawah Support / di atas Resistance dengan konfirmasi Reversal
     # =========================================================================
-    if (c_low <= long_liq_max) and c_close >= nearest_support and rev_pattern["is_bullish_reversal"] and structure != "DOWNTREND":
+    if (c_low <= nearest_support * 0.997) and c_close >= nearest_support and rev_pattern["is_bullish_reversal"] and macro_trend != "BEARISH" and rsi_ok_buy and has_room_for_buy:
         sweep_status = "LONG_LIQUIDITY_SWEPT"
-        if has_volume_expansion and has_ls_support_buy and has_room_for_buy:
-            signal_side = "BUY"
-            setup_name = "LIQUIDITY_SWEEP"
-            setup_desc = f"Liquidity Sweep di Long Pool {long_liq_max:.4f} & Reclaim Support {nearest_support:.4f} ({rev_pattern['pattern_name']})"
-            score = 88.0
+        signal_side = "BUY"
+        setup_name = "LIQUIDITY_SWEEP"
+        setup_desc = f"Liquidity Sweep di bawah Support {nearest_support:.4f} & Reclaim ({rev_pattern['pattern_name']})"
+        score = 90.0
 
-    elif (c_high >= short_liq_min) and c_close <= nearest_resistance and rev_pattern["is_bearish_reversal"] and structure != "UPTREND":
+    elif (c_high >= nearest_resistance * 1.003) and c_close <= nearest_resistance and rev_pattern["is_bearish_reversal"] and macro_trend != "BULLISH" and rsi_ok_sell and has_room_for_sell:
         sweep_status = "SHORT_LIQUIDITY_SWEPT"
-        if has_volume_expansion and has_ls_support_sell and has_room_for_sell:
-            signal_side = "SELL"
-            setup_name = "LIQUIDITY_SWEEP"
-            setup_desc = f"Liquidity Sweep di Short Pool {short_liq_min:.4f} & Reclaim Resistance {nearest_resistance:.4f} ({rev_pattern['pattern_name']})"
-            score = 88.0
-
-    # =========================================================================
-    # SETUP 2: EMA 13 & 21 RETEST BOUNCE (Poin 7 Kalimasada - Dynamic S&R 15m)
-    # Syarat: Hanya saat Trending & Memiliki Room to Run (Jangan Beli di Pucuk!)
-    # =========================================================================
-    if not signal_side and structure != "SIDEWAYS":
-        # BUY: Uptrend & Rebound di Dynamic Support EMA 13/21
-        if structure == "UPTREND" and c_close > ema200_htf and ema13 >= ema21:
-            if c_low <= max(ema13, ema21) * 1.002 and c_close > max(ema13, ema21):
-                if c_close > c_open and has_volume_expansion and has_room_for_buy and has_ls_support_buy:
-                    signal_side = "BUY"
-                    setup_name = "EMA13_21_BOUNCE"
-                    setup_desc = f"Pullback Retest & Bounce di EMA 13/21 15m ({ema13:.4f}) searah Uptrend"
-                    score = 86.0
-
-        # SELL: Downtrend & Rejection di Dynamic Resistance EMA 13/21
-        elif structure == "DOWNTREND" and c_close < ema200_htf and ema13 <= ema21:
-            if c_high >= min(ema13, ema21) * 0.998 and c_close < min(ema13, ema21):
-                if c_close < c_open and has_volume_expansion and has_room_for_sell and has_ls_support_sell:
-                    signal_side = "SELL"
-                    setup_name = "EMA13_21_BOUNCE"
-                    setup_desc = f"Pullback Retest & Rejection di EMA 13/21 15m ({ema13:.4f}) searah Downtrend"
-                    score = 86.0
-
-    # =========================================================================
-    # SETUP 5: COMPRESSION BREAKOUT (Pola Squeeze Akumulasi/Distribusi)
-    # =========================================================================
-    if not signal_side and len(atr_series) >= 10:
-        recent_ranges = [ltf_highs[k] - ltf_lows[k] for k in range(-7, -2)]
-        avg_range = sum(recent_ranges) / len(recent_ranges) if recent_ranges else atr
-        if avg_range <= atr * 0.65 and has_strong_volume:
-            if c_close > c_open and c_close > max(ltf_opens[-4:-2] + ltf_closes[-4:-2]) and c_close > ema21 and has_ls_support_buy and has_room_for_buy:
-                signal_side = "BUY"
-                setup_name = "COMPRESSION_BREAKOUT"
-                setup_desc = "Compression Breakout (Akumulasi padat pecah ke atas dengan volume)"
-                score = 80.0
-            elif c_close < c_open and c_close < min(ltf_opens[-4:-2] + ltf_closes[-4:-2]) and c_close < ema21 and has_ls_support_sell and has_room_for_sell:
-                signal_side = "SELL"
-                setup_name = "COMPRESSION_BREAKOUT"
-                setup_desc = "Compression Breakdown (Distribusi padat pecah ke bawah dengan volume)"
-                score = 80.0
+        signal_side = "SELL"
+        setup_name = "LIQUIDITY_SWEEP"
+        setup_desc = f"Liquidity Sweep di atas Resistance {nearest_resistance:.4f} & Reclaim ({rev_pattern['pattern_name']})"
+        score = 90.0
 
     # Filter Confluence Tren Makro 4h (Pilar Kalimasada: DILARANG Melawan Tren Makro!)
     if signal_side == "BUY" and macro_trend == "BEARISH":

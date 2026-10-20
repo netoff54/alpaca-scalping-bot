@@ -63,13 +63,13 @@ class BotConfig:
 
     # --- Risk / Reward Ratio Presisi Dollar 1:2 NET Riil (Sudah Ditambahkan Seluruh Fee Bursa) ---
     # Fee Loss: Maker Entry 0.02% + Taker SL 0.05% = 0.07% -> Net Loss = 1.00% + 0.07% = 1.07% (-$0.5350 pada notional $50)
-    # Fee Win: Maker Entry 0.02% + Maker TP 0.02% = 0.04% -> Gross TP 2.18% - 0.04% = Net Win 2.14% (+$1.0700 pada notional $50)
-    # Rasio Dolar Bersih Riil Dompet: +$1.0700 / $0.5350 = TEPAT 1 : 2.00 NET
+    # Fee Win: Maker Entry 0.02% + Maker TP 0.02% = 0.04% -> Gross TP 2.33% - 0.04% = Net Win 2.29% (+$1.1450 pada notional $50)
+    # Rasio Dolar Bersih Riil Dompet: +$1.1450 / $0.5350 = 2.14 NET (> 1:2.00)
     SL_PERCENT: float = 0.0100             # Stop Loss 1.00% (Gross 1.00% + Fee 0.07% = Net Loss 1.07% / 1R Risiko)
-    TP_PERCENT: float = 0.0218             # Take Profit 2.18% (Gross 2.18% - Fee 0.04% = Net Win 2.14% / Tepat 2x Net Loss 1.07%)
-    RR_RATIO: float = 2.00                 # Rasio Risk-to-Reward 1:2.00 Net Bersih Sempurna Setelah Seluruh Biaya Transaksi
-    BEP_PROFIT_TRIGGER: float = 0.0180     # Pemicu BEP saat profit mencapai 1.80% (memberi ruang napas penuh bagi trade menuju TP 2.18%)
-    BEP_LOCK_PROFIT: float = 0.0035        # Kunci profit +0.35% (Menutup 100% fee bursa 0.07% + garansi cuan aman bersih > $0.14)
+    TP_PERCENT: float = 0.0233             # Take Profit 2.33% (Gross 2.33% - Fee 0.04% = Net Win 2.29% / Net 2.14:1 RRR)
+    RR_RATIO: float = 2.00                 # Rasio Risk-to-Reward Net Bersih Sempurna Setelah Seluruh Biaya Transaksi
+    BEP_PROFIT_TRIGGER: float = 0.0140     # Pemicu BEP saat profit mencapai 1.40% (1.4R) untuk mengunci profit sebelum reversal
+    BEP_LOCK_PROFIT: float = 0.0025        # Kunci profit +0.25% (Menutup 100% fee bursa 0.07% + garansi cuan aman bersih > $0.10)
     MAX_SPREAD_PERCENT: float = 0.0008     # Batas maksimal spread bid-ask 0.08% (Anti-Slippage & Anti-Illiquid Books)
     MAKER_FEE_RATE: float = 0.0002         # 0.02% maker fee pada Binance Futures
 

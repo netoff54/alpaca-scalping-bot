@@ -9,4 +9,5 @@ get_*.py
 yt_*.txt
 yt_*.png
 klines_cache.json
+klines_1month_cache.json
 *.jsonl

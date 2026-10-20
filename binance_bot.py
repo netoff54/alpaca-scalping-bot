@@ -533,7 +533,7 @@ class BinanceScalper:
             analysis = strategy.analyze_coin_comprehensive(
                 symbol=sym,
                 ohlcv_htf=ohlcv_1h,
-                ohlcv_ltf=ohlcv_15m,
+                ohlcv_ltf=ohlcv_15m[:-1],
                 ohlcv_macro=ohlcv_4h,
                 derivatives_data=deriv_data,
                 available_capital=cap,
