@@ -369,13 +369,13 @@ class BinanceFuturesClient:
         """Mengembalikan leverage maksimal resmi koin (default 50 jika belum termuat)."""
         return self._symbols_max_leverage.get(symbol, 50)
 
-    def set_leverage(self, symbol: str, target_leverage: int = 50, min_leverage: int = 10) -> int:
+    def set_leverage(self, symbol: str, target_leverage: int = 50, min_leverage: int = 25) -> int:
         """
-        Mengatur leverage dengan sistem Range Stepping Probing [50x down to 10x]:
-        1. Jika dari leverage brackets koin < min_leverage (misal koin 5x), langsung kembalikan agar di-skip.
+        Mengatur leverage dengan sistem Range Stepping Probing [50x down to 25x]:
+        1. Jika dari leverage brackets koin < min_leverage (25x), langsung kembalikan agar di-skip.
         2. Mencoba target_leverage (50x) terlebih dahulu.
-        3. Jika ditolak bursa/koin/akun (misal akun baru atau koin dibatasi 20x-49x),
-           secara berurutan mencoba 49x, 48x, ... hingga min_leverage untuk memastikan leverage
+        3. Jika ditolak bursa/koin/akun (misal akun baru atau koin dibatasi 25x-49x),
+           secara berurutan mencoba 49x, 48x, ... hingga 25x untuk memastikan leverage
            maksimal yang tersedia terpakai.
         4. Mengembalikan nilai leverage aktual yang berhasil diset bursa.
         """
