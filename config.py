@@ -20,7 +20,7 @@ class BotConfig:
     ROTATION_BATCH_SIZE: int = 1           # 1 Koin per rotasi (Analisis Menyeluruh, Bukan Screening Singkat)
     TOTAL_ROTATIONS: int = 500             # 500 rotasi berurutan dari koin 1 s/d koin 500
     TOP_COINS_LIMIT: int = 1               # 1 koin per rotasi
-    MIN_24H_VOLUME_USD: float = 1_000_000.0   # Minimal volume $1M agar semesta 500 koin terpenuhi
+    MIN_24H_VOLUME_USD: float = 100_000.0  # Minimal volume $100k agar seluruh semesta 500 koin Binance Futures terakomodasi
     SCAN_INTERVAL_SECONDS: int = 3         # Siklus 3 detik per koin (500 koin = 25 menit 1 siklus penuh)
     TIMEFRAME: str = "15m"                 # Timeframe eksekusi entry 15 menit (Sesuai Akademi Crypto Kalimasada)
     STRUCTURE_TIMEFRAME: str = "1h"        # Timeframe struktur pasar, S&R teruji, & Area Likuidasi 1 Jam
@@ -28,7 +28,7 @@ class BotConfig:
     CANDLE_LIMIT: int = 1000               # 1000 candle untuk minimalkan noise & validasi S&R / EMA presisi
     MIN_SETUP_SCORE: float = 80.0          # Skor minimal agar sinyal dieksekusi (hanya setup matang)
 
-    # --- Account & Risk-Budget Management (Leverage Range 50x -> 20x) ---
+    # --- Account & Risk-Budget Management (Leverage Range 50x -> 10x) ---
     INITIAL_CAPITAL: float = 101.15        # Modal awal riil pengguna di Binance Futures ($101.15)
     DEFAULT_CAPITAL: float = 10.0          # Modal dasar cadangan jika saldo kosong ($10)
     FIXED_MARGIN_LOW_BALANCE: float = 1.00 # Margin tepat $1.00 jika saldo < $100 (Maksimal $1.00)
@@ -38,12 +38,12 @@ class BotConfig:
     COMPOUNDING_ENABLED: bool = True       # Compounding dinamis berdasarkan saldo
     LEVERAGE: int = 50                     # Leverage 50x target utama
     LEVERAGE_MAX: int = 50                 # Batas atas leverage (50x diutamakan)
-    LEVERAGE_MIN: int = 20                 # Batas bawah leverage (20x ketat: koin di bawah 20x langsung di-skip demi mencegah pembengkakan margin)
+    LEVERAGE_MIN: int = 10                 # Batas bawah leverage (10x aman agar seluruh 500 koin bisa masuk semesta rotasi)
     MARGIN_MODE: str = "ISOLATED"          # WAJIB ISOLATED MARGIN
     ORDER_TYPE: str = "LIMIT"              # WAJIB LIMIT ORDER (Maker Only - Fee Rendah)
     CLOSE_ORDER_TYPE: str = "LIMIT"        # WAJIB LIMIT ORDER KELUAR (Maker Close - Post Only GTX)
     MIN_NOTIONAL: float = 5.0              # Nilai notional minimum Binance ($5.0)
-    MAX_ORDER_NOTIONAL: float = 55.00      # Batas maksimal notional untuk akun modal mikro (Target notional $50 pada margin $1.00)
+    MAX_ORDER_NOTIONAL: float = 80.00      # Batas maksimal notional untuk akun modal mikro (Target notional $50 pada margin $1.00)
 
     # --- Limit Order & Anti-FOMO Settings ---
     LIMIT_TIMEOUT_SECONDS: int = 30        # Batalkan limit order jika tidak terisi dalam 30 detik

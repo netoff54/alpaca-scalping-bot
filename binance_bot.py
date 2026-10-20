@@ -360,13 +360,18 @@ class BinanceScalper:
             return {"status": "skipped", "reason": "rate_limited"}
         try:
             console.log("[cyan]Memulai sinkronisasi seluruh riwayat database dengan data riil Binance...[/cyan]")
-            incomes = self.client.fetch_income_history(income_type="REALIZED_PNL", limit=1000)
+            incomes = self.client.fetch_income_history(income_type=None, limit=1000)
             res = db.sync_all_historical_trades_with_binance(incomes)
+            bal = self.get_futures_balance()
             if res.get("status") == "success":
                 self.total_trades = res["total_trades"]
                 self.winning_trades = res["winning_trades"]
-                self.total_pnl_usd = res["total_pnl_usd"]
-                console.log(f"[bold green]Sinkronisasi riwayat database sukses: {res.get('matched_trades', 0)} trade dicocokkan, Total PnL: ${res.get('total_pnl_usd', 0.0):+.4f}[/bold green]")
+                # Gunakan net_realized_pnl resmi Binance (-$1.44) agar persis sama dengan saldo dompet pengguna
+                net_pnl = res.get("net_realized_pnl")
+                if net_pnl is None or abs(net_pnl) < 0.0001:
+                    net_pnl = round(bal["total_wallet"] - config.INITIAL_CAPITAL, 4)
+                self.total_pnl_usd = net_pnl
+                console.log(f"[bold green]Sinkronisasi database sukses: {res.get('matched_trades', 0)} trade dicocokkan, Net PnL (Termasuk Fee & Funding): ${self.total_pnl_usd:+.4f} (Gross PnL: ${res.get('gross_pnl_usd', 0.0):+.4f}, Fee: ${res.get('total_commission', 0.0):.4f}, Funding: ${res.get('total_funding_fee', 0.0):+.4f})[/bold green]")
             return res
         except Exception as e:
             console.log(f"[red]Error sinkronisasi database dengan Binance: {e}[/red]")
@@ -405,12 +410,12 @@ class BinanceScalper:
 
     def _fetch_universe_symbols(self) -> List[Dict[str, Any]]:
         """
-        Mengambil Semesta 200 Koin Crypto Murni (Non-Stablecoin) Langsung dari Binance Futures:
+        Mengambil Semesta 500 Koin Crypto Murni (Non-Stablecoin) Langsung dari Binance Futures:
         1. Buang semua stablecoin (USDC, FDUSD, BUSD, TUSD, EUR, DAI, AEUR, USDP, USD1, BFUSD, USDT, USTC, dll).
         2. Hanya koin yang terdaftar di self.client.allowed_crypto_symbols.
-        3. Filter koin dengan volume 24 jam >= config.MIN_24H_VOLUME_USD ($3M).
-        4. Saring koin yang minimum order-nya terlalu besar untuk modal mikro ($11 USDT).
-        5. Urutkan berdasarkan quoteVolume tertinggi dan ambil tepat 200 koin crypto murni.
+        3. Filter koin dengan volume 24 jam >= config.MIN_24H_VOLUME_USD ($100K).
+        4. Saring koin yang minimum order-nya terlalu besar untuk modal mikro.
+        5. Urutkan berdasarkan quoteVolume tertinggi dan ambil tepat 500 koin crypto murni untuk 500 rotasi.
         """
         if self.client.is_banned():
             return self._cached_universe_symbols if self._cached_universe_symbols else self._get_fallback_symbols()
@@ -441,13 +446,13 @@ class BinanceScalper:
                     if q_vol < config.MIN_24H_VOLUME_USD or last_price <= 0:
                         continue
 
-                    # Filter koin dengan ukuran lot minimum terlalu besar untuk akun modal mikro ($11 USDT)
+                    # Filter koin dengan ukuran lot minimum terlalu besar untuk akun modal mikro
                     rules = self.client._symbols_rules.get(sym, {})
                     min_q = rules.get("min_qty", 0.0)
                     if (min_q * last_price) > config.MAX_ORDER_NOTIONAL:
                         continue
 
-                    # Filter koin dengan leverage maksimal < 20x (misal AVAUSDT 10x) agar semesta 500 koin hanya berisi koin likuid & seragam
+                    # Filter koin dengan leverage maksimal < LEVERAGE_MIN (10x)
                     max_sym_lev = self.client.get_max_leverage(sym)
                     if max_sym_lev < config.LEVERAGE_MIN:
                         continue
@@ -465,11 +470,11 @@ class BinanceScalper:
                 except Exception:
                     continue
 
-            # Urutkan berdasarkan volume 24 jam tertinggi
+            # Urutkan berdasarkan volume 24 jam tertinggi dan ambil tepat 500 koin
             filtered.sort(key=lambda x: x["quoteVolume"], reverse=True)
             res = filtered[:config.SCAN_UNIVERSE_LIMIT]
             if res:
-                console.log(f"[bold green]Berhasil memuat {len(res)} koin crypto murni (non-stablecoin) ke dalam semesta rotasi.[/bold green]")
+                console.log(f"[bold green]Berhasil memuat {len(res)} koin crypto murni (non-stablecoin) ke dalam semesta 500 rotasi.[/bold green]")
                 return res
             return self._cached_universe_symbols if self._cached_universe_symbols else self._get_fallback_symbols()
         except Exception as e:
