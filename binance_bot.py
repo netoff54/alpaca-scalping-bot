@@ -617,7 +617,7 @@ class BinanceScalper:
             return False
 
         try:
-            # 1. Pastikan ISOLATED margin dan atur leverage dalam rentang 50x turun ke 25x (Seimbang, Anti-Jomplang)
+            # 1. Pastikan ISOLATED margin dan atur leverage dalam rentang 50x turun ke 20x (Kompatibel Akun < 30 Hari)
             self.client.set_margin_type(symbol, "ISOLATED")
             actual_leverage = self.client.set_leverage(
                 symbol,
@@ -626,11 +626,11 @@ class BinanceScalper:
             )
             self._configured_symbols.add(symbol)
             
-            # Saring koin dengan leverage di bawah 25x agar seluruh trade seragam & tidak timpang (1 win di 25x pasti menutup 1 loss di 50x)
+            # Saring koin dengan leverage di bawah 20x agar seluruh trade seragam & koin < 20x di-skip
             if actual_leverage < config.LEVERAGE_MIN:
                 console.log(
                     f"[bold yellow]🛡️ Filter Leverage Rendah: {symbol} hanya mendukung {actual_leverage}x (< {config.LEVERAGE_MIN}x). "
-                    f"Melewati koin agar seluruh trade tetap seimbang, seragam, dan anti-jomplang.[/bold yellow]"
+                    f"Melewati koin agar modal tetap aman dan terukur.[/bold yellow]"
                 )
                 self.active_order = None
                 self.active_signals = [s for s in self.active_signals if s.get("symbol") != symbol]

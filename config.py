@@ -28,17 +28,17 @@ class BotConfig:
     CANDLE_LIMIT: int = 1000               # 1000 candle untuk minimalkan noise & validasi S&R / EMA presisi
     MIN_SETUP_SCORE: float = 80.0          # Skor minimal agar sinyal dieksekusi (hanya setup matang)
 
-    # --- Account & Risk-Budget Management (Leverage Range 50x -> 10x) ---
+    # --- Account & Risk-Budget Management (Leverage Range 50x -> 20x) ---
     INITIAL_CAPITAL: float = 101.15        # Modal awal riil pengguna di Binance Futures ($101.15)
     DEFAULT_CAPITAL: float = 10.0          # Modal dasar cadangan jika saldo kosong ($10)
-    FIXED_MARGIN_LOW_BALANCE: float = 1.00 # Margin tepat $1.00 jika saldo < $100 (Maksimal $1.00)
+    FIXED_MARGIN_LOW_BALANCE: float = 1.00 # Margin tepat $1.00 jika saldo < $100 (Maksimal ketat $1.00)
     MAX_MARGIN_LOW_BALANCE: float = 1.00   # Batas maksimal ketat margin $1.00 jika saldo < $100
     BALANCE_THRESHOLD_SCALING: float = 100.0# Batas ambang $100 untuk beralih ke 1.0% margin fleksibel
     RISK_PORTFOLIO_PERCENT: float = 0.01   # 1.0% margin fleksibel dari total portofolio jika saldo >= $100 (Compounding)
     COMPOUNDING_ENABLED: bool = True       # Compounding dinamis berdasarkan saldo
     LEVERAGE: int = 50                     # Leverage 50x target utama
     LEVERAGE_MAX: int = 50                 # Batas atas leverage (50x diutamakan)
-    LEVERAGE_MIN: int = 25                 # Batas bawah leverage seimbang 25x (Rasio 50:25 = 2.0x, menjamin 1 win di 25x tetap 100% menutup 1 loss di 50x, mencegah Risk of Ruin asimetris)
+    LEVERAGE_MIN: int = 20                 # Batas bawah leverage 20x (Kompatibel penuh pembatasan akun Binance < 30 hari; koin < 20x di-skip agar tidak jomplang)
     MARGIN_MODE: str = "ISOLATED"          # WAJIB ISOLATED MARGIN
     ORDER_TYPE: str = "LIMIT"              # WAJIB LIMIT ORDER (Maker Only - Fee Rendah)
     CLOSE_ORDER_TYPE: str = "LIMIT"        # WAJIB LIMIT ORDER KELUAR (Maker Close - Post Only GTX)
