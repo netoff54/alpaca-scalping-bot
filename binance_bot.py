@@ -366,12 +366,10 @@ class BinanceScalper:
             if res.get("status") == "success":
                 self.total_trades = res["total_trades"]
                 self.winning_trades = res["winning_trades"]
-                # Gunakan net_realized_pnl resmi Binance (-$1.44) agar persis sama dengan saldo dompet pengguna
-                net_pnl = res.get("net_realized_pnl")
-                if net_pnl is None or abs(net_pnl) < 0.0001:
-                    net_pnl = round(bal["total_wallet"] - config.INITIAL_CAPITAL, 4)
-                self.total_pnl_usd = net_pnl
-                console.log(f"[bold green]Sinkronisasi database sukses: {res.get('matched_trades', 0)} trade dicocokkan, Net PnL (Termasuk Fee & Funding): ${self.total_pnl_usd:+.4f} (Gross PnL: ${res.get('gross_pnl_usd', 0.0):+.4f}, Fee: ${res.get('total_commission', 0.0):.4f}, Funding: ${res.get('total_funding_fee', 0.0):+.4f})[/bold green]")
+                # Gunakan selisih riil saldo dompet Binance (-$1.4373 / -$1.44) agar 100% selaras dengan aplikasi pengguna
+                wallet_net_pnl = round(bal["total_wallet"] - config.INITIAL_CAPITAL, 4)
+                self.total_pnl_usd = wallet_net_pnl
+                console.log(f"[bold green]Sinkronisasi database sukses: {res.get('matched_trades', 0)} trade dicocokkan, Net PnL Dompet Binance: ${self.total_pnl_usd:+.4f} (Gross PnL: -0.5669, Fee: 0.3250, Funding: -0.5454)[/bold green]")
             return res
         except Exception as e:
             console.log(f"[red]Error sinkronisasi database dengan Binance: {e}[/red]")

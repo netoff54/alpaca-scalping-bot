@@ -222,6 +222,7 @@ def binance_position_side():
 def index():
     try:
         bal = scalper.get_futures_balance()
+        scalper.total_pnl_usd = round(bal["total_wallet"] - config.INITIAL_CAPITAL, 4)
         try:
             db_summary = db.get_trade_summary()
         except Exception:
