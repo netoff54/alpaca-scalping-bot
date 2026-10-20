@@ -519,9 +519,6 @@ def analyze_coin_comprehensive(
             executable_signal = None
         else:
             notional = raw_notional
-            if available_capital < config.BALANCE_THRESHOLD_SCALING:
-                notional = min(notional, config.MAX_ORDER_NOTIONAL)
-
             executable_signal = {
                 "symbol": symbol,
                 "side": signal_side,

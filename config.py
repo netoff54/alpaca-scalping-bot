@@ -43,7 +43,6 @@ class BotConfig:
     ORDER_TYPE: str = "LIMIT"              # WAJIB LIMIT ORDER (Maker Only - Fee Rendah)
     CLOSE_ORDER_TYPE: str = "LIMIT"        # WAJIB LIMIT ORDER KELUAR (Maker Close - Post Only GTX)
     MIN_NOTIONAL: float = 5.0              # Nilai notional minimum Binance ($5.0)
-    MAX_ORDER_NOTIONAL: float = 80.00      # Batas maksimal notional untuk akun modal mikro (Target notional $50 pada margin $1.00)
 
     # --- Limit Order & Anti-FOMO Settings ---
     LIMIT_TIMEOUT_SECONDS: int = 30        # Batalkan limit order jika tidak terisi dalam 30 detik
