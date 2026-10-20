@@ -240,29 +240,30 @@ def analyze_coin_comprehensive(
     symbol: str,
     ohlcv_htf: List[List[float]],
     ohlcv_ltf: List[List[float]],
+    ohlcv_macro: Optional[List[List[float]]] = None,
     derivatives_data: Optional[Dict[str, Any]] = None,
     available_capital: float = 10.0,
     leverage: int = 50,
     max_symbol_leverage: int = 50
 ) -> Dict[str, Any]:
     """
-    Analisis Menyeluruh 1 Koin Crypto (Akademi Crypto Master Blueprint Disempurnakan):
-    1. Multi-Timeframe Structure (15m):
-       - Tren Makro (EMA 200) & Struktur Pasar (HH/HL vs LH/LL)
-       - Support & Resistance teruji >= 2 kali
-       - Pemetaan Area Likuidasi (Liquidation Pools)
-    2. Lower Timeframe Scalping Execution (5m):
-       - Range Trading S&D (Sideways): Demand Bounce & Supply Rejection
-       - EMA 13 & 21 Retest Bounce (Searah Tren & Ada Room to Run)
-       - Liquidity Sweep Reclaim (SMC Stop Hunt Hunter)
-       - True Retest (Khusus Tren Kuat, Bukan Breakout Mentah)
+    Analisis Menyeluruh 1 Koin Crypto (Akademi Crypto Kalimasada Multi-Timeframe):
+    1. Macro Timeframe (4h):
+       - Tren Makro Institusi (EMA 200 & EMA 13/21 4 Jam)
+       - Filter arah pasar (Bullish vs Bearish)
+    2. Primary Structure Timeframe (1h):
+       - Struktur Pasar (HH/HL vs LH/LL) & S&R Teruji >= 2 kali
+       - Pemetaan Area Likuidasi Institusi (Liquidation Pools SMC)
+    3. Lower Timeframe Execution (15m):
+       - EMA 13 & 21 Retest Bounce (Searah Tren & Memiliki Room to Run >= 1.8%)
+       - Liquidity Sweep Reclaim Teruji (SMC Stop Hunt dengan konfirmasi pola reversal lilin & volume)
        - Compression Squeeze Breakout
        - Pola Pembalikan Lilin (Hammer / Shooting Star / Engulfing)
-       - Konfirmasi Volume Wajib (>= 110% rata-rata)
-    3. Confluence Derivatif:
+       - Konfirmasi Volume Wajib (>= 100% rata-rata)
+    4. Confluence Derivatif:
        - Open Interest (OI) Trend & CVD Delta
        - Global Long/Short Ratio
-    4. Strict Risk Management: Risk to Reward 1:2 & SL BEP saat 1R.
+    5. Strict Risk Management: Risk-to-Reward 1:2.00 (SL 1.00%, TP 2.00%, BEP 1.75%).
     """
     if not ohlcv_ltf or len(ohlcv_ltf) < 25:
         return {"symbol": symbol, "price": 0.0, "status": "INSUFFICIENT_DATA", "score": 0.0, "signal": None}
@@ -271,7 +272,23 @@ def analyze_coin_comprehensive(
     if not ohlcv_htf or len(ohlcv_htf) < 25:
         ohlcv_htf = ohlcv_ltf
 
-    # --- 1. Analisis HTF 15m (Struktur Pasar, S&R, & Area Likuidasi) ---
+    # --- 1. Analisis Tren Makro 4h ---
+    macro_trend = "NEUTRAL"
+    ema200_macro = 0.0
+    latest_price = ohlcv_ltf[-1][4]
+
+    if ohlcv_macro and len(ohlcv_macro) >= 15:
+        m_closes = [c[4] for c in ohlcv_macro]
+        ema200_m_series = calculate_ema_series(m_closes, min(len(m_closes), config.EMA_TREND))
+        ema200_macro = ema200_m_series[-1] if ema200_m_series else latest_price
+        ema13_m = calculate_ema_series(m_closes, config.EMA_FAST)[-1]
+        ema21_m = calculate_ema_series(m_closes, config.EMA_SLOW)[-1]
+        if latest_price >= ema200_macro and ema13_m >= ema21_m:
+            macro_trend = "BULLISH"
+        elif latest_price <= ema200_macro and ema13_m <= ema21_m:
+            macro_trend = "BEARISH"
+
+    # --- 2. Analisis Struktur HTF 1h (Struktur Pasar, S&R, & Area Likuidasi) ---
     htf_opens = [c[1] for c in ohlcv_htf]
     htf_highs = [c[2] for c in ohlcv_htf]
     htf_lows = [c[3] for c in ohlcv_htf]
@@ -280,7 +297,6 @@ def analyze_coin_comprehensive(
     structure_info = detect_market_structure(htf_highs, htf_lows, htf_closes)
     structure = structure_info["structure"]
 
-    latest_price = ohlcv_ltf[-1][4]
     tested_s, tested_r = find_tested_support_resistance(htf_highs, htf_lows, htf_closes, latest_price)
 
     nearest_support = tested_s[0] if tested_s else latest_price * 0.990
@@ -289,9 +305,13 @@ def analyze_coin_comprehensive(
     # Hitung Area Likuidasi
     liq_pools = calculate_liquidation_pools(nearest_support, nearest_resistance, latest_price)
 
-    # EMA 200 HTF untuk filter tren makro
+    # EMA 200 HTF untuk filter tren struktur
     ema200_series = calculate_ema_series(htf_closes, min(len(htf_closes), config.EMA_TREND))
     ema200_htf = ema200_series[-1] if ema200_series else latest_price
+    if ema200_macro == 0.0:
+        ema200_macro = ema200_htf
+        if macro_trend == "NEUTRAL":
+            macro_trend = structure_info.get("bias", "NEUTRAL")
 
     # --- 2. Analisis LTF 5m (Eksekusi Scalping) ---
     ltf_opens = [c[1] for c in ohlcv_ltf]
@@ -354,53 +374,53 @@ def analyze_coin_comprehensive(
     dist_to_resistance_pct = ((nearest_resistance - c_close) / c_close) if nearest_resistance > c_close else 0.0
     dist_to_support_pct = ((c_close - nearest_support) / c_close) if c_close > nearest_support else 0.0
 
-    # Minimal jarak ke S&R berikutnya adalah 1.2% (cukup untuk TP 1.4% tanpa langsung terbentur tembok)
-    has_room_for_buy = dist_to_resistance_pct >= 0.012
-    has_room_for_sell = dist_to_support_pct >= 0.012
+    # Minimal jarak ke S&R berikutnya adalah 1.80% (cukup untuk target TP 2.00% tanpa langsung terbentur tembok)
+    has_room_for_buy = dist_to_resistance_pct >= 0.018
+    has_room_for_sell = dist_to_support_pct >= 0.018
 
     long_liq_max = liq_pools["long_liquidation_zone"][1]
     short_liq_min = liq_pools["short_liquidation_zone"][0]
 
     # =========================================================================
-    # SETUP 1: LIQUIDITY SWEEP & RECLAIM (Poin 8 Kalimasada - SMC Win Rate Tertinggi)
+    # SETUP 1: LIQUIDITY SWEEP & RECLAIM (Poin 8 Kalimasada - SMC Validasi Lilin Reversal)
     # =========================================================================
-    if (c_low <= long_liq_max or c_low < nearest_support) and c_close >= nearest_support and (lower_wick / c_range >= 0.35) and c_close >= c_open:
+    if (c_low <= long_liq_max) and c_close >= nearest_support and rev_pattern["is_bullish_reversal"] and structure != "DOWNTREND":
         sweep_status = "LONG_LIQUIDITY_SWEPT"
         if has_volume_expansion and has_ls_support_buy and has_room_for_buy:
             signal_side = "BUY"
             setup_name = "LIQUIDITY_SWEEP"
-            setup_desc = f"Liquidity Sweep di Long Pool {long_liq_max:.4f} & Reclaim Support {nearest_support:.4f}"
+            setup_desc = f"Liquidity Sweep di Long Pool {long_liq_max:.4f} & Reclaim Support {nearest_support:.4f} ({rev_pattern['pattern_name']})"
             score = 88.0
 
-    elif (c_high >= short_liq_min or c_high > nearest_resistance) and c_close <= nearest_resistance and (upper_wick / c_range >= 0.35) and c_close <= c_open:
+    elif (c_high >= short_liq_min) and c_close <= nearest_resistance and rev_pattern["is_bearish_reversal"] and structure != "UPTREND":
         sweep_status = "SHORT_LIQUIDITY_SWEPT"
         if has_volume_expansion and has_ls_support_sell and has_room_for_sell:
             signal_side = "SELL"
             setup_name = "LIQUIDITY_SWEEP"
-            setup_desc = f"Liquidity Sweep di Short Pool {short_liq_min:.4f} & Reclaim Resistance {nearest_resistance:.4f}"
+            setup_desc = f"Liquidity Sweep di Short Pool {short_liq_min:.4f} & Reclaim Resistance {nearest_resistance:.4f} ({rev_pattern['pattern_name']})"
             score = 88.0
 
     # =========================================================================
-    # SETUP 2: EMA 13 & 21 RETEST BOUNCE (Poin 7 Kalimasada - Dynamic S&R)
+    # SETUP 2: EMA 13 & 21 RETEST BOUNCE (Poin 7 Kalimasada - Dynamic S&R 15m)
     # Syarat: Hanya saat Trending & Memiliki Room to Run (Jangan Beli di Pucuk!)
     # =========================================================================
     if not signal_side and structure != "SIDEWAYS":
         # BUY: Uptrend & Rebound di Dynamic Support EMA 13/21
         if structure == "UPTREND" and c_close > ema200_htf and ema13 >= ema21:
-            if c_low <= max(ema13, ema21) * 1.001 and c_close > max(ema13, ema21):
+            if c_low <= max(ema13, ema21) * 1.002 and c_close > max(ema13, ema21):
                 if c_close > c_open and has_volume_expansion and has_room_for_buy and has_ls_support_buy:
                     signal_side = "BUY"
                     setup_name = "EMA13_21_BOUNCE"
-                    setup_desc = f"Pullback Retest & Bounce di EMA 13/21 5m ({ema13:.4f}) searah Uptrend"
+                    setup_desc = f"Pullback Retest & Bounce di EMA 13/21 15m ({ema13:.4f}) searah Uptrend"
                     score = 86.0
 
         # SELL: Downtrend & Rejection di Dynamic Resistance EMA 13/21
         elif structure == "DOWNTREND" and c_close < ema200_htf and ema13 <= ema21:
-            if c_high >= min(ema13, ema21) * 0.999 and c_close < min(ema13, ema21):
+            if c_high >= min(ema13, ema21) * 0.998 and c_close < min(ema13, ema21):
                 if c_close < c_open and has_volume_expansion and has_room_for_sell and has_ls_support_sell:
                     signal_side = "SELL"
                     setup_name = "EMA13_21_BOUNCE"
-                    setup_desc = f"Pullback Retest & Rejection di EMA 13/21 5m ({ema13:.4f}) searah Downtrend"
+                    setup_desc = f"Pullback Retest & Rejection di EMA 13/21 15m ({ema13:.4f}) searah Downtrend"
                     score = 86.0
 
     # =========================================================================
@@ -421,11 +441,27 @@ def analyze_coin_comprehensive(
                 setup_desc = "Compression Breakdown (Distribusi padat pecah ke bawah dengan volume)"
                 score = 80.0
 
-    # Bonus Skor Pola Candlestick Reversal
-    if signal_side == "BUY" and rev_pattern["is_bullish_reversal"]:
-        score += 5.0
-    elif signal_side == "SELL" and rev_pattern["is_bearish_reversal"]:
-        score += 5.0
+    # Filter Confluence Tren Makro 4h (Pilar Kalimasada: DILARANG Melawan Tren Makro!)
+    if signal_side == "BUY" and macro_trend == "BEARISH":
+        signal_side = None
+        setup_name = ""
+        setup_desc = "Dibatalkan: Sinyal Buy melawan Tren Makro 4 Jam Bearish"
+    elif signal_side == "SELL" and macro_trend == "BULLISH":
+        signal_side = None
+        setup_name = ""
+        setup_desc = "Dibatalkan: Sinyal Sell melawan Tren Makro 4 Jam Bullish"
+
+    # Bonus Skor Pola Candlestick Reversal & Tren Makro 4h
+    if signal_side == "BUY":
+        if rev_pattern["is_bullish_reversal"]:
+            score += 5.0
+        if macro_trend == "BULLISH":
+            score += 6.0
+    elif signal_side == "SELL":
+        if rev_pattern["is_bearish_reversal"]:
+            score += 5.0
+        if macro_trend == "BEARISH":
+            score += 6.0
 
     # Bonus Skor Derivatif & Struktur
     if signal_side == "BUY":
@@ -518,22 +554,28 @@ def analyze_coin_comprehensive(
                 "ls_ratio": ls_ratio,
                 "vol_ratio": round(c_vol / avg_vol, 2) if avg_vol > 0 else 1.0,
                 "scanned_candles_htf": len(ohlcv_htf),
-                "scanned_candles_ltf": len(ohlcv_ltf)
+                "scanned_candles_ltf": len(ohlcv_ltf),
+                "scanned_candles_macro": len(ohlcv_macro) if ohlcv_macro else 0
             }
 
     return {
         "symbol": symbol,
         "price": latest_price,
+        "macro_timeframe": config.MACRO_TIMEFRAME,
         "structure_timeframe": config.STRUCTURE_TIMEFRAME,
         "execution_timeframe": config.TIMEFRAME,
-        "scanned_candles_htf": len(ohlcv_htf),
         "scanned_candles_ltf": len(ohlcv_ltf),
+        "scanned_candles_htf": len(ohlcv_htf),
+        "scanned_candles_macro": len(ohlcv_macro) if ohlcv_macro else 0,
+        "macro_trend_4h": macro_trend,
+        "market_structure_1h": structure,
         "market_structure": structure,
         "structure_desc": structure_info.get("desc", ""),
         "trend_bias": structure_info.get("bias", "NEUTRAL"),
-        "ema13_5m": round(ema13, 4),
-        "ema21_5m": round(ema21, 4),
-        "ema200_15m": round(ema200_htf, 4),
+        "ema13_15m": round(ema13, 4),
+        "ema21_15m": round(ema21, 4),
+        "ema200_1h": round(ema200_htf, 4),
+        "ema200_4h": round(ema200_macro, 4),
         "nearest_support": round(nearest_support, 4),
         "nearest_resistance": round(nearest_resistance, 4),
         "liquidation_pools": liq_pools,

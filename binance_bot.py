@@ -512,14 +512,16 @@ class BinanceScalper:
             bal = self.get_futures_balance()
             cap = bal["available"] if bal["available"] >= 1.0 else config.DEFAULT_CAPITAL
 
-            # 1. Fetch Multi-Timeframe: 15m untuk Struktur & Area Likuidasi, 5m untuk Eksekusi Scalp
-            ohlcv_15m = self.client.fetch_klines(sym, interval=config.STRUCTURE_TIMEFRAME, limit=config.CANDLE_LIMIT)
-            time.sleep(0.08)
-            ohlcv_5m = self.client.fetch_klines(sym, interval=config.TIMEFRAME, limit=config.CANDLE_LIMIT)
-            time.sleep(0.08)
-            deriv_data = self.client.fetch_derivatives_data(sym, period="5m")
+            # 1. Fetch Multi-Timeframe Kalimasada: 4h untuk Tren Makro, 1h untuk Struktur & S&R, 15m untuk Eksekusi Scalp
+            ohlcv_4h = self.client.fetch_klines(sym, interval=config.MACRO_TIMEFRAME, limit=250)
+            time.sleep(0.05)
+            ohlcv_1h = self.client.fetch_klines(sym, interval=config.STRUCTURE_TIMEFRAME, limit=500)
+            time.sleep(0.05)
+            ohlcv_15m = self.client.fetch_klines(sym, interval=config.TIMEFRAME, limit=config.CANDLE_LIMIT)
+            time.sleep(0.05)
+            deriv_data = self.client.fetch_derivatives_data(sym, period="15m")
 
-            if not ohlcv_5m or len(ohlcv_5m) < 25:
+            if not ohlcv_15m or len(ohlcv_15m) < 25:
                 self._current_rotation_index = (self._current_rotation_index + 1) % total_univ
                 return
 
@@ -527,8 +529,9 @@ class BinanceScalper:
             max_sym_lev = self.client.get_max_leverage(sym)
             analysis = strategy.analyze_coin_comprehensive(
                 symbol=sym,
-                ohlcv_htf=ohlcv_15m,
-                ohlcv_ltf=ohlcv_5m,
+                ohlcv_htf=ohlcv_1h,
+                ohlcv_ltf=ohlcv_15m,
+                ohlcv_macro=ohlcv_4h,
                 derivatives_data=deriv_data,
                 available_capital=cap,
                 leverage=config.LEVERAGE,

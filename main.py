@@ -290,6 +290,11 @@ def health_check():
             "status": "healthy",
             "exchange": "Binance Futures",
             "candle_scan_depth": config.CANDLE_LIMIT,
+            "timeframe_setup": {
+                "execution": config.TIMEFRAME,
+                "structure": config.STRUCTURE_TIMEFRAME,
+                "macro": config.MACRO_TIMEFRAME
+            },
             "rate_limit_status": cooldown_info,
             "compounding": "ACTIVE",
             "futures_wallet_usdt": bal["total_wallet"],

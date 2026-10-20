@@ -1,17 +1,13 @@
 """
-Backtest Engine Resmi & Realistis - Binance Futures Scalper
+Backtest Engine Resmi & Realistis - Binance Futures Scalper (Kalimasada 15m/1h/4h)
 Sesuai Sistem Live & Blueprint Akademi Crypto Kalimasada:
-- Modal Awal: $11.11 USDT
-- Periode Data: ~7 Hari (2.000 Candle 5m per Koin dari Binance Vision API)
-- Timeframe Eksekusi: 5m | Struktur Pasar: 15m
-- Rasio Risk-to-Reward: 1:2.00 (SL -0.70%, TP +1.40%)
-- Proteksi BEP: Aktif saat menyentuh 1R (+0.70%), Kunci Profit Bersih +0.15% (Fee tertutup 100% + cuan aman)
+- Modal Awal: $101.15 USDT
+- Timeframe Eksekusi: 15m | Struktur Pasar & S&R: 1h | Tren Makro: 4h
+- Rasio Risk-to-Reward: 1:2.00 (SL -1.00%, TP +2.00%)
+- Proteksi BEP: Aktif saat menyentuh +1.75%, Kunci Profit Bersih +0.30%
 - Margin Modal Mikro: Tepat $1.00 USDT per posisi (Saldo < $100) / 1.0% Compounding (Saldo >= $100)
 - Leverage: 50x (Notional $50.00 pada margin $1.00)
 - Fee Bursa Riil: Maker 0.02% (Entry & TP Limit), Taker 0.05% (SL & BEP Market Stop)
-- Model Eksekusi:
-  1. Akun Riil Portofolio (1 Bot, Modal $11.11, Maksimal 1 Posisi Terbuka pada Satu Waktu)
-  2. Statistik Agregat Multi-Koin (15 Koin Likuid Teratas)
 """
 
 import sys
@@ -43,8 +39,7 @@ BACKTEST_SYMBOLS = [
 ]
 
 CANDLES_LIMIT = 2000
-INITIAL_CAPITAL = 101.70
-MARGIN_PERCENT = 0.01  # 1.0% dari total saldo portofolio per posisi (Compounding)
+INITIAL_CAPITAL = 101.15
 CACHE_FILE = "klines_cache.json"
 
 def load_or_fetch_klines() -> Dict[str, List[List[float]]]:
@@ -78,9 +73,9 @@ def load_or_fetch_klines() -> Dict[str, List[List[float]]]:
 
     return data
 
-def aggregate_htf(klines_5m: List[List[float]], factor: int = 3) -> List[List[float]]:
-    """Mengagregasi klines 5m menjadi 15m (faktor 3)."""
-    htf = []
+def aggregate_candles(klines_5m: List[List[float]], factor: int) -> List[List[float]]:
+    """Mengagregasi klines 5m menjadi timeframe lebih tinggi (15m=3, 1h=12, 4h=48)."""
+    res = []
     for i in range(0, len(klines_5m), factor):
         group = klines_5m[i:i+factor]
         if len(group) == factor:
@@ -90,17 +85,21 @@ def aggregate_htf(klines_5m: List[List[float]], factor: int = 3) -> List[List[fl
             low_p = min(c[3] for c in group)
             close_p = group[-1][4]
             vol = sum(c[5] for c in group)
-            htf.append([o_time, open_p, high_p, low_p, close_p, vol])
-    return htf
+            res.append([o_time, open_p, high_p, low_p, close_p, vol])
+    return res
 
 def run_portfolio_simulation(klines_data: Dict[str, List[List[float]]]) -> Tuple[float, List[Dict[str, Any]], Dict[str, Any]]:
     """
     Simulasi Portofolio Akun Riil 1 Bot:
-    - Modal Awal: $11.11
-    - Maksimal 1 posisi aktif bersamaan (sesuai has_open_position di bot live)
-    - Compounding saldo real-time
-    - Fee riil maker (0.02%) & taker (0.05%)
+    - Timeframe: Eksekusi 15m, Struktur 1h, Tren Makro 4h
+    - Modal Awal: $101.15
+    - Maksimal 1 posisi aktif bersamaan
+    - RRR 1:2.00 (SL 1.00%, TP 2.00%, BEP 1.75%)
     """
+    data_15m = {sym: aggregate_candles(klines_data[sym], factor=3) for sym in BACKTEST_SYMBOLS}
+    data_1h = {sym: aggregate_candles(klines_data[sym], factor=12) for sym in BACKTEST_SYMBOLS}
+    data_4h = {sym: aggregate_candles(klines_data[sym], factor=48) for sym in BACKTEST_SYMBOLS}
+
     wallet = INITIAL_CAPITAL
     peak_wallet = INITIAL_CAPITAL
     max_dd_usd = 0.0
@@ -109,20 +108,24 @@ def run_portfolio_simulation(klines_data: Dict[str, List[List[float]]]) -> Tuple
     trades: List[Dict[str, Any]] = []
     active_pos: Dict[str, Any] = None
 
-    # Tentukan rentang indeks candle yang sinkron (indeks 80 s/d 2000)
-    total_candles = min(len(klines_data[s]) for s in BACKTEST_SYMBOLS)
-    first_ts = klines_data[BACKTEST_SYMBOLS[0]][0][0] / 1000
-    last_ts = klines_data[BACKTEST_SYMBOLS[0]][-1][0] / 1000
+    total_candles = min(len(data_15m[s]) for s in BACKTEST_SYMBOLS)
+    first_ts = data_15m[BACKTEST_SYMBOLS[0]][0][0] / 1000
+    last_ts = data_15m[BACKTEST_SYMBOLS[0]][-1][0] / 1000
     duration_days = (last_ts - first_ts) / 86400.0
 
     start_date_str = datetime.datetime.fromtimestamp(first_ts).strftime("%Y-%m-%d %H:%M")
     end_date_str = datetime.datetime.fromtimestamp(last_ts).strftime("%Y-%m-%d %H:%M")
 
-    for i in range(80, total_candles):
-        # 1. Jika ada posisi aktif, update & pantau candle koin tersebut
+    sl_pct = config.SL_PERCENT          # 1.00%
+    tp_pct = config.TP_PERCENT          # 2.00%
+    bep_trig_pct = config.BEP_PROFIT_TRIGGER  # 1.75%
+    bep_lock_pct = config.BEP_LOCK_PROFIT    # 0.30%
+
+    for i in range(30, total_candles):
+        # 1. Jika ada posisi aktif, update & pantau candle koin tersebut di 15m
         if active_pos is not None:
             sym = active_pos["symbol"]
-            c = klines_data[sym][i]
+            c = data_15m[sym][i]
             c_time, c_open, c_high, c_low, c_close, c_vol = c
 
             side = active_pos["side"]
@@ -131,32 +134,28 @@ def run_portfolio_simulation(klines_data: Dict[str, List[List[float]]]) -> Tuple
             tp_p = active_pos["tp_price"]
             notional = active_pos["notional"]
 
-            # Cek aktivasi BEP (+0.70% / 1R)
+            # Cek aktivasi BEP (+1.75%)
             if not active_pos["bep_activated"]:
                 hit_bep = (c_high >= active_pos["bep_trigger_price"]) if side == "BUY" else (c_low <= active_pos["bep_trigger_price"])
                 if hit_bep:
-                    bep_lock = config.BEP_LOCK_PROFIT  # +0.15%
-                    new_sl = entry_p * (1.0 + bep_lock) if side == "BUY" else entry_p * (1.0 - bep_lock)
+                    new_sl = entry_p * (1.0 + bep_lock_pct) if side == "BUY" else entry_p * (1.0 - bep_lock_pct)
                     active_pos["sl_price"] = new_sl
                     active_pos["bep_activated"] = True
                     sl_p = new_sl
 
             # Cek Stop Loss / BEP Hit
             hit_sl = (c_low <= sl_p) if side == "BUY" else (c_high >= sl_p)
-            # Cek Take Profit Hit (RR 1:2.0 / +1.40%)
+            # Cek Take Profit Hit (RR 1:2.0 / +2.00%)
             hit_tp = (c_high >= tp_p) if side == "BUY" else (c_low <= tp_p)
 
-            # Jika candle sangat volatil menyentuh kedua target, konservatif: anggap kena SL/BEP
             if hit_tp and hit_sl:
-                hit_tp = False
+                hit_tp = False  # Konservatif
 
             if hit_tp:
                 exit_p = tp_p
                 gross_pct = (exit_p - entry_p) / entry_p if side == "BUY" else (entry_p - exit_p) / entry_p
-                # Fee: Maker Entry (0.02%) + Maker TP Exit (0.02%) = 0.04%
-                fee_rate = 0.0004
-                net_pct = gross_pct - fee_rate
-                net_pnl = net_pct * notional
+                fee_rate = 0.0004  # Maker in + Maker out
+                net_pnl = (gross_pct - fee_rate) * notional
 
                 wallet += net_pnl
                 trades.append({
@@ -170,7 +169,7 @@ def run_portfolio_simulation(klines_data: Dict[str, List[List[float]]]) -> Tuple
                     "fee_usd": round(fee_rate * notional, 4),
                     "net_pnl": round(net_pnl, 4),
                     "result": "WIN",
-                    "reason": "TAKE_PROFIT_1:2",
+                    "reason": "TAKE_PROFIT_2%",
                     "margin": active_pos["margin"],
                     "wallet_after": round(wallet, 4)
                 })
@@ -179,10 +178,8 @@ def run_portfolio_simulation(klines_data: Dict[str, List[List[float]]]) -> Tuple
             elif hit_sl:
                 exit_p = sl_p
                 gross_pct = (exit_p - entry_p) / entry_p if side == "BUY" else (entry_p - exit_p) / entry_p
-                # Fee: Maker Entry (0.02%) + Taker SL/BEP Exit (0.05%) = 0.07%
-                fee_rate = 0.0007
-                net_pct = gross_pct - fee_rate
-                net_pnl = net_pct * notional
+                fee_rate = 0.0007  # Maker in + Taker out
+                net_pnl = (gross_pct - fee_rate) * notional
 
                 res = "WIN" if net_pnl >= 0.0 else "LOSS"
                 reason = "BEP_LOCK_PROFIT" if active_pos["bep_activated"] else "STOP_LOSS_1R"
@@ -205,7 +202,6 @@ def run_portfolio_simulation(klines_data: Dict[str, List[List[float]]]) -> Tuple
                 })
                 active_pos = None
 
-            # Update Peak & Max Drawdown
             if wallet > peak_wallet:
                 peak_wallet = wallet
             dd_usd = peak_wallet - wallet
@@ -218,20 +214,20 @@ def run_portfolio_simulation(klines_data: Dict[str, List[List[float]]]) -> Tuple
 
         # 2. Jika tidak ada posisi aktif, bot memindai koin secara bergilir (rotasi)
         for sym in BACKTEST_SYMBOLS:
-            klines = klines_data[sym]
-            c = klines[i]
-            c_time, c_open, c_high, c_low, c_close, c_vol = c
+            w_15m = data_15m[sym][:i+1]
+            h_idx = (i + 1) // 4
+            w_1h = data_1h[sym][:h_idx+1]
+            m_idx = (i + 1) // 16
+            w_4h = data_4h[sym][:m_idx+1]
 
-            ltf_window = klines[:i+1]
-            htf_window = aggregate_htf(ltf_window, factor=3)
-
-            if len(htf_window) < 25:
+            if len(w_1h) < 15:
                 continue
 
             analysis = strategy.analyze_coin_comprehensive(
                 symbol=sym,
-                ohlcv_htf=htf_window,
-                ohlcv_ltf=ltf_window,
+                ohlcv_htf=w_1h,
+                ohlcv_ltf=w_15m,
+                ohlcv_macro=w_4h if len(w_4h) >= 8 else None,
                 derivatives_data=None,
                 available_capital=wallet,
                 leverage=config.LEVERAGE,
@@ -241,30 +237,26 @@ def run_portfolio_simulation(klines_data: Dict[str, List[List[float]]]) -> Tuple
             sig = analysis.get("signal")
             if sig and sig.get("score", 0) >= config.MIN_SETUP_SCORE:
                 side = sig["side"]
-                entry_p = c_close
+                entry_p = w_15m[-1][4]
 
-                # Alokasi Margin: Tepat 1.0% dari Total Saldo Portofolio (Compounding)
-                margin = wallet * MARGIN_PERCENT
-                lev = 50
+                # Alokasi Margin Mikro: Tepat $1.00 (saldo < $100) atau 1.0% Compounding
+                margin = config.FIXED_MARGIN_LOW_BALANCE if wallet < config.BALANCE_THRESHOLD_SCALING else (wallet * config.RISK_PORTFOLIO_PERCENT)
+                lev = config.LEVERAGE
                 notional = margin * lev
                 qty = notional / entry_p
 
-                sl_dist = entry_p * config.SL_PERCENT
-                tp_dist = entry_p * config.TP_PERCENT
-                bep_trigger_dist = entry_p * config.BEP_PROFIT_TRIGGER
-
-                sl_p = entry_p - sl_dist if side == "BUY" else entry_p + sl_dist
-                tp_p = entry_p + tp_dist if side == "BUY" else entry_p - tp_dist
-                bep_trigger_p = entry_p + bep_trigger_dist if side == "BUY" else entry_p - bep_trigger_dist
+                sl_dist = entry_p * sl_pct
+                tp_dist = entry_p * tp_pct
+                bep_trigger_dist = entry_p * bep_trig_pct
 
                 active_pos = {
                     "symbol": sym,
                     "side": side,
-                    "entry_time": c_time / 1000,
+                    "entry_time": w_15m[-1][0] / 1000,
                     "entry_price": entry_p,
-                    "sl_price": sl_p,
-                    "tp_price": tp_p,
-                    "bep_trigger_price": bep_trigger_p,
+                    "sl_price": entry_p - sl_dist if side == "BUY" else entry_p + sl_dist,
+                    "tp_price": entry_p + tp_dist if side == "BUY" else entry_p - tp_dist,
+                    "bep_trigger_price": entry_p + bep_trigger_dist if side == "BUY" else entry_p - bep_trigger_dist,
                     "bep_activated": False,
                     "margin": margin,
                     "notional": notional,
@@ -272,7 +264,7 @@ def run_portfolio_simulation(klines_data: Dict[str, List[List[float]]]) -> Tuple
                     "score": sig.get("score", 0),
                     "setup_name": sig.get("setup_name", "")
                 }
-                break  # Satu posisi diambil, bot fokus mengelola posisi ini
+                break
 
     meta = {
         "start_date": start_date_str,
@@ -290,66 +282,76 @@ def run_all_symbols_independent(klines_data: Dict[str, List[List[float]]]) -> Di
     Simulasi Independen per Koin untuk Validitas Statistik Strategi:
     Mengukur performa murni strategi di setiap koin jika seluruh sinyal dieksekusi.
     """
+    data_15m = {sym: aggregate_candles(klines_data[sym], factor=3) for sym in BACKTEST_SYMBOLS}
+    data_1h = {sym: aggregate_candles(klines_data[sym], factor=12) for sym in BACKTEST_SYMBOLS}
+    data_4h = {sym: aggregate_candles(klines_data[sym], factor=48) for sym in BACKTEST_SYMBOLS}
+
     coin_stats: Dict[str, Dict[str, Any]] = {}
     all_trades: List[Dict[str, Any]] = []
 
+    sl_pct = config.SL_PERCENT
+    tp_pct = config.TP_PERCENT
+    bep_trig_pct = config.BEP_PROFIT_TRIGGER
+    bep_lock_pct = config.BEP_LOCK_PROFIT
+
     for sym in BACKTEST_SYMBOLS:
-        klines = klines_data[sym]
+        kl_15m = data_15m[sym]
+        kl_1h = data_1h[sym]
+        kl_4h = data_4h[sym]
         in_pos = False
         pos: Dict[str, Any] = {}
         sym_trades: List[Dict[str, Any]] = []
 
-        for i in range(80, len(klines)):
-            c = klines[i]
+        for i in range(30, len(kl_15m)):
+            c = kl_15m[i]
             c_time, c_open, c_high, c_low, c_close, c_vol = c
 
             if not in_pos:
-                ltf = klines[:i+1]
-                htf = aggregate_htf(ltf, factor=3)
-                if len(htf) < 25:
+                w_15m = kl_15m[:i+1]
+                h_idx = (i + 1) // 4
+                w_1h = kl_1h[:h_idx+1]
+                m_idx = (i + 1) // 16
+                w_4h = kl_4h[:m_idx+1]
+
+                if len(w_1h) < 15:
                     continue
 
                 analysis = strategy.analyze_coin_comprehensive(
-                    symbol=sym, ohlcv_htf=htf, ohlcv_ltf=ltf, derivatives_data=None,
-                    available_capital=INITIAL_CAPITAL, leverage=50, max_symbol_leverage=50
+                    symbol=sym, ohlcv_htf=w_1h, ohlcv_ltf=w_15m,
+                    ohlcv_macro=w_4h if len(w_4h) >= 8 else None,
+                    derivatives_data=None, available_capital=INITIAL_CAPITAL,
+                    leverage=50, max_symbol_leverage=50
                 )
                 sig = analysis.get("signal")
                 if sig and sig.get("score", 0) >= config.MIN_SETUP_SCORE:
                     side = sig["side"]
                     entry_p = c_close
-                    margin = INITIAL_CAPITAL * MARGIN_PERCENT
-                    notional = margin * 50
-
-                    sl_dist = entry_p * config.SL_PERCENT
-                    tp_dist = entry_p * config.TP_PERCENT
-                    bep_dist = entry_p * config.BEP_PROFIT_TRIGGER
+                    notional = 50.0
 
                     pos = {
                         "side": side,
                         "entry_p": entry_p,
-                        "sl_p": entry_p - sl_dist if side == "BUY" else entry_p + sl_dist,
-                        "tp_p": entry_p + tp_dist if side == "BUY" else entry_p - tp_dist,
-                        "bep_trigger_p": entry_p + bep_dist if side == "BUY" else entry_p - bep_dist,
-                        "bep_activated": False,
+                        "sl_p": entry_p * (1 - sl_pct) if side == "BUY" else entry_p * (1 + sl_pct),
+                        "tp_p": entry_p * (1 + tp_pct) if side == "BUY" else entry_p * (1 - tp_pct),
+                        "bep_trig": entry_p * (1 + bep_trig_pct) if side == "BUY" else entry_p * (1 - bep_trig_pct),
+                        "bep_act": False,
                         "notional": notional
                     }
                     in_pos = True
                 continue
 
-            # In position
             side = pos["side"]
             entry_p = pos["entry_p"]
             sl_p = pos["sl_p"]
             tp_p = pos["tp_p"]
             notional = pos["notional"]
 
-            if not pos["bep_activated"]:
-                hit_bep = (c_high >= pos["bep_trigger_p"]) if side == "BUY" else (c_low <= pos["bep_trigger_p"])
+            if not pos["bep_act"]:
+                hit_bep = (c_high >= pos["bep_trig"]) if side == "BUY" else (c_low <= pos["bep_trig"])
                 if hit_bep:
-                    bep_lock = config.BEP_LOCK_PROFIT
-                    new_sl = entry_p * (1.0 + bep_lock) if side == "BUY" else entry_p * (1.0 - bep_lock)
+                    new_sl = entry_p * (1.0 + bep_lock_pct) if side == "BUY" else entry_p * (1.0 - bep_lock_pct)
                     pos["sl_p"] = new_sl
-                    pos["bep_activated"] = True
+                    pos["bep_act"] = True
                     sl_p = new_sl
 
             hit_sl = (c_low <= sl_p) if side == "BUY" else (c_high >= sl_p)
@@ -362,7 +364,7 @@ def run_all_symbols_independent(klines_data: Dict[str, List[List[float]]]) -> Di
                 exit_p = tp_p
                 gross_pct = (exit_p - entry_p) / entry_p if side == "BUY" else (entry_p - exit_p) / entry_p
                 net_pnl = (gross_pct - 0.0004) * notional
-                trade = {"symbol": sym, "result": "WIN", "reason": "TP_1:2", "net_pnl": net_pnl}
+                trade = {"symbol": sym, "result": "WIN", "reason": "TP_2%", "net_pnl": net_pnl}
                 sym_trades.append(trade)
                 all_trades.append(trade)
                 in_pos = False
@@ -372,14 +374,14 @@ def run_all_symbols_independent(klines_data: Dict[str, List[List[float]]]) -> Di
                 gross_pct = (exit_p - entry_p) / entry_p if side == "BUY" else (entry_p - exit_p) / entry_p
                 net_pnl = (gross_pct - 0.0007) * notional
                 res = "WIN" if net_pnl >= 0 else "LOSS"
-                reason = "BEP_LOCK" if pos["bep_activated"] else "STOP_LOSS"
+                reason = "BEP_LOCK" if pos["bep_act"] else "STOP_LOSS"
                 trade = {"symbol": sym, "result": res, "reason": reason, "net_pnl": net_pnl}
                 sym_trades.append(trade)
                 all_trades.append(trade)
                 in_pos = False
 
         wins = [t for t in sym_trades if t["result"] == "WIN"]
-        tps = [t for t in sym_trades if t["reason"] == "TP_1:2"]
+        tps = [t for t in sym_trades if t["reason"] == "TP_2%"]
         beps = [t for t in sym_trades if t["reason"] == "BEP_LOCK"]
         losses = [t for t in sym_trades if t["result"] == "LOSS"]
         total = len(sym_trades)
@@ -401,7 +403,7 @@ def print_final_report(final_wallet: float, trades: List[Dict[str, Any]], meta: 
     total = len(trades)
     wins = [t for t in trades if t["result"] == "WIN"]
     losses = [t for t in trades if t["result"] == "LOSS"]
-    tp_wins = [t for t in trades if t["reason"] == "TAKE_PROFIT_1:2"]
+    tp_wins = [t for t in trades if t["reason"] == "TAKE_PROFIT_2%"]
     bep_wins = [t for t in trades if t["reason"] == "BEP_LOCK_PROFIT"]
 
     win_rate = (len(wins) / total) * 100 if total > 0 else 0.0
@@ -418,12 +420,11 @@ def print_final_report(final_wallet: float, trades: List[Dict[str, Any]], meta: 
 
     console.print("\n")
     console.print("[bold cyan]========================================================================================[/bold cyan]")
-    console.print("[bold yellow]            HASIL BACKTEST RESMI & REALISTIS - BINANCE FUTURES SCALPER           [/bold yellow]")
+    console.print("[bold yellow]      HASIL BACKTEST MULTI-TIMEFRAME (15m Eksekusi / 1h S&R / 4h Makro) - KALIMASADA    [/bold yellow]")
     console.print(f"[bold white]           Periode Data: {meta['start_date']} s/d {meta['end_date']} (~{meta['duration_days']:.1f} Hari)[/bold white]")
     console.print("[bold cyan]========================================================================================[/bold cyan]\n")
 
-    # Tabel 1: Portofolio Akun Riil (1 Bot Mengelola 1 Posisi)
-    t1 = Table(title=f"1. SIMULASI PORTOFOLIO (Modal ${INITIAL_CAPITAL:.2f} | Margin {MARGIN_PERCENT*100:.1f}% Compounding | 1 Posisi Aktif)", show_header=True, header_style="bold magenta", box=box.ASCII)
+    t1 = Table(title=f"1. SIMULASI PORTOFOLIO (Modal ${INITIAL_CAPITAL:.2f} | 1 Posisi Aktif | RRR 1:2.00)", show_header=True, header_style="bold magenta", box=box.ASCII)
     t1.add_column("Parameter / Metrik", style="cyan", width=38)
     t1.add_column("Nilai Realistis (Setelah Fee Bursa)", style="bold white", width=34)
 
@@ -435,18 +436,17 @@ def print_final_report(final_wallet: float, trades: List[Dict[str, Any]], meta: 
     t1.add_row("Total Posisi Dibuka", f"{total} posisi")
     t1.add_row("Frekuensi Rata-rata per Hari", f"{total / meta['duration_days']:.1f} posisi / hari")
     t1.add_row("Total Menang (Winning Trades)", f"{len(wins)} posisi ({win_rate:.1f}%)")
-    t1.add_row(" - Full TP Hit (+1.40% / RR 1:2.0)", f"{len(tp_wins)} posisi ({pure_tp_wr:.1f}%)")
-    t1.add_row(" - BEP Profit Lock (+0.15%)", f"{len(bep_wins)} posisi (Semua Fee Tertutup + Untung Bersih)")
-    t1.add_row("Total Kalah (Kena SL -0.70%)", f"{len(losses)} posisi ({(len(losses)/total*100):.1f}%)" if total > 0 else "0")
+    t1.add_row(" - Full TP Hit (+2.00% / RR 1:2.0)", f"{len(tp_wins)} posisi ({pure_tp_wr:.1f}%)")
+    t1.add_row(" - BEP Profit Lock (+0.30%)", f"{len(bep_wins)} posisi (Fee Tertutup + Cuan Aman)")
+    t1.add_row("Total Kalah (Kena SL -1.00%)", f"{len(losses)} posisi ({(len(losses)/total*100):.1f}%)" if total > 0 else "0")
     t1.add_row("Win Rate Total (TP + BEP Lock)", f"[{color_pnl}]{win_rate:.1f}%[/{color_pnl}]")
     t1.add_row("Profit Factor", f"{profit_factor:.2f}")
     t1.add_row("Rata-rata Cuan per Win", f"+${avg_win:.4f} USDT")
     t1.add_row("Rata-rata Minus per Loss", f"-${avg_loss:.4f} USDT")
     t1.add_row("Max Drawdown Terbesar", f"${meta['max_dd_usd']:.4f} ({meta['max_dd_pct']:.2f}%)")
-    t1.add_row("Rasio Risk-to-Reward Riil", "1 : 2.00 Harga (+1.40% / -0.70%) | 1 : 1.77 Net Fee")
+    t1.add_row("Rasio Risk-to-Reward Riil", "1 : 2.00 (+2.00% TP / -1.00% SL) | 1 : 1.83 Net Fee")
     console.print(t1)
 
-    # Tabel 2: Detail Transaksi Eksekusi Akun Riil
     if trades:
         console.print("\n")
         t2 = Table(title="2. LOG EKSEKUSI RIIL AKUN (Posisi demi Posisi)", show_header=True, header_style="bold yellow", box=box.ASCII)
@@ -476,14 +476,13 @@ def print_final_report(final_wallet: float, trades: List[Dict[str, Any]], meta: 
             )
         console.print(t2)
 
-    # Tabel 3: Statistik Uji Validitas Strategi 15 Koin Independen
     console.print("\n")
     t3 = Table(title="3. VALIDITAS STATISTIK STRATEGI (15 Koin Likuid Binance Futures)", show_header=True, header_style="bold green", box=box.ASCII)
     t3.add_column("Simbol Koin", style="cyan", width=12)
     t3.add_column("Total Sinyal", width=12)
-    t3.add_column("Full TP (+1.40%)", width=16)
-    t3.add_column("BEP Lock (+0.15%)", width=16)
-    t3.add_column("Kena SL (-0.70%)", width=16)
+    t3.add_column("Full TP (+2.00%)", width=16)
+    t3.add_column("BEP Lock (+0.30%)", width=16)
+    t3.add_column("Kena SL (-1.00%)", width=16)
     t3.add_column("Win Rate (%)", width=14)
     t3.add_column("Net PnL ($)", width=14)
 
@@ -530,10 +529,10 @@ def print_final_report(final_wallet: float, trades: List[Dict[str, Any]], meta: 
     console.print("\n")
 
 def main():
-    console.print("[bold cyan]Memuat data klines dan menjalankan backtest realistis di localhost...[/bold cyan]")
+    console.print("[bold cyan]Memuat data klines dan menjalankan backtest multi-timeframe di localhost...[/bold cyan]")
     klines_data = load_or_fetch_klines()
 
-    console.print("[bold yellow]Menjalankan Simulasi 1: Akun Riil Portofolio (1 Bot, Modal $11.11, 1 Posisi Aktif)...[/bold yellow]")
+    console.print("[bold yellow]Menjalankan Simulasi 1: Akun Riil Portofolio (15m Eksekusi / 1h S&R / 4h Makro)...[/bold yellow]")
     final_wallet, trades, meta = run_portfolio_simulation(klines_data)
 
     console.print("[bold yellow]Menjalankan Simulasi 2: Uji Validitas Statistik Multi-Koin...[/bold yellow]")
