@@ -512,13 +512,13 @@ class BinanceScalper:
             bal = self.get_futures_balance()
             cap = bal["available"] if bal["available"] >= 1.0 else config.DEFAULT_CAPITAL
 
-            # 1. Fetch Multi-Timeframe Kalimasada: 4h untuk Tren Makro, 1h untuk Struktur & S&R, 15m untuk Eksekusi Scalp
-            ohlcv_4h = self.client.fetch_klines(sym, interval=config.MACRO_TIMEFRAME, limit=250)
-            time.sleep(0.05)
-            ohlcv_1h = self.client.fetch_klines(sym, interval=config.STRUCTURE_TIMEFRAME, limit=500)
-            time.sleep(0.05)
+            # 1. Fetch Multi-Timeframe Kalimasada: 4h untuk Tren Makro, 1h untuk Struktur & S&R, 15m untuk Eksekusi Scalp (1000 Candle Murni Tanpa Noise)
+            ohlcv_4h = self.client.fetch_klines(sym, interval=config.MACRO_TIMEFRAME, limit=config.CANDLE_LIMIT)
+            time.sleep(0.06)
+            ohlcv_1h = self.client.fetch_klines(sym, interval=config.STRUCTURE_TIMEFRAME, limit=config.CANDLE_LIMIT)
+            time.sleep(0.06)
             ohlcv_15m = self.client.fetch_klines(sym, interval=config.TIMEFRAME, limit=config.CANDLE_LIMIT)
-            time.sleep(0.05)
+            time.sleep(0.06)
             deriv_data = self.client.fetch_derivatives_data(sym, period="15m")
 
             if not ohlcv_15m or len(ohlcv_15m) < 25:

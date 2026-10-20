@@ -436,15 +436,15 @@ def print_final_report(final_wallet: float, trades: List[Dict[str, Any]], meta: 
     t1.add_row("Total Posisi Dibuka", f"{total} posisi")
     t1.add_row("Frekuensi Rata-rata per Hari", f"{total / meta['duration_days']:.1f} posisi / hari")
     t1.add_row("Total Menang (Winning Trades)", f"{len(wins)} posisi ({win_rate:.1f}%)")
-    t1.add_row(" - Full TP Hit (+2.00% / RR 1:2.0)", f"{len(tp_wins)} posisi ({pure_tp_wr:.1f}%)")
-    t1.add_row(" - BEP Profit Lock (+0.30%)", f"{len(bep_wins)} posisi (Fee Tertutup + Cuan Aman)")
+    t1.add_row(" - Full TP Hit (+2.18% / RR Net 1:2.0)", f"{len(tp_wins)} posisi ({pure_tp_wr:.1f}%)")
+    t1.add_row(" - BEP Profit Lock (+0.35%)", f"{len(bep_wins)} posisi (Fee Tertutup + Cuan Aman)")
     t1.add_row("Total Kalah (Kena SL -1.00%)", f"{len(losses)} posisi ({(len(losses)/total*100):.1f}%)" if total > 0 else "0")
     t1.add_row("Win Rate Total (TP + BEP Lock)", f"[{color_pnl}]{win_rate:.1f}%[/{color_pnl}]")
     t1.add_row("Profit Factor", f"{profit_factor:.2f}")
     t1.add_row("Rata-rata Cuan per Win", f"+${avg_win:.4f} USDT")
     t1.add_row("Rata-rata Minus per Loss", f"-${avg_loss:.4f} USDT")
     t1.add_row("Max Drawdown Terbesar", f"${meta['max_dd_usd']:.4f} ({meta['max_dd_pct']:.2f}%)")
-    t1.add_row("Rasio Risk-to-Reward Riil", "1 : 2.00 (+2.00% TP / -1.00% SL) | 1 : 1.83 Net Fee")
+    t1.add_row("Rasio Risk-to-Reward Riil", "1 : 2.00 Net Dompet (+2.18% TP / -1.00% SL -> Tepat 1:2.00 Net Fee)")
     console.print(t1)
 
     if trades:

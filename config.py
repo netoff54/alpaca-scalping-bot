@@ -62,12 +62,15 @@ class BotConfig:
     RSI_PERIOD: int = 14                   # Relative Strength Index (Poin 7 Kalimasada)
     VOLUME_SPIKE_FACTOR: float = 1.15      # Konfirmasi volume transaksi >= 115% rata-rata
 
-    # --- Risk / Reward Ratio Presisi Dollar 1:2 Riil (SL 1.00% -> Net -$0.53 & TP 2.00% -> Net +$0.98) ---
-    SL_PERCENT: float = 0.0100             # Stop Loss 1.00% (1R Risiko pada timeframe 15m)
-    TP_PERCENT: float = 0.0200             # Take Profit 2.00% (2R Untung Tepat 2x $SL pada timeframe 15m)
-    RR_RATIO: float = 2.00                 # Rasio Risk-to-Reward 1:2 Murni Seimbang
-    BEP_PROFIT_TRIGGER: float = 0.0175     # Saat profit mencapai 1.75% (memberi ruang napas penuh bagi trade mencapai TP 2.00%)
-    BEP_LOCK_PROFIT: float = 0.0030        # Kunci profit +0.30% (Menutup 100% fee bursa 0.08% + garansi cuan aman jika membalik di pucuk)
+    # --- Risk / Reward Ratio Presisi Dollar 1:2 NET Riil (Sudah Ditambahkan Seluruh Fee Bursa) ---
+    # Fee Loss: Maker Entry 0.02% + Taker SL 0.05% = 0.07% -> Net Loss = 1.00% + 0.07% = 1.07% (-$0.5350 pada notional $50)
+    # Fee Win: Maker Entry 0.02% + Maker TP 0.02% = 0.04% -> Gross TP 2.18% - 0.04% = Net Win 2.14% (+$1.0700 pada notional $50)
+    # Rasio Dolar Bersih Riil Dompet: +$1.0700 / $0.5350 = TEPAT 1 : 2.00 NET
+    SL_PERCENT: float = 0.0100             # Stop Loss 1.00% (Gross 1.00% + Fee 0.07% = Net Loss 1.07% / 1R Risiko)
+    TP_PERCENT: float = 0.0218             # Take Profit 2.18% (Gross 2.18% - Fee 0.04% = Net Win 2.14% / Tepat 2x Net Loss 1.07%)
+    RR_RATIO: float = 2.00                 # Rasio Risk-to-Reward 1:2.00 Net Bersih Sempurna Setelah Seluruh Biaya Transaksi
+    BEP_PROFIT_TRIGGER: float = 0.0180     # Pemicu BEP saat profit mencapai 1.80% (memberi ruang napas penuh bagi trade menuju TP 2.18%)
+    BEP_LOCK_PROFIT: float = 0.0035        # Kunci profit +0.35% (Menutup 100% fee bursa 0.07% + garansi cuan aman bersih > $0.14)
     MAX_SPREAD_PERCENT: float = 0.0008     # Batas maksimal spread bid-ask 0.08% (Anti-Slippage & Anti-Illiquid Books)
     MAKER_FEE_RATE: float = 0.0002         # 0.02% maker fee pada Binance Futures
 
