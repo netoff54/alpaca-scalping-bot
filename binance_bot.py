@@ -221,25 +221,27 @@ class BinanceScalper:
                 }
                 return self.active_position
             else:
-                # 1. PEMBERSIH OTOMATIS: Jika posisi terbuka di bursa sudah 0, pastikan TIDAK ADA order pemicu yang tertinggal/menggantung!
-                if not self.client.is_banned():
-                    try:
-                        dangling_algos = self.client.fetch_open_algo_orders()
-                        if dangling_algos:
-                            for d_order in dangling_algos:
-                                d_sym = d_order.get("symbol")
-                                if d_sym:
-                                    console.log(f"[bold yellow]🧹 Membersihkan pesanan bersyarat menggantung pada {d_sym} karena posisi terbuka sudah 0.[/bold yellow]")
-                                    self.client.cancel_all_open_orders(d_sym)
-                    except Exception as e_clean:
-                        pass
+                # 1. PEMBERSIH OTOMATIS INSTAN: Jika posisi terbuka di bursa sudah 0, pastikan TIDAK ADA order pemicu yang tertinggal/menggantung!
+                try:
+                    dangling_algos = self.client.fetch_open_algo_orders()
+                    if dangling_algos:
+                        for d_order in dangling_algos:
+                            d_sym = d_order.get("symbol")
+                            d_id = d_order.get("algoId")
+                            if d_sym:
+                                console.log(f"[bold yellow]🧹 Membersihkan pesanan bersyarat menggantung pada {d_sym} (Algo ID: {d_id}) karena posisi terbuka sudah 0.[/bold yellow]")
+                                self.client.cancel_all_open_orders(d_sym)
+                                self.client.cancel_all_algo_orders(d_sym)
+                except Exception as e_clean:
+                    pass
 
                 # 2. Rekam posisi yang baru saja tertutup
-                if not self.client.is_banned() and self.active_position is not None:
+                if self.active_position is not None:
                     closed_pos = self.active_position
                     sym = closed_pos.get("symbol")
                     console.log(f"[bold yellow]Posisi {sym} telah selesai/tertutup di Binance (Eksekusi Native Stop Loss / Take Profit / BEP Bursa).[/bold yellow]")
                     self.client.cancel_all_open_orders(sym)
+                    self.client.cancel_all_algo_orders(sym)
                     
                     entry_p = float(closed_pos.get("entry_price", 0.0))
                     exit_hint = float(closed_pos.get("tp_price", entry_p))
@@ -1022,6 +1024,7 @@ class BinanceScalper:
                 # Batalkan Native SL yang masih terpasang di Binance agar tidak tereksekusi ganda
                 try:
                     self.client.cancel_all_open_orders(symbol)
+                    self.client.cancel_all_algo_orders(symbol)
                 except Exception as e_c:
                     console.log(f"[dim]Cancel native SL saat TP: {e_c}[/dim]")
 
@@ -1046,6 +1049,7 @@ class BinanceScalper:
                 console.log(f"[bold {color}]{tag}! ({pnl_pct*100:+.2f}%, PnL: ${pnl_usd:+.2f}) pada {symbol}[/bold {color}]")
                 try:
                     self.client.cancel_all_open_orders(symbol)
+                    self.client.cancel_all_algo_orders(symbol)
                 except Exception:
                     pass
 

@@ -256,12 +256,9 @@ def binance_all_orders(symbol: str, limit: int = 15):
     }
 
 @app.get("/clean-algo-orders")
-def clean_algo_orders(symbol: str = "BTCUSDT"):
-    """Membersihkan pesanan algo uji coba untuk simbol tertentu."""
-    url_algo = f"{scalper.client.base_url}/fapi/v1/algoOpenOrders"
-    params = scalper.client._sign({"symbol": symbol})
-    resp = scalper.client.session.delete(url_algo, params=params, timeout=10)
-    return resp.json()
+def clean_algo_orders(symbol: Optional[str] = None):
+    """Membersihkan pesanan algo uji coba untuk simbol tertentu atau seluruh simbol di akun."""
+    return scalper.client.cancel_all_algo_orders(symbol)
 
 @app.get("/binance-position-side")
 def binance_position_side():

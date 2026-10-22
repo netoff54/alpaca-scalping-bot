@@ -55,13 +55,13 @@ class BinanceFuturesClient:
                 try:
                     w = int(used_weight)
                     self.current_weight_1m = w
-                    # HANYA throttle scanner jika weight benar-benar mendekati limit 2400 (misal >= 2320)
+                    # HANYA throttle scanner jika weight mendekati batas aman 2400 (gunakan threshold aman 1500)
                     # JANGAN set self.ban_until di sini, agar order eksekusi (weight 1) tetap dapat berjalan lancar!
-                    if w >= 2320:
-                        self.scan_throttle_until = max(self.scan_throttle_until, now + 6.0)
+                    if w >= 1500:
+                        self.scan_throttle_until = max(self.scan_throttle_until, now + 10.0)
                         if now - self._last_ban_log_time > 20:
                             self._last_ban_log_time = now
-                            console.log(f"[bold yellow]Request weight IP bursa tinggi ({w}/2400). Scanner melambat 6s agar weight turun...[/bold yellow]")
+                            console.log(f"[bold yellow]Request weight IP bursa mendekati batas aman ({w}/2400). Scanner melambat 10s agar weight turun...[/bold yellow]")
                 except Exception:
                     pass
 
@@ -580,8 +580,7 @@ class BinanceFuturesClient:
         return data if isinstance(data, dict) else {}
 
     def cancel_order(self, symbol: str, order_id: Any) -> Dict[str, Any]:
-        if self.is_banned():
-            return {}
+        # Pembatalan order darurat WAJIB selalu diproses untuk perlindungan modal maksimal
         # 1. Coba batalkan order reguler di /fapi/v1/order
         url = f"{self.base_url}/fapi/v1/order"
         params = self._sign({"symbol": symbol, "orderId": order_id})
@@ -689,8 +688,6 @@ class BinanceFuturesClient:
 
     def cancel_all_open_orders(self, symbol: str) -> Dict[str, Any]:
         """Membatalkan seluruh order aktif pada koin (pesanan limit biasa & seluruh algo SL/TP)."""
-        if self.is_banned():
-            return {}
         res = {}
         # 1. Batalkan pesanan reguler (Limit / Market)
         try:
@@ -698,7 +695,7 @@ class BinanceFuturesClient:
             params = self._sign({"symbol": symbol})
             resp = self.session.delete(url, params=params, timeout=10)
             self.check_response_for_ban(resp)
-            res = resp.json()
+            res = resp.json() if resp.status_code == 200 else {}
         except Exception as e:
             console.log(f"[dim]Notice cancel regular orders {symbol}: {e}[/dim]")
             
@@ -715,8 +712,6 @@ class BinanceFuturesClient:
 
     def fetch_open_algo_orders(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
         """Mengambil seluruh pesanan Algo pemicu (STOP_MARKET & TAKE_PROFIT_MARKET) yang sedang aktif di Binance."""
-        if self.is_banned():
-            return []
         try:
             url = f"{self.base_url}/fapi/v1/openAlgoOrders"
             params = {"symbol": symbol} if symbol else {}
@@ -731,15 +726,39 @@ class BinanceFuturesClient:
 
     def cancel_all_algo_orders(self, symbol: Optional[str] = None) -> Dict[str, Any]:
         """Membersihkan seluruh pesanan Algo pemicu yang menggantung di Binance."""
-        if self.is_banned():
-            return {}
         try:
-            url = f"{self.base_url}/fapi/v1/algoOpenOrders"
-            params = {"symbol": symbol} if symbol else {}
-            signed = self._sign(params)
-            resp = self.session.delete(url, params=signed, timeout=10)
-            self.check_response_for_ban(resp)
-            return resp.json() if resp.status_code == 200 else {}
+            if symbol:
+                url = f"{self.base_url}/fapi/v1/algoOpenOrders"
+                params = self._sign({"symbol": symbol})
+                resp = self.session.delete(url, params=params, timeout=10)
+                self.check_response_for_ban(resp)
+                return resp.json() if resp.status_code == 200 else {}
+            else:
+                # Sapu seluruh pesanan algo terbuka lintas simbol jika tidak ada simbol spesifik
+                open_algos = self.fetch_open_algo_orders()
+                cleaned_count = 0
+                symbols_seen = set()
+                for o in open_algos:
+                    s = o.get("symbol")
+                    a_id = o.get("algoId")
+                    if s and a_id:
+                        try:
+                            u_del = f"{self.base_url}/fapi/v1/algoOrder"
+                            p_del = self._sign({"symbol": s, "algoId": a_id})
+                            self.session.delete(u_del, params=p_del, timeout=5)
+                            cleaned_count += 1
+                        except Exception:
+                            pass
+                    if s:
+                        symbols_seen.add(s)
+                for s in symbols_seen:
+                    try:
+                        u_s = f"{self.base_url}/fapi/v1/algoOpenOrders"
+                        p_s = self._sign({"symbol": s})
+                        self.session.delete(u_s, params=p_s, timeout=5)
+                    except Exception:
+                        pass
+                return {"status": "success", "cleaned_orders_count": cleaned_count, "symbols": list(symbols_seen)}
         except Exception as e:
             console.log(f"[dim]Notice cancel all algo orders: {e}[/dim]")
             return {}
