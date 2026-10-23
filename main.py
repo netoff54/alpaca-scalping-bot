@@ -398,9 +398,18 @@ def health_check():
             "resumes_at": time.strftime("%Y-%m-%d %H:%M:%S WIB", time.gmtime(scalper.client.ban_until + 7 * 3600)) if scalper.client.is_banned() else "READY",
             "seconds_left": max(0, int(scalper.client.ban_until - time.time())) if scalper.client.is_banned() else 0
         }
+        ws_mgr = getattr(scalper.client, "ws_manager", None)
+        ws_info = {
+            "status": "LIVE_STREAMING" if (ws_mgr and ws_mgr.is_alive()) else "CONNECTING",
+            "is_alive": ws_mgr.is_alive() if ws_mgr else False,
+            "tracked_symbols": len(ws_mgr.prices) if ws_mgr else 0,
+            "total_messages_received": ws_mgr.total_messages_received if ws_mgr else 0,
+            "last_stream_time": time.strftime("%Y-%m-%d %H:%M:%S WIB", time.gmtime(ws_mgr.last_update_time + 7 * 3600)) if (ws_mgr and ws_mgr.last_update_time > 0) else "INITIALIZING"
+        }
         return {
             "status": "healthy",
             "exchange": "Binance Futures",
+            "websocket_stream": ws_info,
             "candle_scan_depth": config.CANDLE_LIMIT,
             "account_age": f"{int((time.time() - 1791861617.021) / 86400)} Hari (Aktif sejak 13 Okt 2026 - Batas Binance <30 hari: Max 20x)",
             "timeframe_setup": {

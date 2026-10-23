@@ -7,6 +7,7 @@ import urllib.parse
 from typing import Dict, Any, List, Optional, Set, Tuple
 import requests
 from rich.console import Console
+from binance_ws import BinanceWebSocketManager
 
 console = Console()
 
@@ -46,6 +47,14 @@ class BinanceFuturesClient:
         self._derivatives_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
         self._ls_cache: Dict[str, Tuple[float, Dict[str, float]]] = {}
         self._account_max_leverage: Optional[int] = None
+
+        # Inisialisasi WebSocket Stream Manager (Weight = 0 untuk pemantauan harga real-time)
+        try:
+            self.ws_manager = BinanceWebSocketManager()
+            self.ws_manager.start()
+        except Exception as e_ws:
+            console.log(f"[yellow]Peringatan inisialisasi WebSocket: {e_ws}[/yellow]")
+            self.ws_manager = None
         
         # Muat pasar dan filter aturan presisi
         self.load_markets()
@@ -827,6 +836,18 @@ class BinanceFuturesClient:
 
 
     def fetch_price(self, symbol: str) -> float:
+        """
+        Mengambil harga terkini simbol.
+        Prioritas 1: Membaca dari stream WebSocket real-time (Weight = 0, latency <1ms).
+        Prioritas 2: Fallback ke REST API jika WebSocket sedang rekoneksi.
+        """
+        # 1. Prioritas Utama: Ambil langsung dari live WebSocket stream (0 weight)
+        if hasattr(self, "ws_manager") and self.ws_manager:
+            ws_p = self.ws_manager.get_price(symbol)
+            if ws_p > 0.0 and self.ws_manager.is_alive():
+                return ws_p
+
+        # 2. Fallback REST API
         if self.is_banned():
             return 0.0
         try:
