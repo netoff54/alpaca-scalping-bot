@@ -46,22 +46,31 @@ class BinanceFuturesClient:
         return time.time() < self.scan_throttle_until
 
     def check_response_for_ban(self, resp_or_data: Any):
-        """Mendeteksi apakah Binance merespons dengan HTTP 418/429 atau kode -1003 ban."""
+        """Mendeteksi penggunaan request weight dan merespons rate limit 418/429 bursa dengan backoff cerdas."""
         msg = ""
         now = time.time()
+        retry_after_header = None
         if isinstance(resp_or_data, requests.Response):
             used_weight = resp_or_data.headers.get("x-mbx-used-weight-1m")
+            retry_after_header = resp_or_data.headers.get("retry-after")
             if used_weight:
                 try:
                     w = int(used_weight)
                     self.current_weight_1m = w
-                    # HANYA throttle scanner jika weight mendekati batas aman 2400 (gunakan threshold aman 1500)
-                    # JANGAN set self.ban_until di sini, agar order eksekusi (weight 1) tetap dapat berjalan lancar!
-                    if w >= 1500:
-                        self.scan_throttle_until = max(self.scan_throttle_until, now + 10.0)
-                        if now - self._last_ban_log_time > 20:
+                    # PENCEGAHAN PROAKTIF TINGKAT 1: Jika weight mencapai 900 (37.5% dari batas 2400),
+                    # perlambat scanner selama 25 detik agar rolling window meluruh aman.
+                    if w >= 900 and w < 1400:
+                        self.scan_throttle_until = max(self.scan_throttle_until, now + 25.0)
+                        if now - self._last_ban_log_time > 30:
                             self._last_ban_log_time = now
-                            console.log(f"[bold yellow]Request weight IP bursa mendekati batas aman ({w}/2400). Scanner melambat 10s agar weight turun...[/bold yellow]")
+                            console.log(f"[bold yellow]Request weight bursa ({w}/2400) mencapai batas proaktif 900. Scanner istirahat 25s agar weight luruh aman...[/bold yellow]")
+                    # PENCEGAHAN PROAKTIF TINGKAT 2: Jika weight mencapai 1400 (58% dari batas 2400),
+                    # istirahatkan scanner selama 50 detik (mendekati 1 siklus penuh 60s rolling window).
+                    elif w >= 1400:
+                        self.scan_throttle_until = max(self.scan_throttle_until, now + 50.0)
+                        if now - self._last_ban_log_time > 30:
+                            self._last_ban_log_time = now
+                            console.log(f"[bold red]Request weight bursa tinggi ({w}/2400). Scanner istirahat 50s untuk reset penuh 1m window...[/bold red]")
                 except Exception:
                     pass
 
@@ -87,11 +96,20 @@ class BinanceFuturesClient:
                     wib_time = time.strftime('%H:%M:%S', time.gmtime(self.ban_until + 7 * 3600))
                     console.log(f"[bold yellow]Rate limit Binance aktif ({msg[:100]}). Server IP istirahat hingga {wib_time} WIB ({m_left}m {sec_left}s lagi).[/bold yellow]")
             else:
-                # Rolling window limit 1 menit (bukan ban panjang). Jeda 10 detik agar jendela 1 menit bergeser
-                self.ban_until = max(self.ban_until, now + 10.0)
-                if now - self._last_ban_log_time > 10:
+                # Rolling window limit 1 menit (HTTP 429 atau kode -1003).
+                # Jika ada header Retry-After dari Binance, patuhi durasi tersebut (+ 2s buffer).
+                # Jika tidak, jeda minimal 45 detik agar jendela 1 menit (60 detik) benar-benar bergeser dan bersih!
+                if retry_after_header:
+                    try:
+                        backoff = float(retry_after_header) + 2.0
+                    except Exception:
+                        backoff = 45.0
+                else:
+                    backoff = 45.0
+                self.ban_until = max(self.ban_until, now + backoff)
+                if now - self._last_ban_log_time > 20:
                     self._last_ban_log_time = now
-                    console.log(f"[bold yellow]Rolling rate limit 1m terdeteksi ({msg[:100]}). Jeda singkat 10 detik lalu lanjut otomatis...[/bold yellow]")
+                    console.log(f"[bold yellow]Rolling rate limit 1m terdeteksi ({msg[:100]}). Jeda aman {int(backoff)} detik agar counter 1m bersih lalu lanjut otomatis...[/bold yellow]")
 
     def _apply_fallback_symbols(self):
         """Mengaktifkan daftar default 28 koin crypto likuid utama jika bursa sedang dalam cooldown."""
@@ -892,7 +910,9 @@ class BinanceFuturesClient:
         try:
             url_oi = f"{self.base_url}/futures/data/openInterestHist?symbol={symbol}&period={period}&limit=2"
             r_oi = self.session.get(url_oi, timeout=3)
+            self.check_response_for_ban(r_oi)
             data_oi = r_oi.json()
+            self.check_response_for_ban(data_oi)
             if isinstance(data_oi, list) and len(data_oi) >= 2:
                 prev_oi = float(data_oi[-2].get("sumOpenInterest", 0.0))
                 curr_oi = float(data_oi[-1].get("sumOpenInterest", 0.0))
@@ -907,7 +927,9 @@ class BinanceFuturesClient:
         try:
             url_taker = f"{self.base_url}/futures/data/takerlongshortRatio?symbol={symbol}&period={period}&limit=1"
             r_taker = self.session.get(url_taker, timeout=3)
+            self.check_response_for_ban(r_taker)
             data_taker = r_taker.json()
+            self.check_response_for_ban(data_taker)
             if isinstance(data_taker, list) and len(data_taker) > 0:
                 t_ratio = float(data_taker[-1].get("buySellRatio", 1.0))
                 res["taker_ratio"] = round(t_ratio, 4)

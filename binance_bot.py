@@ -120,8 +120,12 @@ class BinanceScalper:
         if self.client.is_banned():
             return self.active_position
 
-        # Throttling 20 detik jika posisi sudah tercatat
-        if not force and (now - self._last_sync_position_time < 20.0) and self.active_position is not None:
+        # Throttling cerdas sinkronisasi posisi:
+        # Jika ada order aktif menunggu fill: cek setiap 5 detik agar responsif mendeteksi eksekusi
+        # Jika tidak ada posisi & tidak ada order: cek setiap 15 detik (menghemat kuota signed endpoint)
+        # Jika posisi aktif sedang berjalan: cek setiap 20 detik (pemantauan harga ketat & geser BEP tetap berjalan setiap 2.0s via fetch_price)
+        sync_interval = 5.0 if self.active_order else (20.0 if self.active_position else 15.0)
+        if not force and (now - self._last_sync_position_time < sync_interval):
             return self.active_position
 
         try:
@@ -519,11 +523,11 @@ class BinanceScalper:
 
             # 1. Fetch Multi-Timeframe Kalimasada: 4h untuk Tren Makro, 1h untuk Struktur & S&R, 15m untuk Eksekusi Scalp (1000 Candle Murni Tanpa Noise)
             ohlcv_4h = self.client.fetch_klines(sym, interval=config.MACRO_TIMEFRAME, limit=config.CANDLE_LIMIT)
-            time.sleep(0.06)
+            time.sleep(0.15)
             ohlcv_1h = self.client.fetch_klines(sym, interval=config.STRUCTURE_TIMEFRAME, limit=config.CANDLE_LIMIT)
-            time.sleep(0.06)
+            time.sleep(0.15)
             ohlcv_15m = self.client.fetch_klines(sym, interval=config.TIMEFRAME, limit=config.CANDLE_LIMIT)
-            time.sleep(0.06)
+            time.sleep(0.15)
             deriv_data = self.client.fetch_derivatives_data(sym, period="15m")
 
             if not ohlcv_15m or len(ohlcv_15m) < 25:
@@ -1109,10 +1113,10 @@ class BinanceScalper:
                 # 1. Selalu sinkronisasi posisi riil dari Binance
                 self.sync_exchange_position()
 
-                # 2. Jika ada posisi aktif, pantau harga setiap 2.5 detik
+                # 2. Jika ada posisi aktif, pantau harga setiap 2.0 detik untuk geser BEP presisi
                 if self.active_position:
                     self.monitor_active_position()
-                    time.sleep(2.5)  # Cek harga posisi aktif setiap 2.5 detik sesuai permintaan
+                    time.sleep(2.0)  # Cek harga posisi aktif setiap 2.0 detik sesuai permintaan user
                     continue
                     
                 # 3. Jalankan pemindaian koin Top volume
@@ -1138,7 +1142,7 @@ class BinanceScalper:
                             console.log(f"[yellow]Saldo USDT Futures (${avail_usdt:.2f}) di bawah minimum (${min_req:.2f}). Menunggu modal.[/yellow]")
                         
                 if self.active_position:
-                    time.sleep(2.5)  # Langsung monitor 2.5s jika posisi baru saja terisi
+                    time.sleep(2.0)  # Langsung monitor 2.0s jika posisi baru saja terisi
                 else:
                     time.sleep(config.SCAN_INTERVAL_SECONDS)
                 
