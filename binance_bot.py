@@ -63,6 +63,8 @@ class BinanceScalper:
         self._last_balance_time: float = 0.0
         self._last_sync_position_time: float = 0.0
         self._configured_symbols: Set[str] = set()
+        self._symbol_leverage: Dict[str, int] = {}
+        self._last_algo_sweep: float = 0.0
         self._last_reversal_check_time: float = 0.0
         self.last_error: Optional[str] = None
         self._symbol_order_cooldown: Dict[str, float] = {}
@@ -225,19 +227,25 @@ class BinanceScalper:
                 }
                 return self.active_position
             else:
-                # 1. PEMBERSIH OTOMATIS INSTAN: Jika posisi terbuka di bursa sudah 0, pastikan TIDAK ADA order pemicu yang tertinggal/menggantung!
-                try:
-                    dangling_algos = self.client.fetch_open_algo_orders()
-                    if dangling_algos:
-                        for d_order in dangling_algos:
-                            d_sym = d_order.get("symbol")
-                            d_id = d_order.get("algoId")
-                            if d_sym:
-                                console.log(f"[bold yellow]🧹 Membersihkan pesanan bersyarat menggantung pada {d_sym} (Algo ID: {d_id}) karena posisi terbuka sudah 0.[/bold yellow]")
-                                self.client.cancel_all_open_orders(d_sym)
-                                self.client.cancel_all_algo_orders(d_sym)
-                except Exception as e_clean:
-                    pass
+                # 1. PEMBERSIH OTOMATIS: Bersihkan pesanan bersyarat menggantung HANYA jika:
+                #    a. Posisi baru saja tertutup (self.active_position is not None), ATAU
+                #    b. Sapuan berkala setiap 5 menit (300 detik) untuk menghemat kuota request bursa
+                now_sync = time.time()
+                should_sweep_algos = (self.active_position is not None) or (now_sync - self._last_algo_sweep > 300.0)
+                if should_sweep_algos and not self.client.is_banned():
+                    self._last_algo_sweep = now_sync
+                    try:
+                        dangling_algos = self.client.fetch_open_algo_orders()
+                        if dangling_algos:
+                            for d_order in dangling_algos:
+                                d_sym = d_order.get("symbol")
+                                d_id = d_order.get("algoId")
+                                if d_sym:
+                                    console.log(f"[bold yellow]🧹 Membersihkan pesanan bersyarat menggantung pada {d_sym} (Algo ID: {d_id}) karena posisi terbuka sudah 0.[/bold yellow]")
+                                    self.client.cancel_all_open_orders(d_sym)
+                                    self.client.cancel_all_algo_orders(d_sym)
+                    except Exception as e_clean:
+                        pass
 
                 # 2. Rekam posisi yang baru saja tertutup
                 if self.active_position is not None:
@@ -532,6 +540,7 @@ class BinanceScalper:
 
             if not ohlcv_15m or len(ohlcv_15m) < 25:
                 self._current_rotation_index = (self._current_rotation_index + 1) % total_univ
+                self.last_scan_time = time.strftime("%Y-%m-%d %H:%M:%S")
                 return
 
             # 2. Analisis Menyeluruh Sesuai Master Blueprint Akademi Crypto
@@ -624,13 +633,18 @@ class BinanceScalper:
 
         try:
             # 1. Pastikan ISOLATED margin dan atur leverage dalam rentang 50x turun ke 20x (Kompatibel Akun < 30 Hari)
-            self.client.set_margin_type(symbol, "ISOLATED")
-            actual_leverage = self.client.set_leverage(
-                symbol,
-                target_leverage=config.LEVERAGE_MAX,
-                min_leverage=config.LEVERAGE_MIN
-            )
-            self._configured_symbols.add(symbol)
+            if symbol in self._symbol_leverage:
+                actual_leverage = self._symbol_leverage[symbol]
+            else:
+                self.client.set_margin_type(symbol, "ISOLATED")
+                actual_leverage = self.client.set_leverage(
+                    symbol,
+                    target_leverage=config.LEVERAGE_MAX,
+                    min_leverage=config.LEVERAGE_MIN
+                )
+                if actual_leverage >= config.LEVERAGE_MIN:
+                    self._symbol_leverage[symbol] = actual_leverage
+                    self._configured_symbols.add(symbol)
             
             # Saring koin dengan leverage di bawah 20x agar seluruh trade seragam & koin < 20x di-skip
             if actual_leverage < config.LEVERAGE_MIN:

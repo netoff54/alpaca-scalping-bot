@@ -21,7 +21,7 @@ class BotConfig:
     TOTAL_ROTATIONS: int = 500             # 500 rotasi berurutan dari koin 1 s/d koin 500
     TOP_COINS_LIMIT: int = 1               # 1 koin per rotasi
     MIN_24H_VOLUME_USD: float = 100_000.0  # Minimal volume $100k agar seluruh semesta 500 koin Binance Futures terakomodasi
-    SCAN_INTERVAL_SECONDS: int = 6         # Siklus aman 6 detik per koin (hemat kuota weight bursa 94%, bebas shutdown rate-limit)
+    SCAN_INTERVAL_SECONDS: int = 8         # Siklus aman 8 detik per koin (hemat kuota weight bursa 96%, bebas shutdown rate-limit)
     TIMEFRAME: str = "15m"                 # Timeframe eksekusi entry 15 menit (Sesuai Akademi Crypto Kalimasada)
     STRUCTURE_TIMEFRAME: str = "1h"        # Timeframe struktur pasar, S&R teruji, & Area Likuidasi 1 Jam
     MACRO_TIMEFRAME: str = "4h"            # Timeframe tren makro institusi (EMA 200) 4 Jam

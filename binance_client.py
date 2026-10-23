@@ -4,7 +4,7 @@ import time
 import math
 import re
 import urllib.parse
-from typing import Dict, Any, List, Optional, Set
+from typing import Dict, Any, List, Optional, Set, Tuple
 import requests
 from rich.console import Console
 
@@ -15,11 +15,20 @@ class BinanceFuturesClient:
     Klien REST API Binance Futures USDⓈ-M Native murni.
     Memuat aturan presisi pasar (exchangeInfo) satu kali saat startup ke memori (<50KB),
     menjamin 100% presisi harga/lot size tepat dan secara otomatis menyaring token non-crypto.
+    Dilengkapi Multi-Endpoint Failover Gateway resmi Binance & Caching In-Memory Ultra Ringan.
     """
     def __init__(self, api_key: str, api_secret: str):
         self.api_key = api_key
         self.api_secret = api_secret
-        self.base_url = "https://fapi.binance.com"
+        self.primary_base_url = "https://fapi.binance.com"
+        self.fallback_base_urls = [
+            "https://fapi.binance.com",
+            "https://fapi1.binance.com",
+            "https://fapi2.binance.com",
+            "https://fapi3.binance.com"
+        ]
+        self.base_url = self.primary_base_url
+        self._current_url_index = 0
         self.session = requests.Session()
         self.session.headers.update({
             "X-MBX-APIKEY": self.api_key,
@@ -32,10 +41,21 @@ class BinanceFuturesClient:
         self._last_ban_log_time: float = 0.0
         self.current_weight_1m: int = 0
         self.scan_throttle_until: float = 0.0
+
+        # Cache In-Memory Derivatif & Sentimen (TTL 180s = hemat ratusan request per jam)
+        self._derivatives_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+        self._ls_cache: Dict[str, Tuple[float, Dict[str, float]]] = {}
+        self._account_max_leverage: Optional[int] = None
         
         # Muat pasar dan filter aturan presisi
         self.load_markets()
         self.load_leverage_brackets()
+
+    def rotate_endpoint(self):
+        """Merotasi domain endpoint Binance Futures (fapi -> fapi1 -> fapi2 -> fapi3) saat terjadi kendala jaringan."""
+        self._current_url_index = (self._current_url_index + 1) % len(self.fallback_base_urls)
+        self.base_url = self.fallback_base_urls[self._current_url_index]
+        console.log(f"[dim]Failover Binance endpoint dialihkan ke: {self.base_url}[/dim]")
 
     def is_banned(self) -> bool:
         """Mengecek apakah IP server sedang dalam masa cooldown rate limit Binance resmi (HTTP 418/429)."""
@@ -86,8 +106,8 @@ class BinanceFuturesClient:
             import re
             match = re.search(r"banned until (\d+)", msg)
             if match:
-                # Ban resmi dari bursa dengan timestamp
-                self.ban_until = float(match.group(1)) / 1000.0
+                # Ban resmi dari bursa dengan timestamp (+ 5.0 detik buffer keselamatan sinkronisasi jam bursa)
+                self.ban_until = (float(match.group(1)) / 1000.0) + 5.0
                 if now - self._last_ban_log_time > 60:
                     self._last_ban_log_time = now
                     s_left = int(self.ban_until - now)
@@ -97,15 +117,15 @@ class BinanceFuturesClient:
                     console.log(f"[bold yellow]Rate limit Binance aktif ({msg[:100]}). Server IP istirahat hingga {wib_time} WIB ({m_left}m {sec_left}s lagi).[/bold yellow]")
             else:
                 # Rolling window limit 1 menit (HTTP 429 atau kode -1003).
-                # Jika ada header Retry-After dari Binance, patuhi durasi tersebut (+ 2s buffer).
-                # Jika tidak, jeda minimal 45 detik agar jendela 1 menit (60 detik) benar-benar bergeser dan bersih!
+                # Jika ada header Retry-After dari Binance, patuhi durasi tersebut (+ 5s buffer).
+                # Jika tidak, jeda minimal 60 detik agar jendela 1 menit benar-benar bergeser dan bersih!
                 if retry_after_header:
                     try:
-                        backoff = float(retry_after_header) + 2.0
+                        backoff = float(retry_after_header) + 5.0
                     except Exception:
-                        backoff = 45.0
+                        backoff = 60.0
                 else:
-                    backoff = 45.0
+                    backoff = 60.0
                 self.ban_until = max(self.ban_until, now + backoff)
                 if now - self._last_ban_log_time > 20:
                     self._last_ban_log_time = now
@@ -389,11 +409,10 @@ class BinanceFuturesClient:
 
     def set_leverage(self, symbol: str, target_leverage: int = 50, min_leverage: int = 20) -> int:
         """
-        Mengatur leverage dengan sistem Range Stepping Probing bertahap [50x down to 20x]:
-        1. Jika dari leverage brackets koin < min_leverage (20x), langsung kembalikan agar di-skip.
-        2. Mencoba bertahap dari target_leverage (50x), 49x, 48x, ... hingga batas minimal 20x.
-        3. Nilai pertama yang berhasil diterima bursa langsung dipakai dan dikembalikan.
-        4. Jika semua level 50x s/d 20x ditolak bursa (misal koin < 20x), kembalikan nilai 0 agar bot skip koin.
+        Mengatur leverage dengan efisiensi tinggi [50x down to 20x]:
+        1. Memanfaatkan batas akun global jika sudah terdeteksi (misal pembatasan akun < 30 hari = 20x).
+        2. Mencoba level-level leverage standar Binance [50, 25, 20] tanpa spam integer berulang.
+        3. Nilai pertama yang berhasil diterima bursa langsung dipakai dan disimpan.
         """
         if self.is_banned():
             return max(min_leverage, min(target_leverage, self.get_max_leverage(symbol)))
@@ -405,11 +424,22 @@ class BinanceFuturesClient:
             console.log(f"[bold yellow]Batas leverage resmi {symbol} hanya {cached_lev}x (< {min_leverage}x). Melewati probing agar koin di-skip.[/bold yellow]")
             return 0
 
-        start_lev = min(target_leverage, cached_lev if cached_lev and cached_lev >= min_leverage else target_leverage)
+        # Jika sudah terdeteksi limit global akun (misal akun < 30 hari dibatasi 20x)
+        if self._account_max_leverage is not None:
+            effective_target = min(target_leverage, self._account_max_leverage)
+        else:
+            effective_target = target_leverage
+
+        start_lev = min(effective_target, cached_lev if cached_lev and cached_lev >= min_leverage else effective_target)
         url = f"{self.base_url}/fapi/v1/leverage"
 
-        console.log(f"[yellow]Mencari leverage tertinggi yang tersedia untuk {symbol} secara bertahap (Range {start_lev}x turun ke {min_leverage}x: 50x, 49x, 48x...)...[/yellow]")
-        for lev in range(start_lev, min_leverage - 1, -1):
+        # Coba target utama dulu (misal 50 atau batas akun), lalu fallback ke tier umum [50, 25, 20]
+        test_levels = [start_lev]
+        for candidate in [50, 25, 20]:
+            if candidate <= start_lev and candidate >= min_leverage and candidate not in test_levels:
+                test_levels.append(candidate)
+
+        for lev in test_levels:
             try:
                 params = self._sign({"symbol": symbol, "leverage": lev})
                 resp = self.session.post(url, params=params, timeout=6)
@@ -419,21 +449,23 @@ class BinanceFuturesClient:
                     actual = int(data["leverage"])
                     console.log(f"[bold green]Ditemukan leverage maksimal untuk {symbol}: {actual}x (Range 50x-{min_leverage}x)![/bold green]")
                     return actual
+                elif isinstance(data, dict):
+                    msg = data.get("msg", "")
+                    # Deteksi batas akun Binance (misal akun baru < 30 hari)
+                    if "20" in msg or "user max leverage" in msg.lower() or "cannot exceed" in msg.lower():
+                        self._account_max_leverage = 20
+                        console.log(f"[bold yellow]Bursa membatasi leverage akun maksimal 20x (Regulasi Akun < 30 Hari). Otomatis menetapkan 20x...[/bold yellow]")
             except Exception as e:
                 console.log(f"[dim]Percobaan leverage {lev}x untuk {symbol}: {e}[/dim]")
                 continue
 
-        # Jika seluruh range [50x down to 20x] ditolak bursa
-        console.log(f"[bold yellow]Koin {symbol} tidak dapat mencapai batas minimal {min_leverage}x (semua level 50x s/d 20x ditolak). Koin di-skip.[/bold yellow]")
+        # Jika seluruh candidate ditolak bursa
+        console.log(f"[bold yellow]Koin {symbol} tidak dapat mencapai batas minimal {min_leverage}x. Koin di-skip.[/bold yellow]")
         return 0
 
     def fetch_best_bid_ask(self, symbol: str) -> Dict[str, float]:
         if self.is_banned():
-            s_left = self.ban_until - time.time()
-            if s_left <= 15.0:
-                time.sleep(max(0.5, s_left + 0.2))
-            else:
-                return {"bid": 0.0, "ask": 0.0}
+            return {"bid": 0.0, "ask": 0.0}
         try:
             url = f"{self.base_url}/fapi/v1/depth?symbol={symbol}&limit=5"
             resp = self.session.get(url, timeout=5)
@@ -451,140 +483,103 @@ class BinanceFuturesClient:
             return {"bid": 0.0, "ask": 0.0}
 
     def create_limit_order(self, symbol: str, side: str, qty: float, price: float) -> Dict[str, Any]:
-        """Kirim Limit Order Maker-Only (timeInForce=GTX / Post Only) dengan auto-wait rate limit."""
+        """Kirim Limit Order Maker-Only (timeInForce=GTX / Post Only) dengan proteksi rate limit ketat."""
+        if self.is_banned():
+            wait_sec = max(0, int(self.ban_until - time.time()))
+            raise Exception(f"Tidak dapat mengirim order: IP bursa dalam ban resmi ({wait_sec}s lagi).")
+
         url = f"{self.base_url}/fapi/v1/order"
-        last_err = None
-
-        for attempt in range(2):
-            now = time.time()
-            if self.is_banned():
-                wait_sec = self.ban_until - now
-                if wait_sec <= 15.0:
-                    console.log(f"[bold yellow]IP cooldown aktif ({wait_sec:.1f}s lagi). Menunggu otomatis sebelum kirim order...[/bold yellow]")
-                    time.sleep(max(0.5, wait_sec + 0.5))
-                else:
-                    raise Exception(f"Tidak dapat mengirim order: IP bursa dalam ban resmi ({int(wait_sec)}s lagi).")
-
-            params = self._sign({
-                "symbol": symbol,
-                "side": side.upper(),
-                "type": "LIMIT",
-                "timeInForce": "GTX",
-                "quantity": qty,
-                "price": price
-            })
+        params = self._sign({
+            "symbol": symbol,
+            "side": side.upper(),
+            "type": "LIMIT",
+            "timeInForce": "GTX",
+            "quantity": qty,
+            "price": price
+        })
+        try:
+            resp = self.session.post(url, params=params, timeout=10)
+            self.check_response_for_ban(resp)
             try:
-                resp = self.session.post(url, params=params, timeout=10)
-                self.check_response_for_ban(resp)
-                try:
-                    data = resp.json()
-                except Exception:
-                    data = {"error": resp.text}
-                self.check_response_for_ban(data)
+                data = resp.json()
+            except Exception:
+                data = {"error": resp.text}
+            self.check_response_for_ban(data)
 
-                if isinstance(data, dict) and "orderId" in data:
-                    return data
+            if isinstance(data, dict) and "orderId" in data:
+                return data
 
-                # Jika ditolak karena GTX maker price crossed, langsung kembalikan pesan jelas
-                if isinstance(data, dict) and data.get("code") == -5022:
-                    raise Exception("Order GTX dibatalkan: Harga akan menjadi Taker (Post-Only).")
+            # Jika ditolak karena GTX maker price crossed, langsung kembalikan pesan jelas
+            if isinstance(data, dict) and data.get("code") == -5022:
+                raise Exception("Order GTX dibatalkan: Harga akan menjadi Taker (Post-Only).")
 
-                last_err = data
-            except Exception as e:
-                last_err = str(e)
-
-            # Jika attempt 0 dan ada cooldown singkat yang baru terpicu, tunggu dan coba sekali lagi
-            if attempt == 0 and self.is_banned() and (self.ban_until - time.time()) <= 15.0:
-                w_left = max(1.0, self.ban_until - time.time() + 0.5)
-                console.log(f"[yellow]Mencoba mengirim ulang order setelah jeda {w_left:.1f}s...[/yellow]")
-                time.sleep(w_left)
-                continue
-            break
-
-        raise Exception(f"Limit order gagal: {last_err}")
+            raise Exception(f"Limit order gagal: {data}")
+        except Exception as e:
+            raise Exception(f"Limit order gagal: {e}")
 
     def create_limit_close_order(self, symbol: str, side: str, qty: float, price: float) -> Dict[str, Any]:
         """Tutup posisi dengan Limit Order Maker-Only (reduceOnly=true, timeInForce=GTX / Post Only) agar fee terendah."""
+        if self.is_banned():
+            wait_sec = max(0, int(self.ban_until - time.time()))
+            raise Exception(f"Tidak dapat menutup order: IP bursa dalam ban resmi ({wait_sec}s lagi).")
+
         url = f"{self.base_url}/fapi/v1/order"
-        last_err = None
-
-        for attempt in range(2):
-            now = time.time()
-            if self.is_banned():
-                wait_sec = self.ban_until - now
-                if wait_sec <= 15.0:
-                    console.log(f"[bold yellow]IP cooldown aktif ({wait_sec:.1f}s lagi). Menunggu otomatis sebelum kirim maker close order...[/bold yellow]")
-                    time.sleep(max(0.5, wait_sec + 0.5))
-                else:
-                    raise Exception(f"Tidak dapat menutup order: IP bursa dalam ban resmi ({int(wait_sec)}s lagi).")
-
-            params = self._sign({
-                "symbol": symbol,
-                "side": side.upper(),
-                "type": "LIMIT",
-                "timeInForce": "GTX",
-                "quantity": qty,
-                "price": price,
-                "reduceOnly": "true"
-            })
+        params = self._sign({
+            "symbol": symbol,
+            "side": side.upper(),
+            "type": "LIMIT",
+            "timeInForce": "GTX",
+            "quantity": qty,
+            "price": price,
+            "reduceOnly": "true"
+        })
+        try:
+            resp = self.session.post(url, params=params, timeout=10)
+            self.check_response_for_ban(resp)
             try:
-                resp = self.session.post(url, params=params, timeout=10)
-                self.check_response_for_ban(resp)
-                try:
-                    data = resp.json()
-                except Exception:
-                    data = {"error": resp.text}
-                self.check_response_for_ban(data)
+                data = resp.json()
+            except Exception:
+                data = {"error": resp.text}
+            self.check_response_for_ban(data)
 
-                if isinstance(data, dict) and "orderId" in data:
-                    return data
+            if isinstance(data, dict) and "orderId" in data:
+                return data
 
-                # Jika ditolak karena harga langsung match (code -5022 Post-Only), kembalikan dict khusus
-                if isinstance(data, dict) and data.get("code") == -5022:
-                    return {"code": -5022, "msg": "Post-Only crossed"}
+            # Jika ditolak karena harga langsung match (code -5022 Post-Only), kembalikan dict khusus
+            if isinstance(data, dict) and data.get("code") == -5022:
+                return {"code": -5022, "msg": "Post-Only crossed"}
 
-                last_err = data
-            except Exception as e:
-                last_err = str(e)
-
-            if attempt == 0 and self.is_banned() and (self.ban_until - time.time()) <= 15.0:
-                time.sleep(max(1.0, self.ban_until - time.time() + 0.5))
-                continue
-            break
-
-        raise Exception(f"Limit close order gagal: {last_err}")
+            raise Exception(f"Limit close order gagal: {data}")
+        except Exception as e:
+            raise Exception(f"Limit close order gagal: {e}")
 
     def create_market_close_order(self, symbol: str, side: str, qty: float) -> Dict[str, Any]:
         """Tutup posisi seketika dengan Market Order (reduceOnly=true). Prioritas Tertinggi."""
+        if self.is_banned():
+            wait_sec = max(0, int(self.ban_until - time.time()))
+            raise Exception(f"Tidak dapat market close: IP bursa dalam ban resmi ({wait_sec}s lagi).")
+
         url = f"{self.base_url}/fapi/v1/order"
-        last_err = None
-        for attempt in range(3):
+        params = self._sign({
+            "symbol": symbol,
+            "side": side.upper(),
+            "type": "MARKET",
+            "quantity": qty,
+            "reduceOnly": "true"
+        })
+        try:
+            resp = self.session.post(url, params=params, timeout=10)
+            self.check_response_for_ban(resp)
             try:
-                if self.is_banned():
-                    wait_sec = self.ban_until - time.time()
-                    if wait_sec <= 12.0:
-                        time.sleep(max(0.5, wait_sec + 0.5))
-                params = self._sign({
-                    "symbol": symbol,
-                    "side": side.upper(),
-                    "type": "MARKET",
-                    "quantity": qty,
-                    "reduceOnly": "true"
-                })
-                resp = self.session.post(url, params=params, timeout=10)
-                self.check_response_for_ban(resp)
-                try:
-                    data = resp.json()
-                except Exception:
-                    data = {"error": resp.text}
-                self.check_response_for_ban(data)
-                if isinstance(data, dict) and "orderId" in data:
-                    return data
-                last_err = data
-            except Exception as e:
-                last_err = str(e)
-            time.sleep(1.5)
-        raise Exception(f"Market close order gagal: {last_err}")
+                data = resp.json()
+            except Exception:
+                data = {"error": resp.text}
+            self.check_response_for_ban(data)
+            if isinstance(data, dict) and "orderId" in data:
+                return data
+            raise Exception(f"Market close order gagal: {data}")
+        except Exception as e:
+            raise Exception(f"Market close order gagal: {e}")
 
     def get_order(self, symbol: str, order_id: Any) -> Dict[str, Any]:
         if self.is_banned():
@@ -598,13 +593,17 @@ class BinanceFuturesClient:
         return data if isinstance(data, dict) else {}
 
     def cancel_order(self, symbol: str, order_id: Any) -> Dict[str, Any]:
-        # Pembatalan order darurat WAJIB selalu diproses untuk perlindungan modal maksimal
+        if self.is_banned():
+            return {}
+        # Pembatalan order darurat
         # 1. Coba batalkan order reguler di /fapi/v1/order
         url = f"{self.base_url}/fapi/v1/order"
         params = self._sign({"symbol": symbol, "orderId": order_id})
         try:
             resp = self.session.delete(url, params=params, timeout=10)
+            self.check_response_for_ban(resp)
             data = resp.json()
+            self.check_response_for_ban(data)
             if isinstance(data, dict) and data.get("orderId"):
                 return data
             # 2. Jika kode -2011 Unknown Order, coba batalkan sebagai Algo Order
@@ -612,7 +611,9 @@ class BinanceFuturesClient:
                 url_algo = f"{self.base_url}/fapi/v1/algoOrder"
                 p_algo = self._sign({"symbol": symbol, "algoId": order_id})
                 r_algo = self.session.delete(url_algo, params=p_algo, timeout=10)
+                self.check_response_for_ban(r_algo)
                 d_algo = r_algo.json()
+                self.check_response_for_ban(d_algo)
                 if isinstance(d_algo, dict) and "algoId" in d_algo:
                     return d_algo
             return data if isinstance(data, dict) else {}
@@ -706,6 +707,8 @@ class BinanceFuturesClient:
 
     def cancel_all_open_orders(self, symbol: str) -> Dict[str, Any]:
         """Membatalkan seluruh order aktif pada koin (pesanan limit biasa & seluruh algo SL/TP)."""
+        if self.is_banned():
+            return {}
         res = {}
         # 1. Batalkan pesanan reguler (Limit / Market)
         try:
@@ -730,6 +733,8 @@ class BinanceFuturesClient:
 
     def fetch_open_algo_orders(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
         """Mengambil seluruh pesanan Algo pemicu (STOP_MARKET & TAKE_PROFIT_MARKET) yang sedang aktif di Binance."""
+        if self.is_banned():
+            return []
         try:
             url = f"{self.base_url}/fapi/v1/openAlgoOrders"
             params = {"symbol": symbol} if symbol else {}
@@ -744,6 +749,8 @@ class BinanceFuturesClient:
 
     def cancel_all_algo_orders(self, symbol: Optional[str] = None) -> Dict[str, Any]:
         """Membersihkan seluruh pesanan Algo pemicu yang menggantung di Binance."""
+        if self.is_banned():
+            return {}
         try:
             if symbol:
                 url = f"{self.base_url}/fapi/v1/algoOpenOrders"
@@ -821,10 +828,7 @@ class BinanceFuturesClient:
 
     def fetch_price(self, symbol: str) -> float:
         if self.is_banned():
-            s_left = self.ban_until - time.time()
-            if s_left > 15.0:
-                return 0.0
-            time.sleep(max(0.2, s_left + 0.2))
+            return 0.0
         try:
             url = f"{self.base_url}/fapi/v1/ticker/price?symbol={symbol}"
             resp = self.session.get(url, timeout=5)
@@ -858,7 +862,13 @@ class BinanceFuturesClient:
         """
         Mengambil rasio akun Long vs Short global (Binance Futures Data API).
         Membaca arah arus sentimen pasar agar tidak melawan arus dominan.
+        Dilengkapi caching in-memory 180 detik (hemat bandwidth & kuota request bursa).
         """
+        now = time.time()
+        cached = self._ls_cache.get(symbol)
+        if cached and (now - cached[0] < 180.0):
+            return cached[1]
+
         if self.is_banned():
             return {"long_pct": 50.0, "short_pct": 50.0, "ratio": 1.0}
         try:
@@ -872,12 +882,16 @@ class BinanceFuturesClient:
                 long_acc = float(item.get("longAccount", 0.5))
                 short_acc = float(item.get("shortAccount", 0.5))
                 ratio = float(item.get("longShortRatio", 1.0))
-                return {
+                res = {
                     "long_pct": round(long_acc * 100, 1),
                     "short_pct": round(short_acc * 100, 1),
                     "ratio": round(ratio, 4)
                 }
-            return {"long_pct": 50.0, "short_pct": 50.0, "ratio": 1.0}
+                self._ls_cache[symbol] = (now, res)
+                return res
+            res = {"long_pct": 50.0, "short_pct": 50.0, "ratio": 1.0}
+            self._ls_cache[symbol] = (now, res)
+            return res
         except Exception:
             return {"long_pct": 50.0, "short_pct": 50.0, "ratio": 1.0}
 
@@ -887,7 +901,13 @@ class BinanceFuturesClient:
         1. Open Interest (OI Delta): Mendeteksi aliran modal baru vs short covering / liquidation.
         2. Taker Buy/Sell Ratio (CVD proxy): Mengukur agresivitas volume pasar.
         3. Global Long/Short Ratio: Menghindari melawan arus mayoritas akun.
+        Dilengkapi caching in-memory 180 detik per simbol.
         """
+        now = time.time()
+        cached = self._derivatives_cache.get(symbol)
+        if cached and (now - cached[0] < 180.0):
+            return cached[1]
+
         res = {
             "long_pct": 50.0,
             "short_pct": 50.0,
@@ -937,6 +957,7 @@ class BinanceFuturesClient:
         except Exception:
             pass
 
+        self._derivatives_cache[symbol] = (now, res)
         return res
 
     def fetch_klines(self, symbol: str, interval: str = "5m", limit: int = 1000) -> Optional[List[List[float]]]:

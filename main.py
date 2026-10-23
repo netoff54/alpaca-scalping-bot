@@ -49,7 +49,10 @@ async def lifespan(app: FastAPI):
 
     # 3. Jalankan auto-sync database dengan pembukuan bursa Binance saat startup
     def auto_sync_startup():
-        time.sleep(10)
+        time.sleep(15)
+        if scalper.client.is_banned():
+            print(">>> [Auto-Sync] Binance API dalam status cooldown, melewati auto-sync startup untuk menjaga kuota.")
+            return
         try:
             print(">>> [Auto-Sync] Menjalankan inisialisasi tabel modal & database...")
             db.init_db()
@@ -88,6 +91,22 @@ def capital_audit():
     - Menyelaraskan 100% PnL dengan saldo riil dompet di aplikasi Binance (-$1.44)
     """
     db.init_db()
+    if scalper.client.is_banned():
+        cap_summary = db.get_capital_summary()
+        wallet_now = scalper._cached_balance["total_wallet"]
+        net_invested = cap_summary["net_capital_invested"]
+        net_performance_usd = round(wallet_now - net_invested, 4)
+        roi_pct = round((net_performance_usd / net_invested) * 100, 2) if net_invested > 0 else 0.0
+        return {
+            "status": "COOLDOWN_CACHED",
+            "message": "Binance API sedang cooldown. Data disajikan dari rekaman database.",
+            "net_modal_pokok_disetor": net_invested,
+            "saldo_dompet_saat_ini": wallet_now,
+            "hasil_bersih_trading_usd": net_performance_usd,
+            "roi_persentase": f"{roi_pct:+.2f}%",
+            "cooldown_until": time.strftime("%Y-%m-%d %H:%M:%S WIB", time.gmtime(scalper.client.ban_until + 7 * 3600))
+        }
+
     transfers = scalper.client.fetch_income_history(income_type="TRANSFER", limit=1000)
     sync_res = db.sync_capital_transfers(transfers)
     cap_summary = db.get_capital_summary()
@@ -135,15 +154,19 @@ def account_age():
     """
     now_ts = time.time()
     now_ms = now_ts * 1000.0
-    transfers = scalper.client.fetch_income_history(income_type="TRANSFER", limit=1000)
-    
     first_transfer_time_ms = 1791861617021  # Fallback transfer perdana 13 Okt 2026
     first_transfer_info = {}
-    if transfers:
-        sorted_transfers = sorted(transfers, key=lambda x: x.get("time", now_ms))
-        if sorted_transfers:
-            first_transfer_info = sorted_transfers[0]
-            first_transfer_time_ms = first_transfer_info.get("time", first_transfer_time_ms)
+
+    if not scalper.client.is_banned():
+        try:
+            transfers = scalper.client.fetch_income_history(income_type="TRANSFER", limit=1000)
+            if transfers:
+                sorted_transfers = sorted(transfers, key=lambda x: x.get("time", now_ms))
+                if sorted_transfers:
+                    first_transfer_info = sorted_transfers[0]
+                    first_transfer_time_ms = first_transfer_info.get("time", first_transfer_time_ms)
+        except Exception:
+            pass
             
     age_seconds = (now_ms - first_transfer_time_ms) / 1000.0
     age_days = age_seconds / 86400.0
@@ -222,13 +245,22 @@ def trade_history(limit: int = 100):
 @app.get("/binance-orders")
 def binance_orders(symbol: Optional[str] = None):
     """Mengambil seluruh pesanan terbuka (Limit & Stop / Trigger Algo) langsung dari Binance Futures."""
+    if scalper.client.is_banned():
+        return {
+            "status": "cooldown",
+            "message": f"Binance rate limit aktif hingga {time.strftime('%H:%M:%S WIB', time.gmtime(scalper.client.ban_until + 7 * 3600))}",
+            "regular_orders": [],
+            "algo_stop_orders": []
+        }
     url_reg = f"{scalper.client.base_url}/fapi/v1/openOrders"
     url_algo = f"{scalper.client.base_url}/fapi/v1/openAlgoOrders"
     params = {"symbol": symbol} if symbol else {}
     signed = scalper.client._sign(params)
     
     resp_reg = scalper.client.session.get(url_reg, params=signed, timeout=10)
+    scalper.client.check_response_for_ban(resp_reg)
     resp_algo = scalper.client.session.get(url_algo, params=signed, timeout=10)
+    scalper.client.check_response_for_ban(resp_algo)
     
     return {
         "regular_orders": resp_reg.json() if resp_reg.status_code == 200 else [],
@@ -238,15 +270,25 @@ def binance_orders(symbol: Optional[str] = None):
 @app.get("/binance-all-orders")
 def binance_all_orders(symbol: str, limit: int = 15):
     """Mengambil riwayat seluruh order (LIMIT, STOP_MARKET, MARKET, dan Algo Orders) untuk koin tertentu langsung dari Binance."""
+    if scalper.client.is_banned():
+        return {
+            "status": "cooldown",
+            "message": f"Binance rate limit aktif hingga {time.strftime('%H:%M:%S WIB', time.gmtime(scalper.client.ban_until + 7 * 3600))}",
+            "symbol": symbol,
+            "orders": [],
+            "algo_orders": []
+        }
     url = f"{scalper.client.base_url}/fapi/v1/allOrders"
     params = {"symbol": symbol, "limit": limit}
     signed = scalper.client._sign(params)
     resp = scalper.client.session.get(url, params=signed, timeout=10)
+    scalper.client.check_response_for_ban(resp)
     
     url_algo = f"{scalper.client.base_url}/fapi/v1/allAlgoOrders"
     params_algo = {"symbol": symbol, "limit": limit}
     signed_algo = scalper.client._sign(params_algo)
     resp_algo = scalper.client.session.get(url_algo, params=signed_algo, timeout=10)
+    scalper.client.check_response_for_ban(resp_algo)
     
     return {
         "status": resp.status_code,
@@ -258,14 +300,19 @@ def binance_all_orders(symbol: str, limit: int = 15):
 @app.get("/clean-algo-orders")
 def clean_algo_orders(symbol: Optional[str] = None):
     """Membersihkan pesanan algo uji coba untuk simbol tertentu atau seluruh simbol di akun."""
+    if scalper.client.is_banned():
+        return {"status": "cooldown", "msg": "Binance rate limit aktif"}
     return scalper.client.cancel_all_algo_orders(symbol)
 
 @app.get("/binance-position-side")
 def binance_position_side():
     """Mengecek apakah akun Binance menggunakan One-Way Mode atau Hedge Mode."""
+    if scalper.client.is_banned():
+        return {"status": "cooldown", "dualSidePosition": False}
     url = f"{scalper.client.base_url}/fapi/v1/positionSide/dual"
     signed = scalper.client._sign({})
     resp = scalper.client.session.get(url, params=signed, timeout=10)
+    scalper.client.check_response_for_ban(resp)
     return resp.json()
 
 @app.api_route("/", methods=["GET", "HEAD"])
