@@ -50,7 +50,7 @@ class BinanceFuturesClient:
 
         # Inisialisasi WebSocket Stream Manager (Weight = 0 untuk pemantauan harga real-time)
         try:
-            self.ws_manager = BinanceWebSocketManager()
+            self.ws_manager = BinanceWebSocketManager(is_banned_fn=self.is_banned)
             self.ws_manager.start()
         except Exception as e_ws:
             console.log(f"[yellow]Peringatan inisialisasi WebSocket: {e_ws}[/yellow]")

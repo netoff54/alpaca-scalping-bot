@@ -13,7 +13,8 @@ class BinanceWebSocketManager:
     sehingga bot memperoleh harga real-time tick-by-tick tanpa memakan kuota REST bursa (Weight = 0).
     Dilengkapi automatic reconnect, keep-alive heartbeat, and multi-endpoint failover.
     """
-    def __init__(self):
+    def __init__(self, is_banned_fn=None):
+        self.is_banned_fn = is_banned_fn
         self.endpoints = [
             "wss://fstream.binance.com/ws/!miniTicker@arr",
             "wss://fstream1.binance.com/ws/!miniTicker@arr",
@@ -70,6 +71,10 @@ class BinanceWebSocketManager:
         backoff = 1.0
 
         while self._running:
+            if self.is_banned_fn and self.is_banned_fn():
+                time.sleep(15.0)
+                continue
+
             endpoint = self.endpoints[self._current_endpoint_idx]
             try:
                 console.log(f"[cyan]📡 Menghubungkan WebSocket Binance Futures: {endpoint}...[/cyan]")
