@@ -93,12 +93,13 @@ def test_binance():
             results[base] = {"error": str(e)}
     
     # Test WebSocket status
+    ws_mgr = getattr(scalper.client, "ws_manager", None)
     results["websocket"] = {
-        "is_alive": scalper.ws.is_alive(),
-        "is_connected": scalper.ws.is_connected,
-        "total_messages": scalper.ws.total_messages_received,
-        "tracked_symbols": len(scalper.ws.prices),
-        "reconnect_count": scalper.ws.reconnect_count
+        "is_alive": ws_mgr.is_alive() if ws_mgr else False,
+        "is_connected": ws_mgr.is_connected if ws_mgr else False,
+        "total_messages": ws_mgr.total_messages_received if ws_mgr else 0,
+        "tracked_symbols": len(ws_mgr.prices) if ws_mgr else 0,
+        "reconnect_count": ws_mgr.reconnect_count if ws_mgr else 0
     }
     
     # Test signed balance request directly without cooldown check
@@ -106,8 +107,8 @@ def test_binance():
         ts = int(time.time() * 1000)
         query = f"timestamp={ts}"
         import hmac, hashlib
-        sig = hmac.new(config.BINANCE_API_SECRET.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()
-        h = {"X-MBX-APIKEY": config.BINANCE_API_KEY}
+        sig = hmac.new(config.API_SECRET.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()
+        h = {"X-MBX-APIKEY": config.API_KEY}
         r_acc = requests.get(f"https://fapi.binance.com/fapi/v2/balance?{query}&signature={sig}", headers=h, timeout=6)
         results["signed_balance"] = {"status": r_acc.status_code, "text": r_acc.text[:300]}
     except Exception as e_acc:

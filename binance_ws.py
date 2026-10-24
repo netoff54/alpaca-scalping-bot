@@ -71,10 +71,6 @@ class BinanceWebSocketManager:
         backoff = 1.0
 
         while self._running:
-            if self.is_banned_fn and self.is_banned_fn():
-                time.sleep(15.0)
-                continue
-
             endpoint = self.endpoints[self._current_endpoint_idx]
             try:
                 console.log(f"[cyan]📡 Menghubungkan WebSocket Binance Futures: {endpoint}...[/cyan]")
