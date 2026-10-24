@@ -459,7 +459,7 @@ def health_check():
             "exchange": "Binance Futures",
             "websocket_stream": ws_info,
             "candle_scan_depth": config.CANDLE_LIMIT,
-            "account_age": f"{int((time.time() - 1791861617.021) / 86400)} Hari (Aktif sejak 13 Okt 2026 - Batas Binance <30 hari: Max 20x)",
+            "account_age": f"{int((time.time() - 1791861617.021) / 86400)} Hari (Aktif sejak 13 Okt 2026 10:20 WIB - Dynamic Min Lev: {config.dynamic_min_leverage}x)",
             "timeframe_setup": {
                 "execution": config.TIMEFRAME,
                 "structure": config.STRUCTURE_TIMEFRAME,

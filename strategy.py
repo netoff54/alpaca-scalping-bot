@@ -426,7 +426,7 @@ def analyze_coin_comprehensive(
     # Target Leverage & Range Stepping Clamping:
     # Mengutamakan 50x, jika koin/akun dibatasi, ambil batas tertinggi dalam rentang [20x, 50x].
     target_leverage = config.LEVERAGE_MAX
-    min_leverage = config.LEVERAGE_MIN
+    min_leverage = config.dynamic_min_leverage
     effective_leverage = min(target_leverage, max_symbol_leverage) if max_symbol_leverage > 0 else target_leverage
 
     # Manajemen Risiko Ketat RR 1:2 (Take Profit 2x Lipat Resiko)

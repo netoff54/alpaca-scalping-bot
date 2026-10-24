@@ -637,19 +637,21 @@ class BinanceScalper:
                 actual_leverage = self._symbol_leverage[symbol]
             else:
                 self.client.set_margin_type(symbol, "ISOLATED")
+                curr_min_lev = config.dynamic_min_leverage
                 actual_leverage = self.client.set_leverage(
                     symbol,
                     target_leverage=config.LEVERAGE_MAX,
-                    min_leverage=config.LEVERAGE_MIN
+                    min_leverage=curr_min_lev
                 )
-                if actual_leverage >= config.LEVERAGE_MIN:
+                if actual_leverage >= curr_min_lev:
                     self._symbol_leverage[symbol] = actual_leverage
                     self._configured_symbols.add(symbol)
             
-            # Saring koin dengan leverage di bawah 20x agar seluruh trade seragam & koin < 20x di-skip
-            if actual_leverage < config.LEVERAGE_MIN:
+            # Saring koin jika leverage di bawah batas minimal dinamis (20x sebelum 35 hari, 25x setelah 35 hari)
+            curr_min_lev = config.dynamic_min_leverage
+            if actual_leverage < curr_min_lev:
                 console.log(
-                    f"[bold yellow]🛡️ Filter Leverage Rendah: {symbol} hanya mendukung {actual_leverage}x (< {config.LEVERAGE_MIN}x). "
+                    f"[bold yellow]🛡️ Filter Leverage Rendah: {symbol} hanya mendukung {actual_leverage}x (< {curr_min_lev}x). "
                     f"Melewati koin agar modal tetap aman dan terukur.[/bold yellow]"
                 )
                 self.active_order = None

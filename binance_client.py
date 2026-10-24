@@ -416,39 +416,39 @@ class BinanceFuturesClient:
         """Mengembalikan leverage maksimal resmi koin (default 50 jika belum termuat)."""
         return self._symbols_max_leverage.get(symbol, 50)
 
-    def set_leverage(self, symbol: str, target_leverage: int = 50, min_leverage: int = 20) -> int:
+    def set_leverage(self, symbol: str, target_leverage: int = 50, min_leverage: Optional[int] = None) -> int:
         """
-        Mengatur leverage dengan efisiensi tinggi [50x down to 20x]:
-        1. Memanfaatkan batas akun global jika sudah terdeteksi (misal pembatasan akun < 30 hari = 20x).
-        2. Mencoba level-level leverage standar Binance [50, 25, 20] tanpa spam integer berulang.
-        3. Nilai pertama yang berhasil diterima bursa langsung dipakai dan disimpan.
+        Mengatur leverage bertahap dari 50x ke bawah (50x -> 49x -> 48x ...):
+        - Tembak dari target maksimal (50x), jika gagal coba 49x, 48x, dst. Tidak langsung lompat ke 20x.
+        - Batas minimal leverage dinamis: 25x setelah akun berumur 35 hari, atau 20x jika < 35 hari.
+        - Mematuhi limit bracket resmi bursa per koin.
         """
+        # 1. Hitung umur akun untuk batas minimal leverage dinamis
+        import time
+        days_active = (time.time() - 1791861617.021) / 86400.0  # Aktif sejak 13 Okt 2026 10:20 WIB
+        effective_min_leverage = 25 if days_active >= 35.0 else (min_leverage if min_leverage else 20)
+
         if self.is_banned():
-            return max(min_leverage, min(target_leverage, self.get_max_leverage(symbol)))
+            return max(effective_min_leverage, min(target_leverage, self.get_max_leverage(symbol)))
         
         cached_lev = self._symbols_max_leverage.get(symbol)
         
-        # Fast Skip: jika batas resmi koin sudah diketahui < 20x (misal koin 10x atau 5x), langsung skip
-        if cached_lev is not None and cached_lev < min_leverage:
-            console.log(f"[bold yellow]Batas leverage resmi {symbol} hanya {cached_lev}x (< {min_leverage}x). Melewati probing agar koin di-skip.[/bold yellow]")
+        # Fast Skip: jika batas resmi koin sudah diketahui di bawah batas minimal, lewati
+        if cached_lev is not None and cached_lev < effective_min_leverage:
+            console.log(f"[bold yellow]Batas leverage resmi {symbol} hanya {cached_lev}x (< {effective_min_leverage}x). Melewati koin.[/bold yellow]")
             return 0
 
-        # Jika sudah terdeteksi limit global akun (misal akun < 30 hari dibatasi 20x)
+        # Tentukan titik mulai tembakan leverage
+        start_lev = target_leverage
+        if cached_lev is not None:
+            start_lev = min(start_lev, cached_lev)
         if self._account_max_leverage is not None:
-            effective_target = min(target_leverage, self._account_max_leverage)
-        else:
-            effective_target = target_leverage
+            start_lev = min(start_lev, self._account_max_leverage)
 
-        start_lev = min(effective_target, cached_lev if cached_lev and cached_lev >= min_leverage else effective_target)
         url = f"{self.base_url}/fapi/v1/leverage"
 
-        # Coba target utama dulu (misal 50 atau batas akun), lalu fallback ke tier umum [50, 25, 20]
-        test_levels = [start_lev]
-        for candidate in [50, 25, 20]:
-            if candidate <= start_lev and candidate >= min_leverage and candidate not in test_levels:
-                test_levels.append(candidate)
-
-        for lev in test_levels:
+        # Tembak bertahap dari 50x, 49x, 48x ... hingga batas minimal (25x / 20x)
+        for lev in range(start_lev, effective_min_leverage - 1, -1):
             try:
                 params = self._sign({"symbol": symbol, "leverage": lev})
                 resp = self.session.post(url, params=params, timeout=6)
@@ -456,20 +456,33 @@ class BinanceFuturesClient:
                 data = resp.json()
                 if isinstance(data, dict) and "leverage" in data:
                     actual = int(data["leverage"])
-                    console.log(f"[bold green]Ditemukan leverage maksimal untuk {symbol}: {actual}x (Range 50x-{min_leverage}x)![/bold green]")
+                    console.log(f"[bold green]Leverage berhasil disetel untuk {symbol}: {actual}x (Probing bertahap dari {target_leverage}x)![/bold green]")
                     return actual
                 elif isinstance(data, dict):
-                    msg = data.get("msg", "")
-                    # Deteksi batas akun Binance (misal akun baru < 30 hari)
-                    if "20" in msg or "user max leverage" in msg.lower() or "cannot exceed" in msg.lower():
-                        self._account_max_leverage = 20
-                        console.log(f"[bold yellow]Bursa membatasi leverage akun maksimal 20x (Regulasi Akun < 30 Hari). Otomatis menetapkan 20x...[/bold yellow]")
+                    msg = str(data.get("msg", ""))
+                    # Deteksi batas akun Binance jika terlampaui
+                    import re
+                    match = re.search(r"(\d+)", msg)
+                    if ("user max leverage" in msg.lower() or "cannot exceed" in msg.lower() or "max leverage" in msg.lower()) and match:
+                        allowed_cap = int(match.group(1))
+                        if allowed_cap >= effective_min_leverage:
+                            self._account_max_leverage = allowed_cap
+                            console.log(f"[bold yellow]Bursa menginformasikan batas leverage akun {allowed_cap}x. Mencoba {allowed_cap}x...[/bold yellow]")
+                            # Coba langsung allowed_cap
+                            params_cap = self._sign({"symbol": symbol, "leverage": allowed_cap})
+                            resp_cap = self.session.post(url, params=params_cap, timeout=6)
+                            data_cap = resp_cap.json()
+                            if isinstance(data_cap, dict) and "leverage" in data_cap:
+                                return int(data_cap["leverage"])
+                        else:
+                            console.log(f"[bold yellow]Batas akun {allowed_cap}x di bawah batas minimal {effective_min_leverage}x.[/bold yellow]")
+                            return 0
             except Exception as e:
                 console.log(f"[dim]Percobaan leverage {lev}x untuk {symbol}: {e}[/dim]")
                 continue
 
-        # Jika seluruh candidate ditolak bursa
-        console.log(f"[bold yellow]Koin {symbol} tidak dapat mencapai batas minimal {min_leverage}x. Koin di-skip.[/bold yellow]")
+        # Jika seluruh percobaan hingga batas minimal ditolak bursa
+        console.log(f"[bold yellow]Koin {symbol} tidak dapat mencapai batas minimal {effective_min_leverage}x. Koin di-skip.[/bold yellow]")
         return 0
 
     def fetch_best_bid_ask(self, symbol: str) -> Dict[str, float]:
