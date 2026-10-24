@@ -81,6 +81,40 @@ def get_outbound_ip():
     except Exception as e:
         return {"error": str(e)}
 
+@app.get("/test-binance")
+def test_binance():
+    """Diagnosa langsung koneksi ke Binance Futures API dari container."""
+    results = {}
+    for base in ["https://fapi.binance.com", "https://fapi1.binance.com", "https://fapi2.binance.com", "https://fapi3.binance.com"]:
+        try:
+            r = requests.get(f"{base}/fapi/v1/time", timeout=5)
+            results[base] = {"status": r.status_code, "text": r.text}
+        except Exception as e:
+            results[base] = {"error": str(e)}
+    
+    # Test WebSocket status
+    results["websocket"] = {
+        "is_alive": scalper.ws.is_alive(),
+        "is_connected": scalper.ws.is_connected,
+        "total_messages": scalper.ws.total_messages_received,
+        "tracked_symbols": len(scalper.ws.prices),
+        "reconnect_count": scalper.ws.reconnect_count
+    }
+    
+    # Test signed balance request directly without cooldown check
+    try:
+        ts = int(time.time() * 1000)
+        query = f"timestamp={ts}"
+        import hmac, hashlib
+        sig = hmac.new(config.BINANCE_API_SECRET.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()
+        h = {"X-MBX-APIKEY": config.BINANCE_API_KEY}
+        r_acc = requests.get(f"https://fapi.binance.com/fapi/v2/balance?{query}&signature={sig}", headers=h, timeout=6)
+        results["signed_balance"] = {"status": r_acc.status_code, "text": r_acc.text[:300]}
+    except Exception as e_acc:
+        results["signed_balance"] = {"error": str(e_acc)}
+
+    return results
+
 @app.get("/capital-audit")
 def capital_audit():
     """
