@@ -85,14 +85,39 @@ def get_outbound_ip():
 def test_binance():
     """Diagnosa langsung koneksi ke Binance Futures API dari container."""
     results = {}
-    for base in ["https://fapi.binance.com", "https://fapi1.binance.com", "https://fapi2.binance.com", "https://fapi3.binance.com"]:
-        try:
-            r = requests.get(f"{base}/fapi/v1/time", timeout=5)
-            results[base] = {"status": r.status_code, "text": r.text}
-        except Exception as e:
-            results[base] = {"error": str(e)}
+    h = {"X-MBX-APIKEY": config.API_KEY}
+    import hmac, hashlib
     
-    # Test WebSocket status
+    # 1. Test public endpoints
+    for ep, name in [
+        ("https://fapi.binance.com/fapi/v1/time", "time"),
+        ("https://fapi.binance.com/fapi/v1/exchangeInfo", "exchangeInfo"),
+        ("https://fapi.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT", "ticker_price"),
+        ("https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=15m&limit=5", "klines")
+    ]:
+        try:
+            r = requests.get(ep, timeout=6)
+            results[name] = {"status": r.status_code, "text": r.text[:200]}
+        except Exception as e:
+            results[name] = {"error": str(e)}
+
+    # 2. Test signed endpoints
+    for ep_path, name in [
+        ("/fapi/v2/balance", "signed_balance"),
+        ("/fapi/v2/account", "signed_account"),
+        ("/fapi/v2/positionRisk", "signed_positionRisk")
+    ]:
+        try:
+            ts = int(time.time() * 1000)
+            query = f"timestamp={ts}"
+            sig = hmac.new(config.API_SECRET.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()
+            url = f"https://fapi.binance.com{ep_path}?{query}&signature={sig}"
+            r_sig = requests.get(url, headers=h, timeout=6)
+            results[name] = {"status": r_sig.status_code, "text": r_sig.text[:200]}
+        except Exception as e_sig:
+            results[name] = {"error": str(e_sig)}
+
+    # 3. WebSocket details
     ws_mgr = getattr(scalper.client, "ws_manager", None)
     results["websocket"] = {
         "is_alive": ws_mgr.is_alive() if ws_mgr else False,
@@ -101,18 +126,6 @@ def test_binance():
         "tracked_symbols": len(ws_mgr.prices) if ws_mgr else 0,
         "reconnect_count": ws_mgr.reconnect_count if ws_mgr else 0
     }
-    
-    # Test signed balance request directly without cooldown check
-    try:
-        ts = int(time.time() * 1000)
-        query = f"timestamp={ts}"
-        import hmac, hashlib
-        sig = hmac.new(config.API_SECRET.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()
-        h = {"X-MBX-APIKEY": config.API_KEY}
-        r_acc = requests.get(f"https://fapi.binance.com/fapi/v2/balance?{query}&signature={sig}", headers=h, timeout=6)
-        results["signed_balance"] = {"status": r_acc.status_code, "text": r_acc.text[:300]}
-    except Exception as e_acc:
-        results["signed_balance"] = {"error": str(e_acc)}
 
     return results
 
