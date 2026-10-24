@@ -16,10 +16,10 @@ class BinanceWebSocketManager:
     def __init__(self, is_banned_fn=None):
         self.is_banned_fn = is_banned_fn
         self.endpoints = [
-            "wss://fstream.binance.com/ws/!miniTicker@arr",
-            "wss://fstream1.binance.com/ws/!miniTicker@arr",
-            "wss://fstream2.binance.com/ws/!miniTicker@arr",
-            "wss://fstream3.binance.com/ws/!miniTicker@arr"
+            "wss://fstream.binance.com/market/ws/!miniTicker@arr",
+            "wss://fstream1.binance.com/market/ws/!miniTicker@arr",
+            "wss://fstream2.binance.com/market/ws/!miniTicker@arr",
+            "wss://fstream3.binance.com/market/ws/!miniTicker@arr"
         ]
         self._current_endpoint_idx = 0
         self.prices: Dict[str, float] = {}
