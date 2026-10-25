@@ -70,15 +70,16 @@ class BotConfig:
     VOLUME_SPIKE_FACTOR: float = 1.15      # Konfirmasi volume transaksi >= 115% rata-rata
 
     # --- Risk / Reward Ratio Presisi Dollar 1:2 NET Riil (Sudah Ditambahkan Seluruh Fee Bursa) ---
-    # Fee Loss: Maker Entry 0.02% + Taker SL 0.05% = 0.07% -> Net Loss = 1.00% + 0.07% = 1.07% (-$0.5350 pada notional $50)
-    # Fee Win: Maker Entry 0.02% + Maker TP 0.02% = 0.04% -> Gross TP 2.33% - 0.04% = Net Win 2.29% (+$1.1450 pada notional $50)
-    # Rasio Dolar Bersih Riil Dompet: +$1.1450 / $0.5350 = 2.14 NET (> 1:2.00)
-    SL_PERCENT: float = 0.0100             # Stop Loss 1.00% (Gross 1.00% + Fee 0.07% = Net Loss 1.07% / 1R Risiko)
-    TP_PERCENT: float = 0.0233             # Take Profit 2.33% (Gross 2.33% - Fee 0.04% = Net Win 2.29% / Net 2.14:1 RRR)
-    RR_RATIO: float = 2.00                 # Rasio Risk-to-Reward Net Bersih Sempurna Setelah Seluruh Biaya Transaksi
-    BEP_PROFIT_TRIGGER: float = 0.0140     # Pemicu BEP saat profit mencapai 1.40% (1.4R) untuk mengunci profit sebelum reversal
-    BEP_LOCK_PROFIT: float = 0.0025        # Kunci profit +0.25% (Menutup 100% fee bursa 0.07% + garansi cuan aman bersih > $0.10)
+    SL_PERCENT: float = 0.0100             # Stop Loss dasar 1.00%
+    TP_PERCENT: float = 0.0233             # Take Profit dasar 2.33%
+    RR_RATIO: float = 2.00                 # Rasio Risk-to-Reward Net Bersih 1:2.0
+    STRUCTURAL_SL_ENABLED: bool = True     # Stop Loss struktural berbasis ekor lilin Price Action
+    MIN_SL_PERCENT: float = 0.0080         # Batas bawah risiko 0.80% (Anti-Wick Noise Altcoin)
+    MAX_SL_PERCENT: float = 0.0200         # Batas atas risiko 2.00% (Maksimal Terkontrol)
+    BTC_FILTER_ENABLED: bool = True        # Kompas Makro BTC (Dilarang Long Altcoin jika BTC di bawah EMA 200 4 Jam)
     POST_SL_COOLDOWN_HOURS: float = 4.0    # Jeda cooldown 4 jam per koin setelah Stop Loss (Anti-Chop & Anti-Revenge Trading)
+    CONSECUTIVE_LOSS_CIRCUIT_BREAKER: int = 3 # Circuit Breaker portofolio jika 3 loss berturut-turut
+    CIRCUIT_BREAKER_PAUSE_HOURS: float = 36.0 # Jeda 36 jam untuk mendinginkan portofolio saat badai pasar
     MAX_SPREAD_PERCENT: float = 0.0008     # Batas maksimal spread bid-ask 0.08% (Anti-Slippage & Anti-Illiquid Books)
     MAKER_FEE_RATE: float = 0.0002         # 0.02% maker fee pada Binance Futures
 

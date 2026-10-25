@@ -68,6 +68,8 @@ class BinanceScalper:
         self._last_reversal_check_time: float = 0.0
         self.last_error: Optional[str] = None
         self._symbol_order_cooldown: Dict[str, float] = {}
+        self.consecutive_losses: int = 0
+        self.circuit_breaker_until: float = 0.0
         
         # Muat riwayat transaksi kumulatif dari Neon Tech agar tidak reset saat restart/redeploy
         self.load_history_from_db()
@@ -369,11 +371,22 @@ class BinanceScalper:
             console.log(f"[red]Error mencatat trade ke database: {e_rec}[/red]")
 
         # Proteksi Anti-Chop & Anti-Revenge Trading:
-        # Jika trade berakhir LOSS (kena SL -1.00%), berikan jeda cooldown per simbol (misal 4 jam)
+        # Jika trade berakhir LOSS, berikan jeda cooldown per simbol (4 jam) & hitung rentetan loss portofolio
         if res == "LOSS":
             cooldown_dur = getattr(config, "POST_SL_COOLDOWN_HOURS", 4.0) * 3600.0
             self._symbol_order_cooldown[sym] = time.time() + cooldown_dur
-            console.log(f"[bold yellow]🛡️ Perlindungan Anti-Chop: Koin {sym} masuk masa jeda cooldown {getattr(config, 'POST_SL_COOLDOWN_HOURS', 4.0)} jam setelah Stop Loss agar terhindar dari whipsaw berulang.[/bold yellow]")
+            self.consecutive_losses += 1
+            console.log(f"[bold yellow]🛡️ Perlindungan Anti-Chop: Koin {sym} masuk jeda cooldown {getattr(config, 'POST_SL_COOLDOWN_HOURS', 4.0)} jam setelah Stop Loss (Loss beruntun: {self.consecutive_losses}).[/bold yellow]")
+
+            cb_threshold = getattr(config, "CONSECUTIVE_LOSS_CIRCUIT_BREAKER", 3)
+            if self.consecutive_losses >= cb_threshold:
+                pause_sec = getattr(config, "CIRCUIT_BREAKER_PAUSE_HOURS", 36.0) * 3600.0
+                self.circuit_breaker_until = time.time() + pause_sec
+                cb_wib = time.strftime('%H:%M:%S', time.gmtime(self.circuit_breaker_until + 7 * 3600))
+                console.log(f"[bold red]🚨 CIRCUIT BREAKER PORTOFOLIO: {self.consecutive_losses} loss berturut-turut. Mengistirahatkan seluruh scanner selama {getattr(config, 'CIRCUIT_BREAKER_PAUSE_HOURS', 36.0)} jam hingga {cb_wib} WIB.[/bold red]")
+                self.consecutive_losses = 0
+        else:
+            self.consecutive_losses = 0
 
         self.active_position = None
         return trade_record
@@ -514,6 +527,10 @@ class BinanceScalper:
         - Sebanyak 500 rotasi berturut-turut untuk menyisir seluruh koin tanpa screening singkat.
         """
         if self.client.is_banned() or self.client.is_scan_throttled():
+            return
+        if time.time() < self.circuit_breaker_until:
+            rem_m = int((self.circuit_breaker_until - time.time()) / 60)
+            self.current_rotation_info = f"Circuit Breaker Aktif ({rem_m}m lagi - Perlindungan Portofolio)"
             return
         t_start = time.time()
         try:

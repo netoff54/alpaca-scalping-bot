@@ -433,16 +433,40 @@ def analyze_coin_comprehensive(
     # Saring ketat: Jika koin tidak mendukung leverage minimal 20x (misal 10x), lewati (skip) koin!
     executable_signal = None
     if signal_side and final_score >= config.MIN_SETUP_SCORE and effective_leverage >= min_leverage:
-        sl_percent = config.SL_PERCENT
-        tp_percent = config.TP_PERCENT
-        bep_trigger_percent = config.BEP_PROFIT_TRIGGER
         entry_price = latest_price
-        sl_dist = entry_price * sl_percent
-        tp_dist = entry_price * tp_percent
-        bep_trigger_dist = entry_price * bep_trigger_percent
 
-        sl_price = entry_price - sl_dist if signal_side == "BUY" else entry_price + sl_dist
-        tp_price = entry_price + tp_dist if signal_side == "BUY" else entry_price - tp_dist
+        # Structural Invalidation SL & True 1:2.0 RRR
+        if getattr(config, "STRUCTURAL_SL_ENABLED", True):
+            p_low = ohlcv_ltf[-2][3] if len(ohlcv_ltf) >= 2 else c_low
+            p_high = ohlcv_ltf[-2][2] if len(ohlcv_ltf) >= 2 else c_high
+            min_r = getattr(config, "MIN_SL_PERCENT", 0.0080)
+            max_r = getattr(config, "MAX_SL_PERCENT", 0.0200)
+
+            if signal_side == "BUY":
+                raw_sl = min(c_low, p_low) * 0.998
+                risk_dist = entry_price - raw_sl
+                risk_dist = max(entry_price * min_r, min(entry_price * max_r, risk_dist))
+                sl_price = entry_price - risk_dist
+                tp_price = entry_price + (risk_dist * config.RR_RATIO)
+            else:
+                raw_sl = max(c_high, p_high) * 1.002
+                risk_dist = raw_sl - entry_price
+                risk_dist = max(entry_price * min_r, min(entry_price * max_r, risk_dist))
+                sl_price = entry_price + risk_dist
+                tp_price = entry_price - (risk_dist * config.RR_RATIO)
+
+            sl_percent = risk_dist / entry_price
+            tp_percent = (risk_dist * config.RR_RATIO) / entry_price
+        else:
+            sl_percent = config.SL_PERCENT
+            tp_percent = config.TP_PERCENT
+            sl_dist = entry_price * sl_percent
+            tp_dist = entry_price * tp_percent
+            sl_price = entry_price - sl_dist if signal_side == "BUY" else entry_price + sl_dist
+            tp_price = entry_price + tp_dist if signal_side == "BUY" else entry_price - tp_dist
+
+        bep_trigger_percent = sl_percent * 1.4
+        bep_trigger_dist = entry_price * bep_trigger_percent
         bep_trigger_price = entry_price + bep_trigger_dist if signal_side == "BUY" else entry_price - bep_trigger_dist
 
         # Aturan Margin Bertingkat Fleksibel:

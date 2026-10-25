@@ -464,6 +464,11 @@ def health_check():
                 "macro": config.MACRO_TIMEFRAME
             },
             "rate_limit_status": cooldown_info,
+            "circuit_breaker": {
+                "active": time.time() < scalper.circuit_breaker_until,
+                "consecutive_losses": scalper.consecutive_losses,
+                "pause_until": time.strftime("%Y-%m-%d %H:%M:%S WIB", time.gmtime(scalper.circuit_breaker_until + 7 * 3600)) if time.time() < scalper.circuit_breaker_until else "READY"
+            },
             "compounding": "ACTIVE",
             "futures_wallet_usdt": bal["total_wallet"],
             "available_usdt": bal["available"],
