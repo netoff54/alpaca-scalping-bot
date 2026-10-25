@@ -78,6 +78,7 @@ class BotConfig:
     RR_RATIO: float = 2.00                 # Rasio Risk-to-Reward Net Bersih Sempurna Setelah Seluruh Biaya Transaksi
     BEP_PROFIT_TRIGGER: float = 0.0140     # Pemicu BEP saat profit mencapai 1.40% (1.4R) untuk mengunci profit sebelum reversal
     BEP_LOCK_PROFIT: float = 0.0025        # Kunci profit +0.25% (Menutup 100% fee bursa 0.07% + garansi cuan aman bersih > $0.10)
+    POST_SL_COOLDOWN_HOURS: float = 4.0    # Jeda cooldown 4 jam per koin setelah Stop Loss (Anti-Chop & Anti-Revenge Trading)
     MAX_SPREAD_PERCENT: float = 0.0008     # Batas maksimal spread bid-ask 0.08% (Anti-Slippage & Anti-Illiquid Books)
     MAKER_FEE_RATE: float = 0.0002         # 0.02% maker fee pada Binance Futures
 

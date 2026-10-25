@@ -256,8 +256,11 @@ class BinanceScalper:
                     self.client.cancel_all_algo_orders(sym)
                     
                     entry_p = float(closed_pos.get("entry_price", 0.0))
-                    exit_hint = float(closed_pos.get("tp_price", entry_p))
-                    self._record_closed_position(closed_pos, exit_price_hint=exit_hint, result_hint="WIN")
+                    c_side = closed_pos.get("side", "buy").lower()
+                    cur_p = self.fetch_price(sym) or entry_p
+                    is_win_hint = (cur_p >= entry_p) if c_side == "buy" else (cur_p <= entry_p)
+                    exit_hint = float(closed_pos.get("tp_price" if is_win_hint else "sl_price", entry_p))
+                    self._record_closed_position(closed_pos, exit_price_hint=exit_hint, result_hint="WIN" if is_win_hint else "LOSS")
                     return None
                 return None
         except Exception as e:
@@ -364,6 +367,13 @@ class BinanceScalper:
             console.log(f"[bold green]✅ Trade {sym} berhasil tercatat 100% akurat dari bursa: PnL ${real_pnl_usd:+.4f} ({real_pnl_pct:+.2f}%), Exit: {real_exit_price}, Lev: {c_lev}x[/bold green]")
         except Exception as e_rec:
             console.log(f"[red]Error mencatat trade ke database: {e_rec}[/red]")
+
+        # Proteksi Anti-Chop & Anti-Revenge Trading:
+        # Jika trade berakhir LOSS (kena SL -1.00%), berikan jeda cooldown per simbol (misal 4 jam)
+        if res == "LOSS":
+            cooldown_dur = getattr(config, "POST_SL_COOLDOWN_HOURS", 4.0) * 3600.0
+            self._symbol_order_cooldown[sym] = time.time() + cooldown_dur
+            console.log(f"[bold yellow]🛡️ Perlindungan Anti-Chop: Koin {sym} masuk masa jeda cooldown {getattr(config, 'POST_SL_COOLDOWN_HOURS', 4.0)} jam setelah Stop Loss agar terhindar dari whipsaw berulang.[/bold yellow]")
 
         self.active_position = None
         return trade_record

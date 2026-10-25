@@ -369,14 +369,14 @@ def analyze_coin_comprehensive(
     # SETUP 1: LIQUIDITY SWEEP & RECLAIM (Poin 8 Kalimasada - SMC Validasi Lilin Reversal)
     # Institutional Stop Hunt di bawah Support / di atas Resistance dengan konfirmasi Reversal
     # =========================================================================
-    if (c_low <= nearest_support * 0.997) and c_close >= nearest_support and rev_pattern["is_bullish_reversal"] and macro_trend != "BEARISH" and rsi_ok_buy and has_room_for_buy:
+    if (c_low <= nearest_support * 0.997) and c_close >= nearest_support and rev_pattern["is_bullish_reversal"] and macro_trend != "BEARISH" and rsi_ok_buy and has_room_for_buy and has_strong_volume:
         sweep_status = "LONG_LIQUIDITY_SWEPT"
         signal_side = "BUY"
         setup_name = "LIQUIDITY_SWEEP"
         setup_desc = f"Liquidity Sweep di bawah Support {nearest_support:.4f} & Reclaim ({rev_pattern['pattern_name']})"
         score = 90.0
 
-    elif (c_high >= nearest_resistance * 1.003) and c_close <= nearest_resistance and rev_pattern["is_bearish_reversal"] and macro_trend != "BULLISH" and rsi_ok_sell and has_room_for_sell:
+    elif (c_high >= nearest_resistance * 1.003) and c_close <= nearest_resistance and rev_pattern["is_bearish_reversal"] and macro_trend != "BULLISH" and rsi_ok_sell and has_room_for_sell and has_strong_volume:
         sweep_status = "SHORT_LIQUIDITY_SWEPT"
         signal_side = "SELL"
         setup_name = "LIQUIDITY_SWEEP"
