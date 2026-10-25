@@ -70,6 +70,7 @@ class BinanceScalper:
         self._symbol_order_cooldown: Dict[str, float] = {}
         self.consecutive_losses: int = 0
         self.circuit_breaker_until: float = 0.0
+        self._cached_btc_macro: Dict[str, Any] = {"bullish": True, "updated_at": 0.0}
         
         # Muat riwayat transaksi kumulatif dari Neon Tech agar tidak reset saat restart/redeploy
         self.load_history_from_db()
@@ -93,6 +94,31 @@ class BinanceScalper:
     @_ban_until.setter
     def _ban_until(self, val: float):
         self.client.ban_until = val
+
+    def is_btc_macro_bullish(self) -> bool:
+        """
+        Kompas Makro BTC 4 Jam:
+        Mengecek apakah harga BTC saat ini berada di atas EMA 200 4 Jam.
+        Di-cache selama 15 menit (900 detik) untuk menghemat kuota request.
+        """
+        now = time.time()
+        if (now - self._cached_btc_macro.get("updated_at", 0.0)) < 900.0:
+            return self._cached_btc_macro.get("bullish", True)
+
+        try:
+            btc_klines = self.client.fetch_klines("BTCUSDT", interval="4h", limit=250)
+            if btc_klines and len(btc_klines) >= 20:
+                closes = [c[4] for c in btc_klines]
+                cur_p = closes[-1]
+                ema200_series = strategy.calculate_ema_series(closes, min(len(closes), config.EMA_TREND))
+                ema200 = ema200_series[-1] if ema200_series else cur_p
+                is_bull = cur_p >= ema200
+                self._cached_btc_macro = {"bullish": is_bull, "updated_at": now}
+                return is_bull
+        except Exception as e:
+            console.log(f"[dim]BTC macro check fallback notice: {e}[/dim]")
+
+        return self._cached_btc_macro.get("bullish", True)
 
     def get_futures_balance(self, max_age_sec: float = 60.0) -> Dict[str, float]:
         """Mengambil saldo wallet USDⓈ-M Futures dengan caching 60 detik."""
@@ -572,6 +598,7 @@ class BinanceScalper:
 
             # 2. Analisis Menyeluruh Sesuai Master Blueprint Akademi Crypto
             max_sym_lev = self.client.get_max_leverage(sym)
+            btc_macro_bull = self.is_btc_macro_bullish() if config.BTC_FILTER_ENABLED else None
             analysis = strategy.analyze_coin_comprehensive(
                 symbol=sym,
                 ohlcv_htf=ohlcv_1h,
@@ -580,7 +607,8 @@ class BinanceScalper:
                 derivatives_data=deriv_data,
                 available_capital=cap,
                 leverage=config.LEVERAGE,
-                max_symbol_leverage=max_sym_lev
+                max_symbol_leverage=max_sym_lev,
+                btc_macro_bullish=btc_macro_bull
             )
             analysis["rank"] = rank
             analysis["vol_24h_m"] = round(q_vol / 1_000_000, 2)

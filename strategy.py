@@ -227,7 +227,8 @@ def analyze_coin_comprehensive(
     derivatives_data: Optional[Dict[str, Any]] = None,
     available_capital: float = 10.0,
     leverage: int = 50,
-    max_symbol_leverage: int = 50
+    max_symbol_leverage: int = 50,
+    btc_macro_bullish: Optional[bool] = None
 ) -> Dict[str, Any]:
     """
     Analisis Menyeluruh 1 Koin Crypto (Akademi Crypto Kalimasada Multi-Timeframe):
@@ -255,7 +256,7 @@ def analyze_coin_comprehensive(
     if not ohlcv_htf or len(ohlcv_htf) < 25:
         ohlcv_htf = ohlcv_ltf
 
-    # --- 1. Analisis Tren Makro 4h ---
+    # --- 1. Analisis Tren Makro 4h (dengan Strict BTC Macro Compass) ---
     macro_trend = "NEUTRAL"
     ema200_macro = 0.0
     latest_price = ohlcv_ltf[-1][4]
@@ -266,9 +267,17 @@ def analyze_coin_comprehensive(
         ema200_macro = ema200_m_series[-1] if ema200_m_series else latest_price
         ema13_m = calculate_ema_series(m_closes, config.EMA_FAST)[-1]
         ema21_m = calculate_ema_series(m_closes, config.EMA_SLOW)[-1]
-        if latest_price >= ema200_macro and ema13_m >= ema21_m:
+
+        is_coin_bull = (latest_price >= ema200_macro and ema13_m >= ema21_m)
+        is_coin_bear = (latest_price <= ema200_macro and ema13_m <= ema21_m)
+
+        # Kompas Makro BTC: Dilarang Long jika BTC Bearish, Dilarang Short jika BTC Bullish
+        btc_ok_buy = (btc_macro_bullish is None) or (btc_macro_bullish is True)
+        btc_ok_sell = (btc_macro_bullish is None) or (btc_macro_bullish is False)
+
+        if is_coin_bull and btc_ok_buy:
             macro_trend = "BULLISH"
-        elif latest_price <= ema200_macro and ema13_m <= ema21_m:
+        elif is_coin_bear and btc_ok_sell:
             macro_trend = "BEARISH"
 
     # --- 2. Analisis Struktur HTF 1h (Struktur Pasar, S&R, & Area Likuidasi) ---
@@ -323,6 +332,7 @@ def analyze_coin_comprehensive(
     ema21 = ema21_series[-1]
     atr = atr_series[-1] if len(atr_series) >= 1 else (c_close * 0.005)
     rsi_val = rsi_series[-1] if len(rsi_series) >= 1 else 50.0
+    rsi_prev = rsi_series[-2] if len(rsi_series) >= 2 else rsi_val
 
     c_range = c_high - c_low if (c_high - c_low) > 0 else 0.0001
     lower_wick = min(c_open, c_close) - c_low
@@ -357,31 +367,43 @@ def analyze_coin_comprehensive(
     dist_to_resistance_pct = ((nearest_resistance - c_close) / c_close) if nearest_resistance > c_close else 0.0
     dist_to_support_pct = ((c_close - nearest_support) / c_close) if c_close > nearest_support else 0.0
 
-    # Minimal jarak ke S&R berikutnya adalah 1.50% (cukup untuk target TP 2.33% tanpa langsung terbentur tembok)
+    # Minimal jarak ke S&R berikutnya adalah 1.50% (cukup untuk target TP 2.00% tanpa langsung terbentur tembok)
     has_room_for_buy = dist_to_resistance_pct >= 0.015
     has_room_for_sell = dist_to_support_pct >= 0.015
 
-    # Filter RSI Confluence (Poin 7 Kalimasada: Hindari overbought saat BUY & oversold saat SELL)
-    rsi_ok_buy = (rsi_val <= 68.0)
-    rsi_ok_sell = (rsi_val >= 32.0)
+    # Filter RSI Momentum / Divergence (Poin 7 Kalimasada)
+    rsi_ok_buy = (rsi_val > rsi_prev or rsi_val <= 40.0)
+    rsi_ok_sell = (rsi_val < rsi_prev or rsi_val >= 60.0)
 
     # =========================================================================
     # SETUP 1: LIQUIDITY SWEEP & RECLAIM (Poin 8 Kalimasada - SMC Validasi Lilin Reversal)
     # Institutional Stop Hunt di bawah Support / di atas Resistance dengan konfirmasi Reversal
     # =========================================================================
-    if (c_low <= nearest_support * 0.997) and c_close >= nearest_support and rev_pattern["is_bullish_reversal"] and macro_trend != "BEARISH" and rsi_ok_buy and has_room_for_buy and has_strong_volume:
+    if (c_low <= nearest_support * 0.9975) and c_close >= nearest_support and rev_pattern["is_bullish_reversal"] and macro_trend != "BEARISH" and rsi_ok_buy and has_room_for_buy and has_strong_volume:
         sweep_status = "LONG_LIQUIDITY_SWEPT"
         signal_side = "BUY"
         setup_name = "LIQUIDITY_SWEEP"
         setup_desc = f"Liquidity Sweep di bawah Support {nearest_support:.4f} & Reclaim ({rev_pattern['pattern_name']})"
         score = 90.0
 
-    elif (c_high >= nearest_resistance * 1.003) and c_close <= nearest_resistance and rev_pattern["is_bearish_reversal"] and macro_trend != "BULLISH" and rsi_ok_sell and has_room_for_sell and has_strong_volume:
+    elif (c_high >= nearest_resistance * 1.0025) and c_close <= nearest_resistance and rev_pattern["is_bearish_reversal"] and macro_trend != "BULLISH" and rsi_ok_sell and has_room_for_sell and has_strong_volume:
         sweep_status = "SHORT_LIQUIDITY_SWEPT"
         signal_side = "SELL"
         setup_name = "LIQUIDITY_SWEEP"
         setup_desc = f"Liquidity Sweep di atas Resistance {nearest_resistance:.4f} & Reclaim ({rev_pattern['pattern_name']})"
         score = 90.0
+
+    # =========================================================================
+    # SETUP 2: TREND CONTINUATION (EMA 13/21 RETEST PULLBACK)
+    # Konfirmasi kelanjutan tren: hanya aktif pada tren UPTREND yang valid, bukan sideways
+    # =========================================================================
+    if not signal_side and has_strong_volume:
+        if macro_trend == "BULLISH" and structure == "UPTREND" and (ema13 > ema21):
+            if (c_low <= ema13 * 1.002) and (c_close >= ema13) and rev_pattern["is_bullish_reversal"] and has_room_for_buy:
+                signal_side = "BUY"
+                setup_name = "TREND_RETEST"
+                setup_desc = f"Retest Pullback EMA 13 ({ema13:.4f}) searah tren Bullish ({rev_pattern['pattern_name']})"
+                score = 88.0
 
     # Filter Confluence Tren Makro 4h (Pilar Kalimasada: DILARANG Melawan Tren Makro!)
     if signal_side == "BUY" and macro_trend == "BEARISH":
@@ -443,13 +465,15 @@ def analyze_coin_comprehensive(
             max_r = getattr(config, "MAX_SL_PERCENT", 0.0200)
 
             if signal_side == "BUY":
-                raw_sl = min(c_low, p_low) * 0.998
+                base_low = min(c_low, p_low, ema21) if setup_name == "TREND_RETEST" else min(c_low, p_low)
+                raw_sl = base_low * 0.998
                 risk_dist = entry_price - raw_sl
                 risk_dist = max(entry_price * min_r, min(entry_price * max_r, risk_dist))
                 sl_price = entry_price - risk_dist
                 tp_price = entry_price + (risk_dist * config.RR_RATIO)
             else:
-                raw_sl = max(c_high, p_high) * 1.002
+                base_high = max(c_high, p_high, ema21) if setup_name == "TREND_RETEST" else max(c_high, p_high)
+                raw_sl = base_high * 1.002
                 risk_dist = raw_sl - entry_price
                 risk_dist = max(entry_price * min_r, min(entry_price * max_r, risk_dist))
                 sl_price = entry_price + risk_dist
