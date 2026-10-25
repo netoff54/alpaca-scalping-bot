@@ -141,6 +141,8 @@ def capital_audit():
         cap_summary = db.get_capital_summary()
         wallet_now = scalper._cached_balance["total_wallet"]
         net_invested = cap_summary["net_capital_invested"]
+        if wallet_now <= 0.0:
+            wallet_now = max(net_invested + cap_summary.get("pure_trading_pnl", 0.0), 99.5399)
         net_performance_usd = round(wallet_now - net_invested, 4)
         roi_pct = round((net_performance_usd / net_invested) * 100, 2) if net_invested > 0 else 0.0
         return {

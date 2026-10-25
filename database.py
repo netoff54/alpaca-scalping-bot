@@ -1,10 +1,12 @@
 import os
 import time
 from typing import Dict, Any, List, Optional
+from dotenv import load_dotenv
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from rich.console import Console
 
+load_dotenv()
 console = Console()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
@@ -205,6 +207,28 @@ class NeonDatabase:
                 conn.commit()
         except Exception as e:
             console.log(f"[dim]DB record wallet: {e}[/dim]")
+
+    def get_latest_wallet_snapshot(self) -> Dict[str, float]:
+        """Mengambil rekaman saldo wallet terakhir dari Neon Tech."""
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("""
+                        SELECT total_wallet, available_balance, unrealized_pnl
+                        FROM binance_scalper.wallet_history
+                        ORDER BY recorded_at DESC
+                        LIMIT 1;
+                    """)
+                    row = cur.fetchone()
+                    if row:
+                        return {
+                            "total_wallet": float(row.get("total_wallet") or 0.0),
+                            "available": float(row.get("available_balance") or 0.0),
+                            "unrealized_pnl": float(row.get("unrealized_pnl") or 0.0)
+                        }
+        except Exception as e:
+            console.log(f"[dim]DB get latest wallet snapshot notice: {e}[/dim]")
+        return {}
 
     def get_trade_summary(self) -> Dict[str, Any]:
         """Mengambil ringkasan statistik trading langsung dari database Neon."""

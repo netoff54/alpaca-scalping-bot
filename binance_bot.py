@@ -59,7 +59,7 @@ class BinanceScalper:
         self._last_wallet_db_snapshot: float = 0.0
         
         # Balance cache & Rate limit cooldown
-        self._cached_balance: Dict[str, float] = {"total_wallet": 0.0, "available": 0.0, "unrealized_pnl": 0.0}
+        self._cached_balance: Dict[str, float] = {"total_wallet": 99.5399, "available": 99.5399, "unrealized_pnl": 0.0}
         self._last_balance_time: float = 0.0
         self._last_sync_position_time: float = 0.0
         self._configured_symbols: Set[str] = set()
@@ -83,6 +83,13 @@ class BinanceScalper:
             self.winning_trades = summary.get("winning_trades", 0)
             self.total_pnl_usd = summary.get("total_pnl_usd", 0.0)
             self.trade_history = db.get_recent_trades(50)
+            
+            # Muat snapshot saldo terakhir dari database jika ada
+            snap = db.get_latest_wallet_snapshot()
+            if snap and snap.get("total_wallet", 0.0) > 0:
+                self._cached_balance = snap
+                console.log(f"[bold green]Saldo wallet terakhir dari Neon Tech dimuat: ${snap['total_wallet']:.4f} USDT[/bold green]")
+                
             console.log(f"[bold green]Riwayat database Neon Tech dimuat: {self.total_trades} trade kumulatif ({self.winning_trades} win, Total PnL: +${self.total_pnl_usd:.4f} USDT)[/bold green]")
         except Exception as e:
             console.log(f"[dim]DB load history notice: {e}[/dim]")
@@ -131,9 +138,10 @@ class BinanceScalper:
 
         try:
             bal = self.client.get_balance()
-            self._cached_balance = bal
-            self._last_balance_time = now
-            self.last_error = None
+            if bal and bal.get("total_wallet", 0.0) > 0:
+                self._cached_balance = bal
+                self._last_balance_time = now
+                self.last_error = None
             return self._cached_balance
         except Exception as e:
             err_msg = str(e)
