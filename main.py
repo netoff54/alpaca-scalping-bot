@@ -90,10 +90,13 @@ def test_binance():
     
     # 1. Test public endpoints
     for ep, name in [
-        ("https://fapi.binance.com/fapi/v1/time", "time"),
-        ("https://fapi.binance.com/fapi/v1/exchangeInfo", "exchangeInfo"),
-        ("https://fapi.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT", "ticker_price"),
-        ("https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=15m&limit=5", "klines")
+        ("https://fapi.binance.com/fapi/v1/time", "time_fapi"),
+        ("https://fapi1.binance.com/fapi/v1/time", "time_fapi1"),
+        ("https://fapi2.binance.com/fapi/v1/time", "time_fapi2"),
+        ("https://fapi3.binance.com/fapi/v1/time", "time_fapi3"),
+        ("https://data-api.binance.vision/api/v3/time", "time_vision"),
+        ("https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=5", "klines_vision"),
+        ("https://fapi1.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT", "ticker_fapi1"),
     ]:
         try:
             r = requests.get(ep, timeout=6)
@@ -102,20 +105,22 @@ def test_binance():
             results[name] = {"error": str(e)}
 
     # 2. Test signed endpoints
-    for ep_path, name in [
-        ("/fapi/v2/balance", "signed_balance"),
-        ("/fapi/v2/account", "signed_account"),
-        ("/fapi/v2/positionRisk", "signed_positionRisk")
-    ]:
-        try:
-            ts = int(time.time() * 1000)
-            query = f"timestamp={ts}"
-            sig = hmac.new(config.API_SECRET.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()
-            url = f"https://fapi.binance.com{ep_path}?{query}&signature={sig}"
-            r_sig = requests.get(url, headers=h, timeout=6)
-            results[name] = {"status": r_sig.status_code, "text": r_sig.text[:200]}
-        except Exception as e_sig:
-            results[name] = {"error": str(e_sig)}
+    for base_domain in ["https://fapi.binance.com", "https://fapi1.binance.com"]:
+        domain_tag = "fapi" if base_domain == "https://fapi.binance.com" else "fapi1"
+        for ep_path, name in [
+            ("/fapi/v2/balance", f"signed_balance_{domain_tag}"),
+            ("/fapi/v2/account", f"signed_account_{domain_tag}"),
+            ("/fapi/v2/positionRisk", f"signed_positionRisk_{domain_tag}")
+        ]:
+            try:
+                ts = int(time.time() * 1000)
+                query = f"timestamp={ts}"
+                sig = hmac.new(config.API_SECRET.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()
+                url = f"{base_domain}{ep_path}?{query}&signature={sig}"
+                r_sig = requests.get(url, headers=h, timeout=6)
+                results[name] = {"status": r_sig.status_code, "text": r_sig.text[:200]}
+            except Exception as e_sig:
+                results[name] = {"error": str(e_sig)}
 
     # 3. WebSocket details
     ws_mgr = getattr(scalper.client, "ws_manager", None)
