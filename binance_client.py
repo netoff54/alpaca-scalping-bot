@@ -39,6 +39,7 @@ class BinanceFuturesClient:
         self._symbols_max_leverage: Dict[str, int] = {}
         self.allowed_crypto_symbols: Set[str] = set()
         self.ban_until: float = 0.0
+        self.public_ban_until: float = 0.0
         self._last_ban_log_time: float = 0.0
         self.current_weight_1m: int = 0
         self.scan_throttle_until: float = 0.0
@@ -67,14 +68,18 @@ class BinanceFuturesClient:
         console.log(f"[dim]Failover Binance endpoint dialihkan ke: {self.base_url}[/dim]")
 
     def is_banned(self) -> bool:
-        """Mengecek apakah IP server sedang dalam masa cooldown rate limit Binance resmi (HTTP 418/429)."""
+        """Mengecek apakah signed API akun sedang dalam ban resmi (trading terkunci)."""
         return time.time() < self.ban_until
+
+    def is_public_banned(self) -> bool:
+        """Mengecek apakah endpoint publik bursa sedang dalam cooldown IP (beralih ke WS & Vision)."""
+        return time.time() < self.public_ban_until
 
     def is_scan_throttled(self) -> bool:
         """Mengecek apakah pemindaian koin perlu jeda sesaat karena weight IP mendekati 2400."""
         return time.time() < self.scan_throttle_until
 
-    def check_response_for_ban(self, resp_or_data: Any):
+    def check_response_for_ban(self, resp_or_data: Any, is_signed: bool = False):
         """Mendeteksi penggunaan request weight dan merespons rate limit 418/429 bursa dengan backoff cerdas."""
         msg = ""
         now = time.time()
@@ -86,20 +91,10 @@ class BinanceFuturesClient:
                 try:
                     w = int(used_weight)
                     self.current_weight_1m = w
-                    # PENCEGAHAN PROAKTIF TINGKAT 1: Jika weight mencapai 900 (37.5% dari batas 2400),
-                    # perlambat scanner selama 25 detik agar rolling window meluruh aman.
                     if w >= 900 and w < 1400:
                         self.scan_throttle_until = max(self.scan_throttle_until, now + 25.0)
-                        if now - self._last_ban_log_time > 30:
-                            self._last_ban_log_time = now
-                            console.log(f"[bold yellow]Request weight bursa ({w}/2400) mencapai batas proaktif 900. Scanner istirahat 25s agar weight luruh aman...[/bold yellow]")
-                    # PENCEGAHAN PROAKTIF TINGKAT 2: Jika weight mencapai 1400 (58% dari batas 2400),
-                    # istirahatkan scanner selama 50 detik (mendekati 1 siklus penuh 60s rolling window).
                     elif w >= 1400:
                         self.scan_throttle_until = max(self.scan_throttle_until, now + 50.0)
-                        if now - self._last_ban_log_time > 30:
-                            self._last_ban_log_time = now
-                            console.log(f"[bold red]Request weight bursa tinggi ({w}/2400). Scanner istirahat 50s untuk reset penuh 1m window...[/bold red]")
                 except Exception:
                     pass
 
@@ -115,19 +110,8 @@ class BinanceFuturesClient:
             import re
             match = re.search(r"banned until (\d+)", msg)
             if match:
-                # Ban resmi dari bursa dengan timestamp (+ 5.0 detik buffer keselamatan sinkronisasi jam bursa)
-                self.ban_until = (float(match.group(1)) / 1000.0) + 5.0
-                if now - self._last_ban_log_time > 60:
-                    self._last_ban_log_time = now
-                    s_left = int(self.ban_until - now)
-                    m_left = s_left // 60
-                    sec_left = s_left % 60
-                    wib_time = time.strftime('%H:%M:%S', time.gmtime(self.ban_until + 7 * 3600))
-                    console.log(f"[bold yellow]Rate limit Binance aktif ({msg[:100]}). Server IP istirahat hingga {wib_time} WIB ({m_left}m {sec_left}s lagi).[/bold yellow]")
+                target_ban = (float(match.group(1)) / 1000.0) + 5.0
             else:
-                # Rolling window limit 1 menit (HTTP 429 atau kode -1003).
-                # Jika ada header Retry-After dari Binance, patuhi durasi tersebut (+ 5s buffer).
-                # Jika tidak, jeda minimal 60 detik agar jendela 1 menit benar-benar bergeser dan bersih!
                 if retry_after_header:
                     try:
                         backoff = float(retry_after_header) + 5.0
@@ -135,10 +119,20 @@ class BinanceFuturesClient:
                         backoff = 60.0
                 else:
                     backoff = 60.0
-                self.ban_until = max(self.ban_until, now + backoff)
-                if now - self._last_ban_log_time > 20:
+                target_ban = now + backoff
+
+            if is_signed:
+                self.ban_until = max(self.ban_until, target_ban)
+                if now - self._last_ban_log_time > 60:
                     self._last_ban_log_time = now
-                    console.log(f"[bold yellow]Rolling rate limit 1m terdeteksi ({msg[:100]}). Jeda aman {int(backoff)} detik agar counter 1m bersih lalu lanjut otomatis...[/bold yellow]")
+                    wib_time = time.strftime('%H:%M:%S', time.gmtime(self.ban_until + 7 * 3600))
+                    console.log(f"[bold red]Rate limit Signed Trading Binance aktif. Jeda signed trading hingga {wib_time} WIB.[/bold red]")
+            else:
+                self.public_ban_until = max(self.public_ban_until, target_ban)
+                if now - self._last_ban_log_time > 60:
+                    self._last_ban_log_time = now
+                    wib_time = time.strftime('%H:%M:%S', time.gmtime(self.public_ban_until + 7 * 3600))
+                    console.log(f"[bold yellow]Rate limit Public IP bursa aktif. Scanner otomatis beralih ke WebSocket & Binance Vision hingga {wib_time} WIB.[/bold yellow]")
 
     def _apply_fallback_symbols(self):
         """Mengaktifkan daftar default 28 koin crypto likuid utama jika bursa sedang dalam cooldown."""
@@ -174,13 +168,28 @@ class BinanceFuturesClient:
             return
 
         try:
-            url = f"{self.base_url}/fapi/v1/exchangeInfo"
-            resp = self.session.get(url, timeout=10)
-            self.check_response_for_ban(resp)
-            data = resp.json()
-            self.check_response_for_ban(data)
-            
-            if not isinstance(data, dict) or "symbols" not in data:
+            data = None
+            if not self.is_public_banned():
+                try:
+                    url = f"{self.base_url}/fapi/v1/exchangeInfo"
+                    resp = self.session.get(url, timeout=10)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                    else:
+                        self.check_response_for_ban(resp, is_signed=False)
+                except Exception:
+                    pass
+
+            if not data or not isinstance(data, dict) or "symbols" not in data:
+                try:
+                    url_v = "https://data-api.binance.vision/api/v3/exchangeInfo"
+                    resp_v = requests.get(url_v, timeout=8)
+                    if resp_v.status_code == 200:
+                        data = resp_v.json()
+                except Exception:
+                    pass
+
+            if not data or not isinstance(data, dict) or "symbols" not in data:
                 self._apply_fallback_symbols()
                 return
 
@@ -313,9 +322,9 @@ class BinanceFuturesClient:
         url = f"{self.base_url}/fapi/v2/balance"
         params = self._sign({})
         resp = self.session.get(url, params=params, timeout=10)
-        self.check_response_for_ban(resp)
+        self.check_response_for_ban(resp, is_signed=True)
         data = resp.json()
-        self.check_response_for_ban(data)
+        self.check_response_for_ban(data, is_signed=True)
         if not isinstance(data, list):
             raise Exception(f"Balance error: {data}")
         
@@ -341,9 +350,9 @@ class BinanceFuturesClient:
         url = f"{self.base_url}/fapi/v2/positionRisk"
         params = self._sign({})
         resp = self.session.get(url, params=params, timeout=10)
-        self.check_response_for_ban(resp)
+        self.check_response_for_ban(resp, is_signed=True)
         data = resp.json()
-        self.check_response_for_ban(data)
+        self.check_response_for_ban(data, is_signed=True)
         if not isinstance(data, list):
             return []
         
@@ -860,20 +869,34 @@ class BinanceFuturesClient:
             if ws_p > 0.0 and self.ws_manager.is_alive():
                 return ws_p
 
-        # 2. Fallback REST API
-        if self.is_banned():
-            return 0.0
+        # 2. Fallback REST API Binance Futures
+        if not self.is_public_banned():
+            try:
+                url = f"{self.base_url}/fapi/v1/ticker/price?symbol={symbol}"
+                resp = self.session.get(url, timeout=4)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if isinstance(data, dict):
+                        p = float(data.get("price", 0.0))
+                        if p > 0.0:
+                            return p
+                else:
+                    self.check_response_for_ban(resp, is_signed=False)
+            except Exception:
+                pass
+
+        # 3. Fallback Binance Vision (Dedicated CDN, 0 limit ban)
         try:
-            url = f"{self.base_url}/fapi/v1/ticker/price?symbol={symbol}"
-            resp = self.session.get(url, timeout=5)
-            self.check_response_for_ban(resp)
-            data = resp.json()
-            self.check_response_for_ban(data)
-            if isinstance(data, dict):
-                return float(data.get("price", 0.0))
-            return 0.0
+            url_v = f"https://data-api.binance.vision/api/v3/ticker/price?symbol={symbol}"
+            resp_v = requests.get(url_v, timeout=4)
+            if resp_v.status_code == 200:
+                p = float(resp_v.json().get("price", 0.0))
+                if p > 0.0:
+                    return p
         except Exception:
-            return 0.0
+            pass
+
+        return 0.0
 
     def fetch_top_tickers(self) -> List[Dict[str, Any]]:
         """Mengambil ticker 24 jam untuk seluruh koin."""
@@ -995,20 +1018,37 @@ class BinanceFuturesClient:
         return res
 
     def fetch_klines(self, symbol: str, interval: str = "5m", limit: int = 1000) -> Optional[List[List[float]]]:
-        if self.is_banned() or self.is_scan_throttled():
-            return None
+        # 1. Coba ambil dari Binance Futures jika tidak public banned
+        if not self.is_public_banned() and not self.is_scan_throttled():
+            try:
+                url = f"{self.base_url}/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
+                resp = self.session.get(url, timeout=6)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if isinstance(data, list) and len(data) > 0:
+                        return [
+                            [float(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5])]
+                            for c in data
+                            if isinstance(c, (list, tuple)) and len(c) >= 6
+                        ]
+                else:
+                    self.check_response_for_ban(resp, is_signed=False)
+            except Exception:
+                pass
+
+        # 2. Fallback resmi ke Binance Vision API (Dedicated CDN, bebas dari limit IP bersama)
         try:
-            url = f"{self.base_url}/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
-            resp = self.session.get(url, timeout=10)
-            self.check_response_for_ban(resp)
-            data = resp.json()
-            self.check_response_for_ban(data)
-            if not isinstance(data, list):
-                return None
-            return [
-                [float(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5])]
-                for c in data
-                if isinstance(c, (list, tuple)) and len(c) >= 6
-            ]
+            url_vision = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit={min(limit, 1000)}"
+            resp_v = requests.get(url_vision, timeout=6)
+            if resp_v.status_code == 200:
+                data_v = resp_v.json()
+                if isinstance(data_v, list) and len(data_v) > 0:
+                    return [
+                        [float(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5])]
+                        for c in data_v
+                        if isinstance(c, (list, tuple)) and len(c) >= 6
+                    ]
         except Exception:
-            return None
+            pass
+
+        return None
