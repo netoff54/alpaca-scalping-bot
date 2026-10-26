@@ -74,7 +74,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Binance Futures Top-200 Scalping Autonomous Agent", lifespan=lifespan)
 
-@app.get("/", response_class=HTMLResponse)
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 def index_dashboard():
     """Menampilkan Web Dashboard Mobile-Friendly untuk monitoring bot trading 24/7."""
     return HTMLResponse(content=DASHBOARD_HTML, status_code=200)
