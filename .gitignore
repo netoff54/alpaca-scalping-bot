@@ -11,5 +11,6 @@ yt_*.png
 klines_cache.json
 klines_1month_cache.json
 data_1year/
+data_2year_samples/
 download_*.py
 *.jsonl
