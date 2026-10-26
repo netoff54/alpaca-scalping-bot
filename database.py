@@ -216,7 +216,7 @@ class NeonDatabase:
                     cur.execute("""
                         SELECT total_wallet, available_balance, unrealized_pnl
                         FROM binance_scalper.wallet_history
-                        ORDER BY recorded_at DESC
+                        ORDER BY id DESC
                         LIMIT 1;
                     """)
                     row = cur.fetchone()
