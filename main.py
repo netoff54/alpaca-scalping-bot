@@ -112,6 +112,10 @@ def api_dashboard_summary():
     minutes = (uptime_sec % 3600) // 60
     uptime_str = f"{hours} Jam {minutes} Menit"
 
+    ws_mgr = getattr(scalper.client, "ws_manager", None)
+    ws_alive = ws_mgr.is_alive() if ws_mgr else False
+    tracked_count = len(ws_mgr.prices) if ws_mgr else 829
+
     return {
         "current_balance": cur_wallet,
         "available_balance": avail_wallet,
@@ -122,9 +126,9 @@ def api_dashboard_summary():
         "active_position": live_pos,
         "rotation_status": scalper.current_rotation_info,
         "current_coin": curr_coin,
-        "tracked_symbols_count": len(scalper.ws_manager.live_tickers) if scalper.ws_manager else 829,
+        "tracked_symbols_count": tracked_count,
         "uptime_str": uptime_str,
-        "websocket_status": "LIVE_STREAMING" if (scalper.ws_manager and scalper.ws_manager.is_alive) else "STANDBY"
+        "websocket_status": "LIVE_STREAMING" if ws_alive else "STANDBY"
     }
 
 @app.get("/api/wallet-history", response_class=JSONResponse)
