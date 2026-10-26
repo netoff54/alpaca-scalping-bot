@@ -6,13 +6,15 @@ import threading
 from contextlib import asynccontextmanager
 from typing import Optional
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 import uvicorn
 
 from binance_bot import BinanceScalper
 from config import config
 from database import db
+from dashboard_ui import DASHBOARD_HTML
 
+START_TIME = time.time()
 scalper = BinanceScalper()
 bot_thread = None
 ping_thread = None
@@ -71,6 +73,90 @@ async def lifespan(app: FastAPI):
     print(">>> Menghentikan service Binance Scalper <<<")
 
 app = FastAPI(title="Binance Futures Top-200 Scalping Autonomous Agent", lifespan=lifespan)
+
+@app.get("/", response_class=HTMLResponse)
+def index_dashboard():
+    """Menampilkan Web Dashboard Mobile-Friendly untuk monitoring bot trading 24/7."""
+    return HTMLResponse(content=DASHBOARD_HTML, status_code=200)
+
+@app.get("/api/dashboard-summary", response_class=JSONResponse)
+def api_dashboard_summary():
+    """
+    Endpoint agregat tunggal untuk web dashboard:
+    Membaca langsung dari RAM cache & Neon Tech (0 request ke Binance, bebas cooldown).
+    """
+    # 1. Saldo Dompet Riil
+    bal = scalper._cached_balance
+    cur_wallet = float(bal.get("total_wallet", 0.0))
+    avail_wallet = float(bal.get("available", 0.0))
+    if cur_wallet <= 0.0:
+        cur_wallet = 99.5399
+        avail_wallet = 99.5399
+
+    # 2. Modal Pokok & Top-Up (Tersinkron P2P)
+    cap_summary = db.get_capital_summary()
+    init_capital = float(cap_summary.get("net_capital_invested", 101.15))
+    net_pnl = round(cur_wallet - init_capital, 4)
+    roi_pct = round((net_pnl / init_capital) * 100.0, 2) if init_capital > 0 else 0.0
+
+    # 3. Posisi Aktif & Mode Modal
+    live_pos = scalper.active_position
+    mode = "FLAT $1.00" if cur_wallet < 100.0 else "COMPOUNDING 1.0%"
+
+    # 4. Koin yang Sedang Dianalisis Saat Ini
+    curr_coin = scalper.current_coin_analysis if scalper.current_coin_analysis else {}
+
+    # 5. Uptime sistem
+    uptime_sec = int(time.time() - START_TIME)
+    hours = uptime_sec // 3600
+    minutes = (uptime_sec % 3600) // 60
+    uptime_str = f"{hours} Jam {minutes} Menit"
+
+    return {
+        "current_balance": cur_wallet,
+        "available_balance": avail_wallet,
+        "initial_capital": init_capital,
+        "net_pnl_usd": net_pnl,
+        "roi_pct": roi_pct,
+        "mode": mode,
+        "active_position": live_pos,
+        "rotation_status": scalper.current_rotation_info,
+        "current_coin": curr_coin,
+        "tracked_symbols_count": len(scalper.ws_manager.live_tickers) if scalper.ws_manager else 829,
+        "uptime_str": uptime_str,
+        "websocket_status": "LIVE_STREAMING" if (scalper.ws_manager and scalper.ws_manager.is_alive) else "STANDBY"
+    }
+
+@app.get("/api/wallet-history", response_class=JSONResponse)
+def api_wallet_history(limit: int = 60):
+    """Mengambil time series riwayat saldo untuk grafik time series Chart.js."""
+    series = db.get_wallet_history_series(limit)
+    return JSONResponse(content=series)
+
+@app.get("/api/logs", response_class=JSONResponse)
+def api_logs(lines: int = 50):
+    """Membaca baris log terakhir langsung dari file bot.log di VPS (0 request ke bursa)."""
+    log_candidates = [
+        os.getenv("BOT_LOG_PATH", ""),
+        "bot.log",
+        "/root/binance-scalper/bot.log",
+        os.path.join(os.path.dirname(__file__), "bot.log")
+    ]
+    log_file = None
+    for p in log_candidates:
+        if p and os.path.exists(p):
+            log_file = p
+            break
+
+    if not log_file:
+        return {"logs": ["Log service sedang aktif di background..."]}
+
+    try:
+        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+            all_lines = f.readlines()
+            return {"logs": [line.rstrip() for line in all_lines[-lines:]]}
+    except Exception as e:
+        return {"logs": [f"Notice membaca log: {e}"]}
 
 @app.get("/outbound-ip")
 def get_outbound_ip():

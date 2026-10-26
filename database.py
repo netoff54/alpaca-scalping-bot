@@ -230,6 +230,34 @@ class NeonDatabase:
             console.log(f"[dim]DB get latest wallet snapshot notice: {e}[/dim]")
         return {}
 
+    def get_wallet_history_series(self, limit: int = 60) -> List[Dict[str, Any]]:
+        """Mengambil data riwayat saldo untuk grafik time series."""
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("""
+                        SELECT id, total_wallet, available_balance, unrealized_pnl, timestamp
+                        FROM binance_scalper.wallet_history
+                        ORDER BY id DESC
+                        LIMIT %s;
+                    """, (limit,))
+                    rows = cur.fetchall()
+                    if rows:
+                        rows.reverse()
+                        return [
+                            {
+                                "id": r["id"],
+                                "total_wallet": float(r["total_wallet"] or 0.0),
+                                "available": float(r["available_balance"] or 0.0),
+                                "unpnl": float(r["unrealized_pnl"] or 0.0),
+                                "time": r["timestamp"].strftime("%d/%m %H:%M") if r.get("timestamp") else ""
+                            }
+                            for r in rows
+                        ]
+        except Exception as e:
+            console.log(f"[dim]DB get wallet history series: {e}[/dim]")
+        return []
+
     def get_trade_summary(self) -> Dict[str, Any]:
         """Mengambil ringkasan statistik trading langsung dari database Neon."""
         try:
