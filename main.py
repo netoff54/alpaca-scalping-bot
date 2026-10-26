@@ -453,8 +453,8 @@ def binance_position_side():
     scalper.client.check_response_for_ban(resp)
     return resp.json()
 
-@app.api_route("/", methods=["GET", "HEAD"])
-def index():
+@app.api_route("/status-json", methods=["GET", "HEAD"])
+def status_json():
     try:
         bal = scalper.get_futures_balance()
         scalper.total_pnl_usd = round(bal["total_wallet"] - config.INITIAL_CAPITAL, 4)
