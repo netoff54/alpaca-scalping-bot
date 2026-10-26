@@ -20,18 +20,18 @@ ping_thread = None
 def keep_alive_ping_loop():
     """
     Loop otomatis untuk ping endpoint /health sendiri setiap 4 menit.
-    Mencegah Render Free Tier melakukan 'Spin Down' / Shutdown karena inaktivitas 15 menit.
     """
     time.sleep(20)  # Beri waktu uvicorn startup
-    base_url = os.getenv("RENDER_EXTERNAL_URL", "https://binance-scalper-tmkm.onrender.com").rstrip('/')
-    ping_url = f"{base_url}/health"
-    print(f">>> [Keep-Alive Ping] Diaktifkan! Memantau {ping_url} setiap 4 menit agar Render tetap ON 24/7.")
+    port = os.getenv("PORT", "10000")
+    base_url = os.getenv("EXTERNAL_HEALTH_URL", os.getenv("RENDER_EXTERNAL_URL", f"http://127.0.0.1:{port}")).rstrip('/')
+    ping_url = base_url if base_url.endswith("/health") else f"{base_url}/health"
+    print(f">>> [Keep-Alive Ping] Diaktifkan! Memantau {ping_url} setiap 4 menit.")
 
     while True:
         try:
-            time.sleep(240)  # Ping setiap 4 menit (240 detik < batas 15 menit Render)
+            time.sleep(240)  # Ping setiap 4 menit
             res = requests.get(ping_url, timeout=15)
-            print(f">>> [Keep-Alive Ping] Sukses (HTTP {res.status_code}) -> Render Container Aktif 24/7.")
+            print(f">>> [Keep-Alive Ping] Sukses (HTTP {res.status_code}) -> Service Aktif 24/7.")
         except Exception as err:
             print(f">>> [Keep-Alive Ping] Status: {err}")
 
