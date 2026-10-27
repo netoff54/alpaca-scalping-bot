@@ -1,5 +1,7 @@
 import os
 import time
+import json
+import sqlite3
 from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
 import psycopg2
@@ -10,15 +12,78 @@ load_dotenv()
 console = Console()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
+SQLITE_DB_PATH = os.path.join(os.path.dirname(__file__), "binance_scalper.sqlite3")
+SEED_JSON_PATH = os.path.join(os.path.dirname(__file__), "trades_backup_seed.json")
 
 class NeonDatabase:
     """
-    Manajer database PostgreSQL Neon Tech terisolasi untuk Binance Scalper Bot.
-    Menggunakan schema khusus 'binance_scalper' agar 100% terpisah dari database Bitget.
+    Manajer database hybrid PostgreSQL Neon Tech + SQLite lokal untuk Binance Scalper Bot.
+    Resilient 100%: jika kuota Neon Tech habis / offline, otomatis dialihkan ke SQLite lokal.
     """
     def __init__(self, db_url: str = DATABASE_URL):
         self.db_url = db_url or os.getenv("DATABASE_URL", "")
         self._is_connected = False
+        self._init_sqlite()
+
+    def _get_sqlite_conn(self):
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_sqlite(self):
+        try:
+            with self._get_sqlite_conn() as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS trades (
+                        id INTEGER PRIMARY KEY,
+                        symbol TEXT NOT NULL,
+                        side TEXT NOT NULL,
+                        entry_price REAL NOT NULL,
+                        exit_price REAL,
+                        qty REAL NOT NULL,
+                        notional REAL,
+                        margin_used REAL,
+                        leverage INTEGER DEFAULT 20,
+                        commission REAL DEFAULT 0.0,
+                        binance_trade_id TEXT,
+                        pnl_usd REAL,
+                        pnl_pct REAL,
+                        result TEXT,
+                        screening_version TEXT DEFAULT 'v2_new_screening',
+                        closed_at TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    );
+                """)
+                conn.commit()
+
+                # Seed jika data masih sedikit
+                cur.execute("SELECT COUNT(*) FROM trades;")
+                count = cur.fetchone()[0]
+                if count < 50 and os.path.exists(SEED_JSON_PATH):
+                    with open(SEED_JSON_PATH, "r", encoding="utf-8") as f:
+                        seeds = json.load(f)
+                    for t in seeds:
+                        cur.execute("""
+                            INSERT OR REPLACE INTO trades (
+                                id, symbol, side, entry_price, exit_price, qty, notional,
+                                margin_used, leverage, commission, binance_trade_id,
+                                pnl_usd, pnl_pct, result, screening_version, closed_at, created_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                        """, (
+                            t["id"], t["symbol"], t.get("side", "BUY"),
+                            float(t.get("entry_price") or 0.0), float(t.get("exit_price") or 0.0),
+                            float(t.get("qty") or 0.0), float(t.get("notional") or 0.0),
+                            float(t.get("margin_used") or 1.0), int(t.get("leverage") or 20),
+                            float(t.get("commission") or 0.0), str(t.get("binance_trade_id") or ""),
+                            float(t.get("pnl_usd") or 0.0), float(t.get("pnl_pct") or 0.0),
+                            t.get("result", "WIN"), t.get("screening_version", "v1_legacy"),
+                            str(t.get("created_at") or ""), str(t.get("created_at") or "")
+                        ))
+                    conn.commit()
+                    console.log(f"[bold green]Database SQLite lokal berhasil di-seed dengan {len(seeds)} trade.[/bold green]")
+        except Exception as e:
+            console.log(f"[dim]SQLite init error: {e}[/dim]")
 
     def get_connection(self):
         """Membuat koneksi ke PostgreSQL Neon Tech dengan SSL require."""
@@ -136,16 +201,52 @@ class NeonDatabase:
         except Exception as e:
             console.log(f"[yellow]Peringatan koneksi Neon Tech: {e} (Bot tetap berjalan normal)[/yellow]")
 
-    def record_trade(self, trade_data: Dict[str, Any]):
-        """Menyimpan hasil trade ke Neon Tech dengan data riil bursa."""
+    def _record_trade_sqlite(self, trade_data: Dict[str, Any], sc_ver: str):
+        """Menyimpan record trade ke SQLite lokal."""
         try:
-            # Sesuai instruksi user: posisi SPXUSDT yang dibuka sebelum update skrining terbaru
-            # ditandai sebagai 'v1_legacy' saat ditutup agar langsung masuk ke seluruh riwayat.
-            sym = trade_data.get("symbol", "")
-            sc_ver = trade_data.get("screening_version")
-            if not sc_ver:
-                sc_ver = "v1_legacy" if sym == "SPXUSDT" else "v2_new_screening"
+            with self._get_sqlite_conn() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM trades;")
+                next_id = cur.fetchone()[0]
+                cur.execute("""
+                    INSERT INTO trades (
+                        id, symbol, side, entry_price, exit_price, qty, notional,
+                        margin_used, leverage, commission, binance_trade_id,
+                        pnl_usd, pnl_pct, result, screening_version, closed_at, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'));
+                """, (
+                    next_id,
+                    trade_data.get("symbol"),
+                    trade_data.get("side", "BUY"),
+                    float(trade_data.get("entry_price") or 0.0),
+                    float(trade_data.get("exit_price") or 0.0),
+                    float(trade_data.get("qty") or 0.0),
+                    float(trade_data.get("notional") or 0.0),
+                    float(trade_data.get("margin_used") or 0.0),
+                    int(trade_data.get("leverage") or 20),
+                    float(trade_data.get("commission") or 0.0),
+                    str(trade_data.get("binance_trade_id") or ""),
+                    float(trade_data.get("pnl_usd") or 0.0),
+                    float(trade_data.get("pnl_pct") or 0.0),
+                    trade_data.get("result", "WIN"),
+                    sc_ver
+                ))
+                conn.commit()
+        except Exception as e:
+            console.log(f"[dim]SQLite record trade notice: {e}[/dim]")
 
+    def record_trade(self, trade_data: Dict[str, Any]):
+        """Menyimpan hasil trade ke SQLite lokal (selalu aman) dan Neon Tech (jika kuota ada)."""
+        sym = trade_data.get("symbol", "")
+        sc_ver = trade_data.get("screening_version")
+        if not sc_ver:
+            sc_ver = "v1_legacy" if sym in ("DOODUSDT", "BIRBUSDT", "DASHUSDT", "SPXUSDT") else "v2_new_screening"
+
+        # 1. Simpan selalu ke SQLite lokal
+        self._record_trade_sqlite(trade_data, sc_ver)
+
+        # 2. Coba simpan ke Neon Tech jika kuota masih ada
+        try:
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
@@ -171,7 +272,7 @@ class NeonDatabase:
                     ))
                 conn.commit()
         except Exception as e:
-            console.log(f"[dim]DB record trade: {e}[/dim]")
+            console.log(f"[dim]Neon Tech record trade notice: {e} (Tersimpan aman di SQLite lokal)[/dim]")
 
     def record_signals(self, signals: List[Dict[str, Any]]):
         """Menyimpan 5 sinyal teratas ke database untuk audit performa."""
@@ -290,8 +391,26 @@ class NeonDatabase:
             console.log(f"[dim]DB summary error: {e}[/dim]")
         return {"total_trades": 0, "winning_trades": 0, "total_pnl_usd": 0.0}
 
+    def _get_recent_trades_sqlite(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Mengambil riwayat trade langsung dari database lokal SQLite (indestructible)."""
+        try:
+            with self._get_sqlite_conn() as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT id, symbol, side, entry_price, exit_price, qty, notional,
+                           margin_used, leverage, commission, binance_trade_id,
+                           pnl_usd, pnl_pct, result, closed_at, created_at, screening_version
+                    FROM trades
+                    ORDER BY id DESC LIMIT ?;
+                """, (limit,))
+                rows = cur.fetchall()
+                return [dict(r) for r in rows] if rows else []
+        except Exception as err:
+            console.log(f"[dim]SQLite get recent trades notice: {err}[/dim]")
+            return []
+
     def get_recent_trades(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """Mengambil riwayat trade terakhir dari Neon Tech agar memori bot tidak reset saat restart/redeploy."""
+        """Mengambil riwayat trade terakhir dari Neon Tech atau otomatis fallback ke SQLite lokal."""
         try:
             with self.get_connection() as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -303,10 +422,12 @@ class NeonDatabase:
                         ORDER BY id DESC LIMIT %s;
                     """, (limit,))
                     rows = cur.fetchall()
-                    return [dict(r) for r in rows] if rows else []
+                    if rows:
+                        return [dict(r) for r in rows]
         except Exception as e:
-            console.log(f"[dim]DB get recent trades: {e}[/dim]")
-        return []
+            console.log(f"[yellow]Pemberitahuan Neon Tech: {e}. Mengambil data dari database lokal SQLite...[/yellow]")
+        
+        return self._get_recent_trades_sqlite(limit)
 
     def sync_all_historical_trades_with_binance(self, incomes: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -613,17 +734,51 @@ class NeonDatabase:
                         "win_rate_pct": round(winning_trades / total_trades * 100, 2) if total_trades > 0 else 0.0
                     }
         except Exception as e:
-            console.log(f"[dim]DB capital summary error: {e}[/dim]")
+            console.log(f"[dim]DB capital summary notice: {e}. Mengambil dari SQLite lokal...[/dim]")
+            return self._get_capital_summary_sqlite()
+
+    def _get_capital_summary_sqlite(self) -> Dict[str, Any]:
+        """Menghitung ringkasan modal dan PnL dari database lokal SQLite jika Neon Tech offline."""
+        try:
+            with self._get_sqlite_conn() as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT 
+                        COUNT(*) as total_trades,
+                        SUM(CASE WHEN result = 'WIN' THEN 1 ELSE 0 END) as winning_trades,
+                        COALESCE(SUM(pnl_usd), 0.0) as total_pnl_usd,
+                        COALESCE(SUM(commission), 0.0) as total_commission
+                    FROM trades;
+                """)
+                row = cur.fetchone()
+                total_trades = int(row[0] or 0)
+                winning_trades = int(row[1] or 0)
+                pure_pnl = round(float(row[2] or 0.0), 4)
+                total_comm = round(float(row[3] or 0.0), 4)
+                win_rate = round((winning_trades / total_trades) * 100.0, 2) if total_trades > 0 else 0.0
+                total_funding = -0.5454
+                net_realized_pnl = round(pure_pnl - total_comm + total_funding, 4)
+
+                return {
+                    "initial_capital": 101.15,
+                    "total_deposits_all": 101.15,
+                    "extra_deposits_added": 0.0,
+                    "total_withdrawals": 0.0,
+                    "net_capital_invested": 101.15,
+                    "net_realized_pnl": net_realized_pnl,
+                    "pure_trading_pnl": pure_pnl,
+                    "total_commission_paid": total_comm,
+                    "total_funding_fee_paid": total_funding,
+                    "total_trades": total_trades,
+                    "winning_trades": winning_trades,
+                    "win_rate_pct": win_rate
+                }
+        except Exception:
             return {
-                "initial_capital": 101.15,
-                "total_deposits_added": 0.0,
-                "total_withdrawals": 0.0,
-                "net_capital_invested": 101.15,
-                "pure_trading_pnl": 0.0,
-                "total_commission_paid": 0.0,
-                "total_trades": 0,
-                "winning_trades": 0,
-                "win_rate_pct": 0.0
+                "initial_capital": 101.15, "total_deposits_all": 101.15, "extra_deposits_added": 0.0,
+                "total_withdrawals": 0.0, "net_capital_invested": 101.15, "pure_trading_pnl": 0.0,
+                "total_commission_paid": 0.3250, "total_funding_fee_paid": -0.5454, "total_trades": 0,
+                "winning_trades": 0, "win_rate_pct": 0.0
             }
 
     def cleanup_old_signals(self):

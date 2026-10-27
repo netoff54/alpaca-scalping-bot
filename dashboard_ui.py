@@ -1522,7 +1522,8 @@ def get_dashboard_html() -> str:
                     if (viewStandby) viewStandby.style.display = 'none';
                     if (posPnlBlock) posPnlBlock.style.display = 'flex';
 
-                    const isBuy = (pos.side === 'BUY' || pos.side === 'LONG');
+                    const sideStr = (pos.side || '').toUpperCase();
+                    const isBuy = (sideStr === 'BUY' || sideStr === 'LONG');
                     if (posTypeBadge) {
                         posTypeBadge.textContent = isBuy ? 'LONG' : 'SHORT';
                         posTypeBadge.className = isBuy ? 'badge badge-green' : 'badge badge-red';
@@ -1552,7 +1553,8 @@ def get_dashboard_html() -> str:
                     const elSpecMargin = document.getElementById('specMargin');
                     if (elSpecMargin) elSpecMargin.textContent = `$${parseFloat(pos.margin_used || 1.0).toFixed(2)} USDT`;
                     const elSpecNotional = document.getElementById('specNotional');
-                    if (elSpecNotional) elSpecNotional.textContent = `$${parseFloat(pos.notional_value || 50.0).toFixed(2)} USDT`;
+                    const realNotional = parseFloat(pos.notional || pos.notional_value || (parseFloat(pos.qty || 0) * parseFloat(pos.entry_price || 0)) || 20.0);
+                    if (elSpecNotional) elSpecNotional.textContent = `$${realNotional.toFixed(2)} USDT`;
                     const elSpecEntry = document.getElementById('specEntry');
                     if (elSpecEntry) elSpecEntry.textContent = `$${parseFloat(pos.entry_price || 0.0).toFixed(4)}`;
                     const elSpecMark = document.getElementById('specMark');

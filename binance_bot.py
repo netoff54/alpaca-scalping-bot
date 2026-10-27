@@ -212,6 +212,13 @@ class BinanceScalper:
 
         return self._cached_btc_macro.get("bullish", True)
 
+    def fetch_price(self, symbol: str) -> float:
+        """Helper delegasi langsung ke client untuk mengambil harga live."""
+        try:
+            return self.client.fetch_price(symbol)
+        except Exception:
+            return 0.0
+
     def get_futures_balance(self, max_age_sec: float = 60.0) -> Dict[str, float]:
         """Mengambil saldo wallet USDⓈ-M Futures dengan caching 60 detik."""
         now = time.time()
@@ -379,7 +386,7 @@ class BinanceScalper:
                     
                     entry_p = float(closed_pos.get("entry_price", 0.0))
                     c_side = closed_pos.get("side", "buy").lower()
-                    cur_p = self.fetch_price(sym) or entry_p
+                    cur_p = self.client.fetch_price(sym) or entry_p
                     is_win_hint = (cur_p >= entry_p) if c_side == "buy" else (cur_p <= entry_p)
                     exit_hint = float(closed_pos.get("tp_price" if is_win_hint else "sl_price", entry_p))
                     self._record_closed_position(closed_pos, exit_price_hint=exit_hint, result_hint="WIN" if is_win_hint else "LOSS")
@@ -1202,6 +1209,12 @@ class BinanceScalper:
                 
             pnl_pct = ((current_price - entry_price) / entry_price) if side == "buy" else ((entry_price - current_price) / entry_price)
             pnl_usd = pnl_pct * pos["notional"]
+
+            # Sinkronisasi status real-time ke memori posisi aktif untuk live web dashboard
+            pos["current_price"] = current_price
+            pos["unrealized_pnl_usd"] = round(pnl_usd, 4)
+            pos["unrealized_pnl_pct"] = round(pnl_pct * 100.0, 2)
+            pos["margin_used"] = round(pos["notional"] / pos_leverage, 4)
 
             # --- 1. Proteksi Geser SL ke Break-Even (BEP) saat mencapai 1R (+0.7%) ---
             bep_trigger = pos.get("bep_trigger_price", 0.0)
