@@ -371,13 +371,42 @@ def leverage_stats():
         "ge_50x_count": sum(v for k, v in distribution.items() if k >= 50),
         "examples_50x": [s for s, l in lev_map.items() if l >= 50][:30]
     }
+@app.get("/api/trade-history")
 @app.get("/trade-history")
 def trade_history(limit: int = 100):
-    """Mengambil riwayat trade terakhir langsung dari database Neon Tech."""
-    trades = db.get_recent_trades(limit)
+    """
+    Mengambil riwayat trade langsung dari database Neon Tech:
+    Dibersihkan agar JSON-serializable dan menandai trade sesi VPS terkini.
+    """
+    import datetime
+    raw_trades = db.get_recent_trades(limit)
+    cleaned = []
+    vps_start_ts = datetime.datetime(2026, 10, 26, 0, 0, 0)
+    for t in raw_trades:
+        created = t.get("created_at") or t.get("closed_at")
+        cleaned.append({
+            "id": t.get("id"),
+            "symbol": t.get("symbol"),
+            "side": t.get("side"),
+            "entry_price": float(t.get("entry_price") or 0.0),
+            "exit_price": float(t.get("exit_price") or 0.0),
+            "qty": float(t.get("qty") or 0.0),
+            "notional": float(t.get("notional") or 0.0),
+            "margin_used": float(t.get("margin_used") or 1.0),
+            "leverage": int(t.get("leverage") or 50),
+            "commission": float(t.get("commission") or 0.0),
+            "pnl_usd": float(t.get("pnl_usd") or 0.0),
+            "pnl_pct": float(t.get("pnl_pct") or 0.0),
+            "result": t.get("result", "WIN" if float(t.get("pnl_usd") or 0.0) >= 0 else "LOSS"),
+            "created_at": created.strftime("%d %b %Y %H:%M") if hasattr(created, "strftime") else str(created or ""),
+            "is_vps_session": bool(created and hasattr(created, "year") and created >= vps_start_ts)
+        })
+
+    vps_trades = [c for c in cleaned if c["is_vps_session"]]
     return {
-        "total_returned": len(trades),
-        "trades": trades
+        "total_returned": len(cleaned),
+        "vps_session_count": len(vps_trades),
+        "trades": cleaned
     }
 
 @app.get("/binance-orders")
