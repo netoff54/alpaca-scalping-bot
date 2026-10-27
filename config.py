@@ -12,7 +12,8 @@ class BotConfig:
     API_KEY: str = os.getenv("BINANCE_API_KEY", "")
     API_SECRET: str = os.getenv("BINANCE_API_SECRET", "")
 
-    # --- Database Neon Tech (PostgreSQL Cloud) ---
+    # --- Database Native VPS SQLite (Bebas Quota Cloud) ---
+    DATABASE_PATH: str = os.getenv("SQLITE_DB_PATH", "binance_scalper.sqlite3")
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
     # --- Market Scanning: 500 Koin Murni, 1 Koin Per Rotasi (Analisis Menyeluruh) ---

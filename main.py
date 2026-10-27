@@ -564,7 +564,7 @@ def status_json():
             "futures_wallet_usdt": bal["total_wallet"],
             "available_usdt": bal["available"],
             "trade_size_notional": scalper.get_compounded_notional(),
-            "database": "Neon Tech PostgreSQL (Schema: binance_scalper)",
+            "database": "Serverless Native VPS SQLite (WAL Mode)",
             "monitored_top_coins": len(scalper.ranked_pairs),
             "last_scan_time": scalper.last_scan_time,
             "last_scan_duration_sec": scalper.last_scan_duration_sec,

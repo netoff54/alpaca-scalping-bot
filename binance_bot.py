@@ -1330,10 +1330,10 @@ class BinanceScalper:
 
     def run_scan_loop(self):
         """Loop pemindaian utama yang berjalan secara otonom di background."""
-        console.log("[bold green]>>> Binance Scalper Autonomous Loop Dimulai (Native Engine + Neon Tech) <<<[/bold green]")
+        console.log("[bold green]>>> Binance Scalper Autonomous Loop Dimulai (Native Engine + VPS SQLite WAL) <<<[/bold green]")
         self.is_running = True
         
-        # 1. Inisialisasi Database Neon Tech (Schema: binance_scalper)
+        # 1. Inisialisasi Database Native VPS SQLite (Indestructible)
         db.init_db()
         
         # 2. Inisialisasi Bursa
