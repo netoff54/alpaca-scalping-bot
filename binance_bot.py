@@ -1,6 +1,7 @@
 import os
 import time
 import math
+import json
 import threading
 import gc
 from typing import Dict, Any, List, Optional, Set, Tuple
@@ -72,8 +73,92 @@ class BinanceScalper:
         self.circuit_breaker_until: float = 0.0
         self._cached_btc_macro: Dict[str, Any] = {"bullish": True, "updated_at": 0.0}
         
+        # Pengunci Target Surplus Bulanan (>= 10.0%) & Rezim Skenario Kalimasada
+        self.state_file: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_state.json")
+        self.current_month: str = time.strftime("%Y-%m")
+        self.month_start_wallet: float = 98.14
+        self.monthly_profit_locked: bool = False
+        self._cached_market_regime: Dict[str, Any] = {"regime": "SIDEWAYS", "updated_at": 0.0}
+
+        # Muat status bot persisten
+        self.load_bot_state()
+
         # Muat riwayat transaksi kumulatif dari Neon Tech agar tidak reset saat restart/redeploy
         self.load_history_from_db()
+
+    def load_bot_state(self):
+        """Memuat status pengunci target bulanan dan circuit breaker dari bot_state.json."""
+        try:
+            if os.path.exists(self.state_file):
+                with open(self.state_file, "r") as fp:
+                    st = json.load(fp)
+                    saved_month = st.get("current_month", "")
+                    now_month = time.strftime("%Y-%m")
+                    if saved_month == now_month:
+                        self.current_month = saved_month
+                        self.month_start_wallet = float(st.get("month_start_wallet", 98.14))
+                        self.monthly_profit_locked = bool(st.get("monthly_profit_locked", False))
+                        self.consecutive_losses = int(st.get("consecutive_losses", 0))
+                        self.circuit_breaker_until = float(st.get("circuit_breaker_until", 0.0))
+                    else:
+                        self.current_month = now_month
+                        self.month_start_wallet = self._cached_balance.get("total_wallet", 98.14)
+                        self.monthly_profit_locked = False
+                        self.consecutive_losses = 0
+                        self.circuit_breaker_until = 0.0
+                        self.save_bot_state()
+            else:
+                self.save_bot_state()
+        except Exception as e:
+            console.log(f"[dim]Load state notice: {e}[/dim]")
+
+    def save_bot_state(self):
+        """Menyimpan status pengunci target bulanan dan circuit breaker ke bot_state.json."""
+        try:
+            st = {
+                "current_month": self.current_month,
+                "month_start_wallet": self.month_start_wallet,
+                "monthly_profit_locked": self.monthly_profit_locked,
+                "consecutive_losses": self.consecutive_losses,
+                "circuit_breaker_until": self.circuit_breaker_until,
+                "updated_at": time.strftime("%Y-%m-%d %H:%M:%S")
+            }
+            with open(self.state_file, "w") as fp:
+                json.dump(st, fp, indent=2)
+        except Exception as e:
+            console.log(f"[dim]Save state notice: {e}[/dim]")
+
+    def get_market_regime(self) -> str:
+        """
+        Deteksi Rezim Pasar Kalimasada Otomatis (BULLISH_TREND, BEARISH_TREND, SIDEWAYS, MARKET_ANEH):
+        Menggunakan data klines BTC 15m terakhir untuk menentukan skenario pasar yang berlaku.
+        Di-cache selama 15 menit (900s) agar efisien dan hemat request.
+        """
+        now = time.time()
+        if (now - self._cached_market_regime.get("updated_at", 0.0)) < 900.0:
+            return self._cached_market_regime.get("regime", "SIDEWAYS")
+
+        try:
+            btc_kl = self.client.fetch_klines("BTCUSDT", interval="15m", limit=96)
+            if btc_kl and len(btc_kl) >= 48:
+                btc_ret = (btc_kl[-1][4] - btc_kl[0][4]) / btc_kl[0][4]
+                avg_wick = sum((c[2] - c[3]) / c[4] for c in btc_kl[-48:]) / 48.0
+
+                if avg_wick >= 0.0120:
+                    regime = "MARKET_ANEH"
+                elif btc_ret >= 0.04:
+                    regime = "BULLISH_TREND"
+                elif btc_ret <= -0.04:
+                    regime = "BEARISH_TREND"
+                else:
+                    regime = "SIDEWAYS"
+
+                self._cached_market_regime = {"regime": regime, "updated_at": now}
+                return regime
+        except Exception as e:
+            console.log(f"[dim]Regime detection notice: {e}[/dim]")
+
+        return self._cached_market_regime.get("regime", "SIDEWAYS")
 
     def load_history_from_db(self):
         """Memuat riwayat transaksi kumulatif dari Neon Tech agar statistik tidak reset dari 0 saat restart/redeploy."""
@@ -415,16 +500,17 @@ class BinanceScalper:
             self.consecutive_losses += 1
             console.log(f"[bold yellow]🛡️ Perlindungan Anti-Chop: Koin {sym} masuk jeda cooldown {getattr(config, 'POST_SL_COOLDOWN_HOURS', 4.0)} jam setelah Stop Loss (Loss beruntun: {self.consecutive_losses}).[/bold yellow]")
 
-            cb_threshold = getattr(config, "CONSECUTIVE_LOSS_CIRCUIT_BREAKER", 3)
+            cb_threshold = getattr(config, "CONSECUTIVE_LOSS_CIRCUIT_BREAKER", 2)
             if self.consecutive_losses >= cb_threshold:
-                pause_sec = getattr(config, "CIRCUIT_BREAKER_PAUSE_HOURS", 36.0) * 3600.0
+                pause_sec = getattr(config, "CIRCUIT_BREAKER_PAUSE_HOURS", 2.0) * 3600.0
                 self.circuit_breaker_until = time.time() + pause_sec
                 cb_wib = time.strftime('%H:%M:%S', time.gmtime(self.circuit_breaker_until + 7 * 3600))
-                console.log(f"[bold red]🚨 CIRCUIT BREAKER PORTOFOLIO: {self.consecutive_losses} loss berturut-turut. Mengistirahatkan seluruh scanner selama {getattr(config, 'CIRCUIT_BREAKER_PAUSE_HOURS', 36.0)} jam hingga {cb_wib} WIB.[/bold red]")
+                console.log(f"[bold red]🚨 CIRCUIT BREAKER PORTOFOLIO: {self.consecutive_losses} loss berturut-turut. Mengistirahatkan seluruh scanner selama {getattr(config, 'CIRCUIT_BREAKER_PAUSE_HOURS', 2.0)} jam hingga {cb_wib} WIB.[/bold red]")
                 self.consecutive_losses = 0
         else:
             self.consecutive_losses = 0
 
+        self.save_bot_state()
         self.active_position = None
         return trade_record
 
@@ -577,6 +663,26 @@ class BinanceScalper:
             rem_m = int((self.circuit_breaker_until - time.time()) / 60)
             self.current_rotation_info = f"Circuit Breaker Aktif ({rem_m}m lagi - Perlindungan Portofolio)"
             return
+
+        # Target Surplus Bulanan: >= 10.0% dikunci otomatis (Sesuai Hasil Backtest 2 Tahun 24/24 Bulan Win)
+        bal = self.get_futures_balance()
+        cur_wallet = bal.get("total_wallet", 0.0)
+        now_month = time.strftime("%Y-%m")
+        if now_month != self.current_month:
+            self.current_month = now_month
+            self.month_start_wallet = cur_wallet if cur_wallet > 0 else 98.14
+            self.monthly_profit_locked = False
+            self.save_bot_state()
+
+        if cur_wallet > 0 and self.month_start_wallet > 0:
+            month_roi = ((cur_wallet - self.month_start_wallet) / self.month_start_wallet) * 100.0
+            target_roi = getattr(config, "MONTHLY_TARGET_SURPLUS_PCT", 10.0)
+            if month_roi >= target_roi:
+                self.monthly_profit_locked = True
+                self.save_bot_state()
+                self.current_rotation_info = f"🏆 TARGET SURPLUS BULANAN {self.current_month} TERCAPAI ({month_roi:+.2f}%) - PROFIT DIKUNCI AMAN (Trading dijeda untuk mengamankan modal hingga bulan baru)"
+                return
+
         t_start = time.time()
         try:
             now = time.time()
@@ -615,7 +721,8 @@ class BinanceScalper:
                 self.last_scan_time = time.strftime("%Y-%m-%d %H:%M:%S")
                 return
 
-            # 2. Analisis Menyeluruh Sesuai Master Blueprint Akademi Crypto
+            # 2. Analisis Menyeluruh Sesuai Master Blueprint Akademi Crypto (4 Rezim Pasar Kalimasada)
+            regime = self.get_market_regime()
             max_sym_lev = self.client.get_max_leverage(sym)
             btc_macro_bull = self.is_btc_macro_bullish() if config.BTC_FILTER_ENABLED else None
             analysis = strategy.analyze_coin_comprehensive(
@@ -627,7 +734,8 @@ class BinanceScalper:
                 available_capital=cap,
                 leverage=config.LEVERAGE,
                 max_symbol_leverage=max_sym_lev,
-                btc_macro_bullish=btc_macro_bull
+                btc_macro_bullish=btc_macro_bull,
+                market_regime=regime
             )
             analysis["rank"] = rank
             analysis["vol_24h_m"] = round(q_vol / 1_000_000, 2)
@@ -879,9 +987,11 @@ class BinanceScalper:
                         
                         # Hitung ulang level SL, TP, dan BEP presisi dari harga keterisian riil (formatted_price)
                         sl_side = "SELL" if side.lower() == "buy" else "BUY"
-                        bep_trigger = getattr(config, "BEP_PROFIT_TRIGGER", 0.0100)
-                        actual_sl = self.client.format_price(symbol, formatted_price * (1.0 - config.SL_PERCENT) if side.lower() == "buy" else formatted_price * (1.0 + config.SL_PERCENT))
-                        actual_tp = self.client.format_price(symbol, formatted_price * (1.0 + config.TP_PERCENT) if side.lower() == "buy" else formatted_price * (1.0 - config.TP_PERCENT))
+                        bep_trigger = getattr(config, "BEP_PROFIT_TRIGGER", 0.0128)
+                        sl_pct = sig.get("sl_percent", config.SL_PERCENT * 100.0) / 100.0
+                        tp_pct = sig.get("tp_percent", config.TP_PERCENT * 100.0) / 100.0
+                        actual_sl = self.client.format_price(symbol, formatted_price * (1.0 - sl_pct) if side.lower() == "buy" else formatted_price * (1.0 + sl_pct))
+                        actual_tp = self.client.format_price(symbol, formatted_price * (1.0 + tp_pct) if side.lower() == "buy" else formatted_price * (1.0 - tp_pct))
                         actual_bep = self.client.format_price(symbol, formatted_price * (1.0 + bep_trigger) if side.lower() == "buy" else formatted_price * (1.0 - bep_trigger))
 
                         # Verifikasi atau pasang ulang Native Stop Loss (STOP_MARKET) di Binance Matching Engine

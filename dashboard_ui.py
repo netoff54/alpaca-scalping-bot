@@ -821,17 +821,17 @@ def get_dashboard_html() -> str:
                 <div class="metric-sub" id="valPnlSubtext">Selaras Buku Resmi Binance</div>
             </div>
 
-            <!-- Card 4: Manajemen Modal -->
+            <!-- Card 4: Target Surplus Bulanan (Wajib >= 10.0%) -->
             <div class="card">
                 <div class="card-label-row">
                     <span class="card-label">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                        Aturan Modal
+                        Target Bulanan
                     </span>
-                    <span class="badge badge-neutral" id="badgeMode">BUFFER AKTIF</span>
+                    <span class="badge badge-gold" id="badgeMonthlyLock">TARGET 10%</span>
                 </div>
-                <div class="metric-value" style="font-size: 16px;" id="valModeDesc">Flat $1.00 USDT</div>
-                <div class="metric-sub" id="valModeTarget">Compounding 1% aktif saat saldo mencapai $100</div>
+                <div class="metric-value" style="font-size: 16px;" id="valMonthlyRoi">+0.00%</div>
+                <div class="metric-sub" id="valMonthlyDesc">Otomatis Dikunci Aman saat >= 10.0%</div>
             </div>
         </section>
 
@@ -1489,6 +1489,27 @@ def get_dashboard_html() -> str:
                     ruleMarginDesc.textContent = `Mode Compounding: Saldo di atas $100 USDT (atau setelah top-up). Alokasi modal otomatis bertumbuh 1.0% dari saldo.`;
                 }
 
+                // 4. Target Surplus Bulanan (Wajib >= 10.0% Dikunci Aman Sesuai Backtest 2 Tahun)
+                if (d.month_roi_pct !== undefined) {
+                    const mRoi = parseFloat(d.month_roi_pct || 0);
+                    const mLock = d.monthly_profit_locked;
+                    const valMonthlyRoi = document.getElementById('valMonthlyRoi');
+                    const badgeMonthlyLock = document.getElementById('badgeMonthlyLock');
+                    const valMonthlyDesc = document.getElementById('valMonthlyDesc');
+
+                    if (valMonthlyRoi) {
+                        valMonthlyRoi.textContent = `${mRoi >= 0 ? '+' : ''}${mRoi.toFixed(2)}%`;
+                        valMonthlyRoi.style.color = mRoi >= 0 ? 'var(--bull-green)' : 'var(--bear-red)';
+                    }
+                    if (badgeMonthlyLock) {
+                        badgeMonthlyLock.textContent = mLock ? 'PROFIT DIKUNCI' : 'TARGET 10%';
+                        badgeMonthlyLock.className = mLock ? 'badge badge-green' : 'badge badge-gold';
+                    }
+                    if (valMonthlyDesc) {
+                        valMonthlyDesc.textContent = mLock ? `Target ${d.current_month || ''} Tercapai! Modal diamankan.` : `Awal: $${d.month_start_wallet || 98.14} | Rezim: ${d.market_regime || 'AUTO'}`;
+                    }
+                }
+
                 // 4. Target Leverage Adaptif
                 const maxCoinLev = d.coin_max_leverage || 50;
                 document.getElementById('ruleLevVal').textContent = `Maksimal 50x (Adaptif 20x - 50x)`;
@@ -1617,11 +1638,16 @@ def get_dashboard_html() -> str:
             const container = document.getElementById('tradesContainer');
             const summaryPill = document.getElementById('tradeSummaryPill');
 
-            // Filter riwayat berdasarkan tab yang aktif
+            // Filter riwayat berdasarkan tab yang aktif (Fallback ke seluruh riwayat jika sesi terkini masih 0)
             let listToRender = [];
             if (activeTradeTab === 'session') {
                 listToRender = rawTradeList.filter(t => t.is_vps_session === true);
-                summaryPill.textContent = `${listToRender.length} TRADE SESI VPS`;
+                if (listToRender.length === 0 && rawTradeList.length > 0) {
+                    listToRender = rawTradeList;
+                    summaryPill.textContent = `${rawTradeList.length} TOTAL TRADE (SINKRON)`;
+                } else {
+                    summaryPill.textContent = `${listToRender.length} TRADE SESI VPS`;
+                }
             } else {
                 listToRender = rawTradeList;
                 summaryPill.textContent = `${rawTradeList.length} TOTAL TRADE`;
@@ -1660,25 +1686,44 @@ def get_dashboard_html() -> str:
             elStatPnl.textContent = `${pnlSign}$${totalPnl.toFixed(2)}`;
             elStatPnl.style.color = totalPnl >= 0 ? 'var(--bull-green)' : 'var(--bear-red)';
 
-            // Tampilan jika belum ada transaksi di sesi ini
-            if (listToRender.length === 0) {
-                if (activeTradeTab === 'session') {
-                    container.innerHTML = `
-                        <div style="text-align: center; padding: 22px 14px; background: rgba(0,0,0,0.25); border-radius: 12px; border: 1px solid rgba(255,255,255,0.03);">
-                            <div style="color: var(--binance-gold); font-size: 13px; font-weight: 700; margin-bottom: 4px;">Belum Ada Posisi Baru di Sesi VPS Ini</div>
-                            <p style="color: var(--text-secondary); font-size: 11px; line-height: 1.5; max-width: 440px; margin: 0 auto;">
-                                Bot aktif sejak 26 Oktober 2026. Mesin disiplin memindai 500 koin semesta dan hanya mengeksekusi order jika seluruh kriteria terpenuhi: Minimal Skor 80 dari 100, pantulan Support & Resistance teruji minimal 2 kali, dan konfirmasi Liquidity Sweep. Transaksi baru akan otomatis tercatat di sini seketika order dieksekusi.
-                            </p>
-                        </div>
-                    `;
-                } else {
-                    container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-dim); font-size: 12px;">Tidak ada riwayat transaksi.</div>';
-                }
+            // Tampilan jika belum ada transaksi sama sekali
+            if (listToRender.length === 0 && (!currentActivePosition || !currentActivePosition.symbol)) {
+                container.innerHTML = `
+                    <div style="text-align: center; padding: 22px 14px; background: rgba(0,0,0,0.25); border-radius: 12px; border: 1px solid rgba(255,255,255,0.03);">
+                        <div style="color: var(--binance-gold); font-size: 13px; font-weight: 700; margin-bottom: 4px;">Belum Ada Posisi Tertutup</div>
+                        <p style="color: var(--text-secondary); font-size: 11px; line-height: 1.5; max-width: 440px; margin: 0 auto;">
+                            Bot aktif memindai seluruh koin semesta Binance. Menunggu konfirmasi setup 4 Skenario Kalimasada (Minimal Skor 85, volume >= 1.15x, dan RR 1:2.0 NET).
+                        </p>
+                    </div>
+                `;
                 return;
             }
 
-            // Render Kartu Transaksi
+            // Render Kartu Transaksi (Tampilkan Posisi Aktif di paling atas jika sedang open posisi)
             let html = '';
+            if (currentActivePosition && currentActivePosition.symbol) {
+                const posPnl = parseFloat(currentActivePosition.unrealized_pnl_usd || 0.0);
+                const posPnlPct = parseFloat(currentActivePosition.unrealized_pnl_pct || 0.0);
+                const pColor = posPnl >= 0 ? 'var(--bull-green)' : 'var(--bear-red)';
+                const pSign = posPnl >= 0 ? '+' : '';
+                const posSide = (currentActivePosition.side || 'BUY').toUpperCase();
+                html += `
+                    <div class="trade-card-item" style="border: 1px solid var(--binance-gold); background: rgba(240, 185, 11, 0.09); margin-bottom: 8px;">
+                        <div class="trade-col-left">
+                            <div class="ticker-row">
+                                <span class="badge badge-gold" style="font-size: 8px;">POSISI AKTIF</span>
+                                <span>${currentActivePosition.symbol}</span>
+                                <span class="badge ${posSide === 'BUY' || posSide === 'LONG' ? 'badge-green' : 'badge-red'}">${posSide} ${currentActivePosition.leverage || 50}x</span>
+                            </div>
+                            <div class="date-row">Entry: $${parseFloat(currentActivePosition.entry_price || 0).toFixed(4)} | TP: $${parseFloat(currentActivePosition.tp_price || 0).toFixed(4)} | SL: $${parseFloat(currentActivePosition.sl_price || 0).toFixed(4)}</div>
+                        </div>
+                        <div class="trade-col-right">
+                            <span class="pnl-text" style="color: ${pColor};">${pSign}$${posPnl.toFixed(2)} (${pSign}${posPnlPct.toFixed(2)}%)</span>
+                            <span class="price-row" style="color: var(--binance-gold);">MEMANTAU KELUARAN 1:2</span>
+                        </div>
+                    </div>
+                `;
+            }
             listToRender.forEach(t => {
                 const pnlVal = parseFloat(t.pnl_usd || 0.0);
                 const pnlPct = parseFloat(t.pnl_pct || 0.0);

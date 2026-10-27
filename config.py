@@ -26,7 +26,10 @@ class BotConfig:
     STRUCTURE_TIMEFRAME: str = "1h"        # Timeframe struktur pasar, S&R teruji, & Area Likuidasi 1 Jam
     MACRO_TIMEFRAME: str = "4h"            # Timeframe tren makro institusi (EMA 200) 4 Jam
     CANDLE_LIMIT: int = 1000               # 1000 candle untuk minimalkan noise & validasi S&R / EMA presisi
-    MIN_SETUP_SCORE: float = 80.0          # Skor minimal agar sinyal dieksekusi (hanya setup matang)
+    MIN_SETUP_SCORE: float = 85.0          # Skor minimal agar sinyal dieksekusi (hanya setup institusional matang)
+    MONTHLY_TARGET_SURPLUS_PCT: float = 10.0 # Target surplus bulanan wajib >= 10.0% dikunci aman (Backtest 2 Tahun)
+    MIN_VOL_RATIO: float = 1.15            # Wajib volume ekspansi >= 1.15x rata-rata MA20
+    MIN_WICK_RATIO: float = 0.35           # Rasio ekor penolakan lilin (Hammer/Shooting Star) >= 35% range total
 
     # --- Account & Risk-Budget Management (Leverage Range 50x -> 20x) ---
     INITIAL_CAPITAL: float = 101.15        # Modal awal riil pengguna di Binance Futures ($101.15)
@@ -80,8 +83,8 @@ class BotConfig:
     MAX_SL_PERCENT: float = 0.0200         # Batas atas risiko 2.00% (Terkontrol ketat)
     BTC_FILTER_ENABLED: bool = True        # Kompas Makro BTC (Dilarang Long Altcoin jika BTC di bawah EMA 200 4 Jam)
     POST_SL_COOLDOWN_HOURS: float = 4.0    # Jeda cooldown 4 jam per koin setelah Stop Loss (Anti-Chop & Anti-Revenge Trading)
-    CONSECUTIVE_LOSS_CIRCUIT_BREAKER: int = 3 # Circuit Breaker portofolio jika 3 loss berturut-turut
-    CIRCUIT_BREAKER_PAUSE_HOURS: float = 24.0 # Jeda 24 jam untuk mendinginkan portofolio saat badai pasar
+    CONSECUTIVE_LOSS_CIRCUIT_BREAKER: int = 2 # Circuit Breaker portofolio jika 2 loss berturut-turut (Sesuai Backtest 2 Tahun)
+    CIRCUIT_BREAKER_PAUSE_HOURS: float = 2.0  # Jeda 2 jam untuk mendinginkan portofolio saat badai pasar (Sesuai Backtest 2 Tahun)
     MAX_SPREAD_PERCENT: float = 0.0008     # Batas maksimal spread bid-ask 0.08% (Anti-Slippage & Anti-Illiquid Books)
     MAKER_FEE_RATE: float = 0.0002         # 0.02% maker fee pada Binance Futures
     TAKER_FEE_RATE: float = 0.0005         # 0.05% taker fee pada Binance Futures

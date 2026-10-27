@@ -119,6 +119,12 @@ def api_dashboard_summary():
     ws_alive = ws_mgr.is_alive() if ws_mgr else False
     tracked_count = len(ws_mgr.prices) if ws_mgr else 829
 
+    month_start = getattr(scalper, "month_start_wallet", init_capital)
+    month_str = getattr(scalper, "current_month", time.strftime("%Y-%m"))
+    month_roi = round(((cur_wallet - month_start) / month_start * 100.0), 2) if month_start > 0 else 0.0
+    profit_locked = getattr(scalper, "monthly_profit_locked", False)
+    market_regime = getattr(scalper, "_cached_market_regime", {}).get("regime", "SIDEWAYS")
+
     return {
         "current_balance": cur_wallet,
         "available_balance": avail_wallet,
@@ -134,7 +140,12 @@ def api_dashboard_summary():
         "target_min_leverage": 20,
         "tracked_symbols_count": tracked_count,
         "uptime_str": uptime_str,
-        "websocket_status": "LIVE_STREAMING" if ws_alive else "STANDBY"
+        "websocket_status": "LIVE_STREAMING" if ws_alive else "STANDBY",
+        "current_month": month_str,
+        "month_start_wallet": round(month_start, 2),
+        "month_roi_pct": month_roi,
+        "monthly_profit_locked": profit_locked,
+        "market_regime": market_regime
     }
 
 @app.get("/api/wallet-history", response_class=JSONResponse)

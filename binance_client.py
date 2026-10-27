@@ -653,17 +653,46 @@ class BinanceFuturesClient:
 
     def create_stop_loss_order(self, symbol: str, side: str, stop_price: float, qty: Optional[float] = None) -> Dict[str, Any]:
         """
-        Memasang Native Stop Loss (STOP_MARKET) langsung di server Matching Engine Binance Futures
-        menggunakan endpoint resmi Algo Service (POST /fapi/v1/algoOrder).
-        Menjamin pesanan Stop Loss resmi muncul di tab 'Pesanan Terbuka' -> 'Pesanan Pemicu' / TP/SL posisi di aplikasi Binance.
+        Memasang Native Stop Loss (STOP_MARKET) langsung di server Matching Engine Binance Futures:
+        1. Menggunakan endpoint resmi POST /fapi/v1/order agar 100% muncul di tab 'Order Terbuka Bersyarat' / TP/SL di aplikasi Binance.
+        2. Fallback ke endpoint Algo Service (POST /fapi/v1/algoOrder) jika endpoint reguler membutuhkan routing alternatif.
         """
         if self.is_banned():
             return {}
-        url_algo = f"{self.base_url}/fapi/v1/algoOrder"
         formatted_stop = self.format_price(symbol, stop_price)
         formatted_qty = self.format_qty(symbol, qty) if qty and qty > 0 else None
 
-        payload: Dict[str, Any] = {
+        # 1. Coba pasang di endpoint resmi /fapi/v1/order (Muncul di tab 'Order Terbuka Bersyarat' Binance App)
+        url_order = f"{self.base_url}/fapi/v1/order"
+        payload_order: Dict[str, Any] = {
+            "symbol": symbol,
+            "side": side.upper(),
+            "type": "STOP_MARKET",
+            "stopPrice": formatted_stop,
+            "workingType": "MARK_PRICE"
+        }
+        if formatted_qty:
+            payload_order["quantity"] = formatted_qty
+            payload_order["reduceOnly"] = "true"
+        else:
+            payload_order["closePosition"] = "true"
+
+        params_order = self._sign(payload_order)
+        try:
+            resp = self.session.post(url_order, params=params_order, timeout=10)
+            self.check_response_for_ban(resp)
+            data = resp.json()
+            self.check_response_for_ban(data)
+            order_id = data.get("orderId") if isinstance(data, dict) else None
+            if order_id:
+                console.log(f"[bold green]🛡️ NATIVE STOP LOSS TERPASANG RESMI (ORDER BERSYARAT BINANCE): {side} {formatted_qty} {symbol} @ {formatted_stop} (Order ID: {order_id})[/bold green]")
+                return {"orderId": order_id, "algoId": order_id, **data}
+        except Exception as e_ord:
+            console.log(f"[dim]Notice fapi/v1/order SL fallback to algoOrder: {e_ord}[/dim]")
+
+        # 2. Fallback ke Algo Service (/fapi/v1/algoOrder)
+        url_algo = f"{self.base_url}/fapi/v1/algoOrder"
+        payload_algo: Dict[str, Any] = {
             "algoType": "CONDITIONAL",
             "symbol": symbol,
             "side": side.upper(),
@@ -672,40 +701,70 @@ class BinanceFuturesClient:
             "workingType": "MARK_PRICE"
         }
         if formatted_qty:
-            payload["quantity"] = formatted_qty
-            payload["reduceOnly"] = "true"
+            payload_algo["quantity"] = formatted_qty
+            payload_algo["reduceOnly"] = "true"
         else:
-            payload["closePosition"] = "true"
+            payload_algo["closePosition"] = "true"
 
-        params = self._sign(payload)
+        params_algo = self._sign(payload_algo)
         try:
-            resp = self.session.post(url_algo, params=params, timeout=10)
-            self.check_response_for_ban(resp)
-            data = resp.json()
-            self.check_response_for_ban(data)
-            algo_id = data.get("algoId") if isinstance(data, dict) else None
+            resp_algo = self.session.post(url_algo, params=params_algo, timeout=10)
+            self.check_response_for_ban(resp_algo)
+            data_algo = resp_algo.json()
+            self.check_response_for_ban(data_algo)
+            algo_id = data_algo.get("algoId") if isinstance(data_algo, dict) else None
             if algo_id:
-                console.log(f"[bold green]🛡️ NATIVE STOP LOSS TERPASANG RESMI DI BINANCE: {side} {formatted_qty} {symbol} @ {formatted_stop} (Algo ID: {algo_id})[/bold green]")
-                return {"orderId": algo_id, "algoId": algo_id, **data}
+                console.log(f"[bold green]🛡️ NATIVE STOP LOSS TERPASANG RESMI DI BINANCE (ALGO): {side} {formatted_qty} {symbol} @ {formatted_stop} (Algo ID: {algo_id})[/bold green]")
+                return {"orderId": algo_id, "algoId": algo_id, **data_algo}
 
-            console.log(f"[yellow]Peringatan pasang native SL Algo: {data}[/yellow]")
-            return data if isinstance(data, dict) else {}
+            console.log(f"[yellow]Peringatan pasang native SL: {data_algo}[/yellow]")
+            return data_algo if isinstance(data_algo, dict) else {}
         except Exception as e:
             console.log(f"[red]Gagal memasang native SL di Binance: {e}[/red]")
             return {}
 
     def create_take_profit_order(self, symbol: str, side: str, stop_price: float, qty: Optional[float] = None) -> Dict[str, Any]:
         """
-        Memasang Native Take Profit (TAKE_PROFIT_MARKET) langsung di server Matching Engine Binance Futures
-        menggunakan endpoint resmi Algo Service (POST /fapi/v1/algoOrder).
+        Memasang Native Take Profit (TAKE_PROFIT_MARKET) langsung di server Matching Engine Binance Futures:
+        1. Menggunakan endpoint resmi POST /fapi/v1/order agar 100% muncul di tab 'Order Terbuka Bersyarat' / TP/SL di aplikasi Binance.
+        2. Fallback ke endpoint Algo Service (POST /fapi/v1/algoOrder) jika diperlukan.
         """
         if self.is_banned():
             return {}
-        url_algo = f"{self.base_url}/fapi/v1/algoOrder"
         formatted_stop = self.format_price(symbol, stop_price)
         formatted_qty = self.format_qty(symbol, qty) if qty and qty > 0 else None
 
-        payload: Dict[str, Any] = {
+        # 1. Coba pasang di endpoint resmi /fapi/v1/order (Muncul di tab 'Order Terbuka Bersyarat' Binance App)
+        url_order = f"{self.base_url}/fapi/v1/order"
+        payload_order: Dict[str, Any] = {
+            "symbol": symbol,
+            "side": side.upper(),
+            "type": "TAKE_PROFIT_MARKET",
+            "stopPrice": formatted_stop,
+            "workingType": "MARK_PRICE"
+        }
+        if formatted_qty:
+            payload_order["quantity"] = formatted_qty
+            payload_order["reduceOnly"] = "true"
+        else:
+            payload_order["closePosition"] = "true"
+
+        params_order = self._sign(payload_order)
+        try:
+            resp = self.session.post(url_order, params=params_order, timeout=10)
+            self.check_response_for_ban(resp)
+            data = resp.json()
+            self.check_response_for_ban(data)
+            order_id = data.get("orderId") if isinstance(data, dict) else None
+            if order_id:
+                console.log(f"[bold green]🎯 NATIVE TAKE PROFIT TERPASANG RESMI (ORDER BERSYARAT BINANCE): {side} {formatted_qty} {symbol} @ {formatted_stop} (Order ID: {order_id})[/bold green]")
+                return {"orderId": order_id, "algoId": order_id, **data}
+        except Exception as e_ord:
+            console.log(f"[dim]Notice fapi/v1/order TP fallback to algoOrder: {e_ord}[/dim]")
+
+        # 2. Fallback ke Algo Service (/fapi/v1/algoOrder)
+        url_algo = f"{self.base_url}/fapi/v1/algoOrder"
+        payload_algo: Dict[str, Any] = {
             "algoType": "CONDITIONAL",
             "symbol": symbol,
             "side": side.upper(),
@@ -714,24 +773,24 @@ class BinanceFuturesClient:
             "workingType": "MARK_PRICE"
         }
         if formatted_qty:
-            payload["quantity"] = formatted_qty
-            payload["reduceOnly"] = "true"
+            payload_algo["quantity"] = formatted_qty
+            payload_algo["reduceOnly"] = "true"
         else:
-            payload["closePosition"] = "true"
+            payload_algo["closePosition"] = "true"
 
-        params = self._sign(payload)
+        params_algo = self._sign(payload_algo)
         try:
-            resp = self.session.post(url_algo, params=params, timeout=10)
-            self.check_response_for_ban(resp)
-            data = resp.json()
-            self.check_response_for_ban(data)
-            algo_id = data.get("algoId") if isinstance(data, dict) else None
+            resp_algo = self.session.post(url_algo, params=params_algo, timeout=10)
+            self.check_response_for_ban(resp_algo)
+            data_algo = resp_algo.json()
+            self.check_response_for_ban(data_algo)
+            algo_id = data_algo.get("algoId") if isinstance(data_algo, dict) else None
             if algo_id:
-                console.log(f"[bold green]🎯 NATIVE TAKE PROFIT TERPASANG RESMI DI BINANCE: {side} {formatted_qty} {symbol} @ {formatted_stop} (Algo ID: {algo_id})[/bold green]")
-                return {"orderId": algo_id, "algoId": algo_id, **data}
+                console.log(f"[bold green]🎯 NATIVE TAKE PROFIT TERPASANG RESMI DI BINANCE (ALGO): {side} {formatted_qty} {symbol} @ {formatted_stop} (Algo ID: {algo_id})[/bold green]")
+                return {"orderId": algo_id, "algoId": algo_id, **data_algo}
 
-            console.log(f"[yellow]Peringatan pasang native TP Algo: {data}[/yellow]")
-            return data if isinstance(data, dict) else {}
+            console.log(f"[yellow]Peringatan pasang native TP: {data_algo}[/yellow]")
+            return data_algo if isinstance(data_algo, dict) else {}
         except Exception as e:
             console.log(f"[red]Gagal memasang native TP di Binance: {e}[/red]")
             return {}
