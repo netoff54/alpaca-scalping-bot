@@ -54,6 +54,15 @@ class NeonDatabase:
                         closed_at TEXT,
                         created_at TEXT DEFAULT CURRENT_TIMESTAMP
                     );
+                    CREATE TABLE IF NOT EXISTS wallet_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        total_wallet REAL NOT NULL,
+                        available_balance REAL NOT NULL,
+                        unrealized_pnl REAL DEFAULT 0.0,
+                        compounded_trade_size REAL DEFAULT 1.0,
+                        margin_allocation_pct REAL DEFAULT 0.5,
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                    );
                 """)
                 conn.commit()
 
@@ -304,7 +313,22 @@ class NeonDatabase:
             console.log(f"[dim]DB record signals: {e}[/dim]")
 
     def record_wallet_snapshot(self, total_wallet: float, available: float, unpnl: float, trade_size: float, margin_pct: float = 0.5):
-        """Merekam riwayat saldo untuk grafik compounding portofolio."""
+        """Merekam riwayat saldo untuk grafik compounding portofolio ke SQLite lokal dan Neon Tech."""
+        # 1. Simpan ke SQLite lokal
+        try:
+            with self._get_sqlite_conn() as s_conn:
+                s_cur = s_conn.cursor()
+                s_cur.execute("""
+                    INSERT INTO wallet_history (
+                        total_wallet, available_balance, unrealized_pnl,
+                        compounded_trade_size, margin_allocation_pct
+                    ) VALUES (?, ?, ?, ?, ?);
+                """, (total_wallet, available, unpnl, trade_size, margin_pct))
+                s_conn.commit()
+        except Exception as e_sql:
+            console.log(f"[dim]SQLite record wallet notice: {e_sql}[/dim]")
+
+        # 2. Coba simpan ke Neon Tech jika kuota masih ada
         try:
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
@@ -316,10 +340,10 @@ class NeonDatabase:
                     """, (total_wallet, available, unpnl, trade_size, margin_pct))
                 conn.commit()
         except Exception as e:
-            console.log(f"[dim]DB record wallet: {e}[/dim]")
+            pass
 
     def get_latest_wallet_snapshot(self) -> Dict[str, float]:
-        """Mengambil rekaman saldo wallet terakhir dari Neon Tech."""
+        """Mengambil rekaman saldo wallet terakhir dari Neon Tech atau SQLite lokal."""
         try:
             with self.get_connection() as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -336,8 +360,28 @@ class NeonDatabase:
                             "available": float(row.get("available_balance") or 0.0),
                             "unrealized_pnl": float(row.get("unrealized_pnl") or 0.0)
                         }
-        except Exception as e:
-            console.log(f"[dim]DB get latest wallet snapshot notice: {e}[/dim]")
+        except Exception:
+            pass
+
+        # Fallback SQLite
+        try:
+            with self._get_sqlite_conn() as s_conn:
+                s_cur = s_conn.cursor()
+                s_cur.execute("""
+                    SELECT total_wallet, available_balance, unrealized_pnl
+                    FROM wallet_history
+                    ORDER BY id DESC
+                    LIMIT 1;
+                """)
+                row = s_cur.fetchone()
+                if row:
+                    return {
+                        "total_wallet": float(row["total_wallet"] or 0.0),
+                        "available": float(row["available_balance"] or 0.0),
+                        "unrealized_pnl": float(row["unrealized_pnl"] or 0.0)
+                    }
+        except Exception:
+            pass
         return {}
 
     def get_wallet_history_series(self, limit: int = 60) -> List[Dict[str, Any]]:
@@ -364,8 +408,35 @@ class NeonDatabase:
                             }
                             for r in rows
                         ]
-        except Exception as e:
-            console.log(f"[dim]DB get wallet history series: {e}[/dim]")
+        except Exception:
+            pass
+
+        # Fallback SQLite
+        try:
+            with self._get_sqlite_conn() as s_conn:
+                s_cur = s_conn.cursor()
+                s_cur.execute("""
+                    SELECT id, total_wallet, available_balance, unrealized_pnl, timestamp
+                    FROM wallet_history
+                    ORDER BY id DESC
+                    LIMIT ?;
+                """, (limit,))
+                rows = s_cur.fetchall()
+                if rows:
+                    rows = list(rows)
+                    rows.reverse()
+                    return [
+                        {
+                            "id": r["id"],
+                            "total_wallet": float(r["total_wallet"] or 0.0),
+                            "available": float(r["available_balance"] or 0.0),
+                            "unpnl": float(r["unrealized_pnl"] or 0.0),
+                            "time": str(r["timestamp"])[:16] if r["timestamp"] else ""
+                        }
+                        for r in rows
+                    ]
+        except Exception:
+            pass
         return []
 
     def get_trade_summary(self) -> Dict[str, Any]:
