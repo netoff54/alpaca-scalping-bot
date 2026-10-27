@@ -1626,3 +1626,6 @@ def get_dashboard_html() -> str:
 </body>
 </html>
 """
+
+DASHBOARD_HTML = get_dashboard_html()
+
