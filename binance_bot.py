@@ -374,7 +374,9 @@ class BinanceScalper:
         else:
             real_pnl_pct = (real_pnl_usd / c_notional * 100) if c_notional > 0 else 0.0
 
-        res = "WIN" if real_pnl_usd >= 0.0 else "LOSS"
+        # Sesuai instruksi pengguna: SL BEP dihitung sebagai LOSS (karena kena Stop Loss)
+        is_bep = (real_pnl_usd > 0.0 and real_pnl_pct < 1.5) or closed_pos.get("bep_activated", False)
+        res = "WIN" if (real_pnl_usd > 0.0 and not is_bep) else "LOSS"
         margin_used = round((c_notional / c_lev) if c_lev > 0 else (c_notional / 20.0), 4)
 
         trade_record = {
@@ -398,7 +400,7 @@ class BinanceScalper:
             self.trade_history.append(trade_record)
             db.record_trade(trade_record)
             self.total_trades += 1
-            if real_pnl_usd >= 0.0:
+            if res == "WIN":
                 self.winning_trades += 1
             self.total_pnl_usd += real_pnl_usd
             console.log(f"[bold green]✅ Trade {sym} berhasil tercatat 100% akurat dari bursa: PnL ${real_pnl_usd:+.4f} ({real_pnl_pct:+.2f}%), Exit: {real_exit_price}, Lev: {c_lev}x[/bold green]")

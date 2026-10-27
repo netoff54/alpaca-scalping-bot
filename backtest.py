@@ -181,7 +181,7 @@ def run_portfolio_simulation(klines_data: Dict[str, List[List[float]]]) -> Tuple
                 fee_rate = 0.0007  # Maker in + Taker out
                 net_pnl = (gross_pct - fee_rate) * notional
 
-                res = "WIN" if net_pnl >= 0.0 else "LOSS"
+                res = "WIN" if (net_pnl > 0.0 and not active_pos["bep_activated"]) else "LOSS"
                 reason = "BEP_LOCK_PROFIT" if active_pos["bep_activated"] else "STOP_LOSS_1R"
 
                 wallet += net_pnl
@@ -373,7 +373,7 @@ def run_all_symbols_independent(klines_data: Dict[str, List[List[float]]]) -> Di
                 exit_p = sl_p
                 gross_pct = (exit_p - entry_p) / entry_p if side == "BUY" else (entry_p - exit_p) / entry_p
                 net_pnl = (gross_pct - 0.0007) * notional
-                res = "WIN" if net_pnl >= 0 else "LOSS"
+                res = "WIN" if (net_pnl > 0 and not pos["bep_act"]) else "LOSS"
                 reason = "BEP_LOCK" if pos["bep_act"] else "STOP_LOSS"
                 trade = {"symbol": sym, "result": res, "reason": reason, "net_pnl": net_pnl}
                 sym_trades.append(trade)

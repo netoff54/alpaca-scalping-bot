@@ -20,7 +20,7 @@ class BotConfig:
     ROTATION_BATCH_SIZE: int = 1           # 1 Koin per rotasi (Analisis Menyeluruh, Bukan Screening Singkat)
     TOTAL_ROTATIONS: int = 500             # 500 rotasi berurutan dari koin 1 s/d koin 500
     TOP_COINS_LIMIT: int = 1               # 1 koin per rotasi
-    MIN_24H_VOLUME_USD: float = 100_000.0  # Minimal volume $100k agar seluruh semesta 500 koin Binance Futures terakomodasi
+    MIN_24H_VOLUME_USD: float = 5_000_000.0# Minimal volume $5M agar koin likuid, orderbook tebal, bebas slippage & wick manipulation (Top 250+ Koin Binance)
     SCAN_INTERVAL_SECONDS: int = 8         # Siklus aman 8 detik per koin (hemat kuota weight bursa 96%, bebas shutdown rate-limit)
     TIMEFRAME: str = "15m"                 # Timeframe eksekusi entry 15 menit (Sesuai Akademi Crypto Kalimasada)
     STRUCTURE_TIMEFRAME: str = "1h"        # Timeframe struktur pasar, S&R teruji, & Area Likuidasi 1 Jam
@@ -73,6 +73,7 @@ class BotConfig:
     SL_PERCENT: float = 0.0100             # Stop Loss dasar 1.00%
     TP_PERCENT: float = 0.0233             # Take Profit dasar 2.33%
     BEP_PROFIT_TRIGGER: float = 0.0070     # Pemicu Break-Even (geser SL ke BEP saat profit mencapai +0.70% / 1R)
+    BEP_LOCK_PROFIT: float = 0.0030        # Kunci profit bersih saat BEP aktif (+0.30%)
     RR_RATIO: float = 2.00                 # Rasio Risk-to-Reward Net Bersih 1:2.0
     STRUCTURAL_SL_ENABLED: bool = True     # Stop Loss struktural berbasis ekor lilin Price Action
     MIN_SL_PERCENT: float = 0.0080         # Batas bawah risiko 0.80% (Anti-Wick Noise Altcoin)

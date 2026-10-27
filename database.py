@@ -433,7 +433,8 @@ class NeonDatabase:
                                 inc = sym_incomes.pop(0)
                                 real_pnl = round(float(inc["income"]), 4)
                                 t_id = str(inc["tradeId"])
-                                res = "WIN" if real_pnl >= 0.0 else "LOSS"
+                                # Sesuai instruksi pengguna: SL BEP (profit tipis < 1.5% notional) dihitung LOSS karena terkena Stop Loss
+                                res = "WIN" if (real_pnl > 0.0 and pnl_pct >= 1.5) else "LOSS"
                                 notional = float(trade.get("notional") or 10.0)
                                 pnl_pct = round((real_pnl / notional) * 100, 2) if notional > 0 else 0.0
 
@@ -449,7 +450,8 @@ class NeonDatabase:
                             for rem_inc in remaining:
                                 real_pnl = round(float(rem_inc["income"]), 4)
                                 t_id = str(rem_inc["tradeId"])
-                                res = "WIN" if real_pnl >= 0.0 else "LOSS"
+                                # Sesuai instruksi pengguna: SL BEP (profit tipis < 1.5% notional) dihitung LOSS karena terkena Stop Loss
+                                res = "WIN" if (real_pnl > 0.0 and pnl_pct >= 1.5) else "LOSS"
                                 t_time = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(rem_inc["time"] / 1000 + 7 * 3600))
                                 notional = 20.0
                                 pnl_pct = round((real_pnl / notional) * 100, 2)
