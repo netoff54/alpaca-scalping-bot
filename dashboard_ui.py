@@ -697,12 +697,13 @@ def get_dashboard_html() -> str:
             font-family: var(--font-mono);
         }
 
-        /* 6. LOGS TERMINAL */
+        /* 6. LOGS TERMINAL (LINUX VPS MATRIX GREEN) */
         .logs-box-card {
-            background: #05070a;
-            border: 1px solid var(--border-card);
+            background: #020603;
+            border: 1px solid rgba(0, 255, 102, 0.2);
             border-radius: 16px;
             padding: 14px;
+            box-shadow: 0 4px 20px rgba(0, 255, 102, 0.04);
         }
 
         .logs-header-row {
@@ -713,18 +714,27 @@ def get_dashboard_html() -> str:
         }
 
         .logs-content {
-            background: #000000;
-            border: 1px solid rgba(255, 255, 255, 0.05);
+            background: #010402;
+            border: 1px solid rgba(0, 255, 102, 0.15);
             border-radius: 10px;
-            padding: 10px;
+            padding: 12px;
             font-family: var(--font-mono);
-            font-size: 10px;
-            color: #79879c;
-            height: 180px;
+            font-size: 10.5px;
+            color: #00ff66;
+            text-shadow: 0 0 3px rgba(0, 255, 102, 0.35);
+            height: 190px;
             overflow-y: auto;
-            line-height: 1.5;
+            line-height: 1.55;
             white-space: pre-wrap;
             word-break: break-all;
+        }
+
+        .logs-content::-webkit-scrollbar-thumb {
+            background: rgba(0, 255, 102, 0.3);
+            border-radius: 4px;
+        }
+        .logs-content::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 255, 102, 0.6);
         }
 
         /* Custom Scrollbar */
@@ -1022,7 +1032,7 @@ def get_dashboard_html() -> str:
                     </svg>
                     Feed Log Mesin VPS
                 </span>
-                <span class="badge badge-neutral" id="logScrollBadge">AUTO-SCROLL ON</span>
+                <span class="badge" id="logScrollBadge" style="background: rgba(0, 255, 102, 0.1); color: #00ff66; border: 1px solid rgba(0, 255, 102, 0.3);">LIVE TERMINAL</span>
             </div>
             <div class="logs-content" id="terminalLogs">Menghubungkan stream log...</div>
         </section>
@@ -1067,6 +1077,17 @@ def get_dashboard_html() -> str:
 
         window.addEventListener('resize', resizeCanvas);
 
+        // Otomatis menyesuaikan ukuran bubble agar fleksibel dan tidak sesak seiring bertambahnya bubble
+        function getDynamicBaseRadius() {
+            const total = bubbleList.length || 50;
+            if (total <= 40) return 13.5;
+            if (total <= 70) return 11.5;
+            if (total <= 110) return 9.5;
+            if (total <= 160) return 8.0;
+            if (total <= 220) return 6.8;
+            return 5.8;
+        }
+
         // Inisialisasi bubble dengan penyebaran luas (jarak lega, tidak mepet)
         function initBubbles() {
             bubbleList = [];
@@ -1074,7 +1095,7 @@ def get_dashboard_html() -> str:
             const centerY = canvasH / 2;
             const minCenterDist = 65; // Jarak minimal dari hub Binance tengah
 
-            INITIAL_COINS.forEach((sym, idx) => {
+            INITIAL_COINS.forEach((sym) => {
                 const b = createSpacedBubble(sym, centerX, centerY, minCenterDist);
                 bubbleList.push(b);
             });
@@ -1082,9 +1103,11 @@ def get_dashboard_html() -> str:
 
         function createSpacedBubble(sym, centerX, centerY, minCenterDist) {
             let posX = 0, posY = 0, valid = false, attempts = 0;
-            const margin = 28;
+            const margin = 26;
+            const curR = getDynamicBaseRadius();
+            const minOtherDist = Math.max(16, curR * 2.6);
 
-            while (!valid && attempts < 100) {
+            while (!valid && attempts < 120) {
                 attempts++;
                 posX = margin + Math.random() * (canvasW - margin * 2);
                 posY = margin + Math.random() * (canvasH - margin * 2);
@@ -1092,10 +1115,10 @@ def get_dashboard_html() -> str:
                 const distCenter = Math.hypot(posX - centerX, posY - centerY);
                 if (distCenter < minCenterDist) continue;
 
-                // Cek jarak dengan bubble lain agar tidak mepet (minimal 42px)
+                // Cek jarak dengan bubble lain agar tidak mepet
                 let tooClose = false;
                 for (let other of bubbleList) {
-                    if (Math.hypot(posX - other.baseX, posY - other.baseY) < 42) {
+                    if (Math.hypot(posX - other.baseX, posY - other.baseY) < minOtherDist) {
                         tooClose = true;
                         break;
                     }
@@ -1109,13 +1132,12 @@ def get_dashboard_html() -> str:
                 baseY: posY,
                 x: posX,
                 y: posY,
-                radius: 13,
                 floatSpeedX: 0.012 + Math.random() * 0.01,
                 floatSpeedY: 0.01 + Math.random() * 0.012,
                 phaseX: Math.random() * Math.PI * 2,
                 phaseY: Math.random() * Math.PI * 2,
-                ampX: 7 + Math.random() * 5,
-                ampY: 6 + Math.random() * 5,
+                ampX: 6 + Math.random() * 4,
+                ampY: 5 + Math.random() * 4,
                 analyzed: false,
                 score: 50
             };
@@ -1230,10 +1252,13 @@ def get_dashboard_html() -> str:
                 ctx.stroke();
             }
 
-            // 5. GAMBAR SELURUH BUBBLE KOIN (STANDBY DI KANVAS)
+            // 5. GAMBAR SELURUH BUBBLE KOIN (STANDBY DI KANVAS & UKURAN FLEKSIBEL OTOMATIS)
+            const currentBaseR = getDynamicBaseRadius();
+
             bubbleList.forEach(b => {
                 const isActive = (b === activeBubble);
-                const r = isActive ? 16 + Math.sin(tick * 0.08) * 1.5 : b.radius;
+                // Ukuran dinamis: jika aktif membesar 1.5x, jika standby mengikuti ukuran dinamis fleksibel
+                const r = isActive ? Math.max(14, currentBaseR * 1.5) + Math.sin(tick * 0.08) * 1.5 : currentBaseR;
 
                 // A. Background Lingkaran Bubble
                 ctx.beginPath();
@@ -1264,12 +1289,29 @@ def get_dashboard_html() -> str:
                 ctx.stroke();
                 ctx.shadowBlur = 0;
 
-                // C. Teks Simbol Koin di Tengah Bubble
-                ctx.font = isActive ? "bold 9px 'JetBrains Mono'" : "500 8px 'JetBrains Mono'";
-                ctx.textAlign = "center";
-                ctx.textBaseline = "middle";
-                ctx.fillStyle = isActive ? "#FFFFFF" : "rgba(234, 236, 239, 0.75)";
-                ctx.fillText(b.sym, b.x, b.y);
+                // C. Teks Simbol Koin di Tengah Bubble (Otomatis skala font)
+                let fontSize = 8.5;
+                if (currentBaseR < 7.0) {
+                    fontSize = 0; // Jika koin sudah ratusan dan sangat padat, teks hanya untuk koin aktif
+                } else if (currentBaseR < 9.0) {
+                    fontSize = 6.5;
+                } else if (currentBaseR < 11.0) {
+                    fontSize = 7.5;
+                }
+
+                if (isActive) {
+                    ctx.font = "bold 9px 'JetBrains Mono'";
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+                    ctx.fillStyle = "#FFFFFF";
+                    ctx.fillText(b.sym, b.x, b.y);
+                } else if (fontSize > 0) {
+                    ctx.font = `600 ${fontSize}px 'JetBrains Mono'`;
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+                    ctx.fillStyle = "rgba(234, 236, 239, 0.75)";
+                    ctx.fillText(b.sym, b.x, b.y);
+                }
 
                 // D. Skor kecil di atas bubble jika aktif
                 if (isActive && currentCoinData && currentCoinData.score) {
@@ -1514,8 +1556,14 @@ def get_dashboard_html() -> str:
 
             listToRender.forEach(t => {
                 const pnl = parseFloat(t.pnl_usd || 0.0);
+                const pnlPct = parseFloat(t.pnl_pct || 0.0);
                 totalPnl += pnl;
-                if (t.result === 'WIN' || pnl >= 0) {
+
+                // ATURAN USER: Stop Loss BEP (SL BEP) tetap dihitung LOSS karena berstatus Stop Loss.
+                // Hanya trade yang mencapai Take Profit penuh (+1.5% ke atas) yang dihitung WIN murni.
+                const isRealWin = (pnl > 0 && pnlPct >= 1.5);
+
+                if (isRealWin) {
                     winCount++;
                 } else {
                     lossCount++;
@@ -1554,11 +1602,23 @@ def get_dashboard_html() -> str:
             // Render Kartu Transaksi
             let html = '';
             listToRender.forEach(t => {
-                const isWin = (t.result === 'WIN' || parseFloat(t.pnl_usd || 0) >= 0);
-                const pnlVal = parseFloat(t.pnl_usd || 0);
-                const pnlColor = isWin ? 'var(--bull-green)' : 'var(--bear-red)';
-                const sideColor = (t.side === 'BUY' || t.side === 'LONG') ? 'badge-green' : 'badge-red';
+                const pnlVal = parseFloat(t.pnl_usd || 0.0);
+                const pnlPct = parseFloat(t.pnl_pct || 0.0);
+                const isRealWin = (pnlVal > 0 && pnlPct >= 1.5);
+                const isSlBep = (pnlVal > 0 && pnlPct < 1.5);
                 const sign = pnlVal >= 0 ? '+' : '';
+                const sideColor = (t.side === 'BUY' || t.side === 'LONG') ? 'badge-green' : 'badge-red';
+
+                let pnlColor = 'var(--bear-red)';
+                let resultBadge = '<span class="badge badge-red" style="font-size: 8px;">LOSS</span>';
+
+                if (isRealWin) {
+                    pnlColor = 'var(--bull-green)';
+                    resultBadge = '<span class="badge badge-green" style="font-size: 8px;">WIN</span>';
+                } else if (isSlBep) {
+                    pnlColor = 'var(--binance-gold)';
+                    resultBadge = '<span class="badge badge-gold" style="font-size: 8px;">SL BEP</span>';
+                }
 
                 html += `
                     <div class="trade-card-item">
@@ -1567,6 +1627,7 @@ def get_dashboard_html() -> str:
                                 <span class="badge ${sideColor}">${t.side || 'BUY'}</span>
                                 <span>${t.symbol}</span>
                                 <span class="badge badge-neutral" style="font-size: 9px;">${t.leverage || 50}x</span>
+                                ${resultBadge}
                             </div>
                             <div class="date-row">
                                 ${t.created_at || '-'} • Margin $${parseFloat(t.margin_used || 1.0).toFixed(2)}
@@ -1574,7 +1635,7 @@ def get_dashboard_html() -> str:
                         </div>
                         <div class="trade-col-right">
                             <div class="pnl-text" style="color: ${pnlColor};">
-                                ${sign}$${pnlVal.toFixed(4)} (${sign}${parseFloat(t.pnl_pct || 0).toFixed(2)}%)
+                                ${sign}$${pnlVal.toFixed(4)} (${sign}${pnlPct.toFixed(2)}%)
                             </div>
                             <div class="price-row">
                                 Entry: ${parseFloat(t.entry_price || 0).toFixed(4)} → Exit: ${parseFloat(t.exit_price || 0).toFixed(4)}
