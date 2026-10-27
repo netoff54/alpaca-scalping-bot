@@ -125,6 +125,13 @@ def api_dashboard_summary():
     profit_locked = getattr(scalper, "monthly_profit_locked", False)
     market_regime = getattr(scalper, "_cached_market_regime", {}).get("regime", "SIDEWAYS")
 
+    # Status Istirahat Circuit Breaker
+    now_ts = time.time()
+    cb_until = getattr(scalper, "circuit_breaker_until", 0.0)
+    is_resting = (now_ts < cb_until)
+    cb_rem_sec = max(0, int(cb_until - now_ts)) if is_resting else 0
+    cb_rem_min = (cb_rem_sec + 59) // 60 if is_resting else 0
+
     return {
         "current_balance": cur_wallet,
         "available_balance": avail_wallet,
@@ -145,7 +152,10 @@ def api_dashboard_summary():
         "month_start_wallet": round(month_start, 2),
         "month_roi_pct": month_roi,
         "monthly_profit_locked": profit_locked,
-        "market_regime": market_regime
+        "market_regime": market_regime,
+        "is_resting": is_resting,
+        "rest_remaining_minutes": cb_rem_min,
+        "rest_remaining_seconds": cb_rem_sec
     }
 
 @app.get("/api/wallet-history", response_class=JSONResponse)

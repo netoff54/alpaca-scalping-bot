@@ -1045,6 +1045,8 @@ def get_dashboard_html() -> str:
         let liveTargetSymbol = '';
         let currentCoinData = null;
         let currentActivePosition = null;
+        let isBotResting = false;
+        let restRemainingMin = 0;
         let lastKnownWallet = 99.54;
         let tick = 0;
 
@@ -1166,8 +1168,9 @@ def get_dashboard_html() -> str:
             const centerX = canvasW / 2;
             const centerY = canvasH / 2;
 
-            // Cek apakah sedang ada posisi terbuka (Instruksi User: saat open posisi, tema berubah menjadi putih & panah kuning)
+            // Cek apakah sedang ada posisi terbuka atau sedang aktif pemindaian presisi
             const hasOpenPos = !!(currentActivePosition && currentActivePosition.symbol);
+            const isActivelyScreening = !isBotResting && !hasOpenPos && !!(liveTargetSymbol && currentCoinData && currentCoinData.symbol);
 
             // 1. Gambar latar belakang halus bintang / partikel redup
             ctx.fillStyle = "rgba(255, 255, 255, 0.03)";
@@ -1178,25 +1181,43 @@ def get_dashboard_html() -> str:
             }
 
             // 2. Tentukan target bubble yang sedang dihubungkan
-            // Jika ada posisi aktif, target dihubungkan langsung ke koin posisi tersebut
-            let targetSymRaw = hasOpenPos ? currentActivePosition.symbol : liveTargetSymbol;
-            const cleanTarget = (targetSymRaw || "").replace("USDT", "").trim();
+            // Instruksi Tegas User:
+            // - Jika ada posisi aktif: sambungkan ke koin posisi tersebut (laser putih + panah kuning)
+            // - Jika sedang aktif screening: sambungkan ke koin yang sedang dianalisis (laser emas + partikel)
+            // - JIKA TIDAK SEDANG SCREENING ATAU OPEN POSISI (misal saat istirahat/standby): JANGAN NYALAKAN ANIMASI JARINGAN! (activeBubble = null)
             let activeBubble = null;
-
-            if (cleanTarget && cleanTarget !== "--" && cleanTarget !== "STANDBY") {
-                // Cari di daftar bubble, jika belum ada, buat bubble baru (bubble tetap standby)
-                for (let b of bubbleList) {
-                    if (b.sym === cleanTarget) {
-                        activeBubble = b;
-                        break;
+            if (hasOpenPos) {
+                const cleanTarget = (currentActivePosition.symbol || "").replace("USDT", "").trim();
+                if (cleanTarget && cleanTarget !== "--" && cleanTarget !== "STANDBY" && cleanTarget !== "ISTIRAHAT") {
+                    for (let b of bubbleList) {
+                        if (b.sym === cleanTarget) {
+                            activeBubble = b;
+                            break;
+                        }
+                    }
+                    if (!activeBubble && cleanTarget) {
+                        activeBubble = createSpacedBubble(cleanTarget, centerX, centerY, 65);
+                        activeBubble.sym = cleanTarget;
+                        bubbleList.push(activeBubble);
                     }
                 }
-
-                if (!activeBubble && cleanTarget) {
-                    activeBubble = createSpacedBubble(cleanTarget, centerX, centerY, 65);
-                    activeBubble.sym = cleanTarget;
-                    bubbleList.push(activeBubble);
+            } else if (isActivelyScreening) {
+                const cleanTarget = (liveTargetSymbol || "").replace("USDT", "").trim();
+                if (cleanTarget && cleanTarget !== "--" && cleanTarget !== "STANDBY" && cleanTarget !== "ISTIRAHAT") {
+                    for (let b of bubbleList) {
+                        if (b.sym === cleanTarget) {
+                            activeBubble = b;
+                            break;
+                        }
+                    }
+                    if (!activeBubble && cleanTarget) {
+                        activeBubble = createSpacedBubble(cleanTarget, centerX, centerY, 65);
+                        activeBubble.sym = cleanTarget;
+                        bubbleList.push(activeBubble);
+                    }
                 }
+            } else {
+                activeBubble = null;
             }
 
             // 3. Update posisi gerak apung alami seluruh bubble
@@ -1403,30 +1424,41 @@ def get_dashboard_html() -> str:
             // 6. GAMBAR NODE HUB PUSAT BINANCE CORE
             const hubPulse = 20 + Math.sin(tick * 0.05) * 2;
             
-            // Outer Halo (Putih saat open posisi, Kuning saat scanning)
-            ctx.fillStyle = hasOpenPos ? "rgba(255, 255, 255, 0.20)" : "rgba(240, 185, 11, 0.12)";
+            // Outer Halo (Putih saat open posisi, Kuning saat scanning, Tenang/Muted saat istirahat/standby)
+            if (hasOpenPos) {
+                ctx.fillStyle = "rgba(255, 255, 255, 0.20)";
+                ctx.strokeStyle = "#FFFFFF";
+                ctx.shadowColor = "#ffffff";
+            } else if (isActivelyScreening) {
+                ctx.fillStyle = "rgba(240, 185, 11, 0.12)";
+                ctx.strokeStyle = "#F0B90B";
+                ctx.shadowColor = "rgba(240, 185, 11, 0.6)";
+            } else {
+                ctx.fillStyle = "rgba(148, 163, 184, 0.08)";
+                ctx.strokeStyle = "rgba(148, 163, 184, 0.4)";
+                ctx.shadowColor = "transparent";
+            }
+
             ctx.beginPath();
             ctx.arc(centerX, centerY, hubPulse + 8, 0, Math.PI * 2);
             ctx.fill();
 
             // Core Solid
             ctx.fillStyle = "#121721";
-            ctx.strokeStyle = hasOpenPos ? "#FFFFFF" : "#F0B90B";
             ctx.lineWidth = 2;
-            ctx.shadowColor = hasOpenPos ? "#ffffff" : "rgba(240, 185, 11, 0.6)";
-            ctx.shadowBlur = hasOpenPos ? 16 : 14;
+            ctx.shadowBlur = (hasOpenPos || isActivelyScreening) ? 14 : 0;
             ctx.beginPath();
             ctx.arc(centerX, centerY, 20, 0, Math.PI * 2);
             ctx.fill();
             ctx.stroke();
             ctx.shadowBlur = 0;
 
-            // Center Monogram Text (Putih saat open posisi, Kuning saat scanning)
+            // Center Monogram Text (Putih saat open posisi, Kuning saat scanning, Muted Slate saat istirahat/standby)
             ctx.font = "bold 9px 'Plus Jakarta Sans'";
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
-            ctx.fillStyle = hasOpenPos ? "#FFFFFF" : "#F0B90B";
-            ctx.fillText("BINANCE", centerX, centerY);
+            ctx.fillStyle = hasOpenPos ? "#FFFFFF" : (isActivelyScreening ? "#F0B90B" : "#94A3B8");
+            ctx.fillText(isBotResting ? "REST" : "BINANCE", centerX, centerY);
 
             requestAnimationFrame(animateBubbleNetwork);
         }
@@ -1438,7 +1470,12 @@ def get_dashboard_html() -> str:
                 if (!res.ok) return;
                 const d = await res.json();
 
+                // Status Istirahat Circuit Breaker & Open Position
+                isBotResting = !!(d.is_resting || (d.rotation_status && d.rotation_status.includes("Circuit Breaker")));
+                restRemainingMin = parseInt(d.rest_remaining_minutes || 0);
+
                 const hasOpenPos = !!(d.active_position && d.active_position.symbol);
+                currentActivePosition = d.active_position || null;
 
                 // 1. Saldo Dompet & Modal Pokok
                 const curBal = parseFloat(d.current_balance || 99.54);
@@ -1596,22 +1633,45 @@ def get_dashboard_html() -> str:
                     if (viewStandby) viewStandby.style.display = 'block';
                     if (posPnlBlock) posPnlBlock.style.display = 'none';
 
-                    if (posTypeBadge) { posTypeBadge.textContent = "STANDBY"; posTypeBadge.className = "badge badge-neutral"; }
-                    if (posSymbolText) posSymbolText.textContent = "Menunggu Sinyal Presisi";
-                    if (posSubtitle) posSubtitle.textContent = "Sedang menyisir semesta koin mencari setup konfluensi tinggi (Minimal Skor 85/100).";
-                    if (posLevBadge) posLevBadge.textContent = "50X ISOLATED";
+                    if (isBotResting) {
+                        if (posTypeBadge) { 
+                            posTypeBadge.textContent = "ISTIRAHAT CIRCUIT BREAKER"; 
+                            posTypeBadge.className = "badge badge-warning"; 
+                        }
+                        if (posSymbolText) posSymbolText.textContent = "Mode Perlindungan Modal Anti-Chop";
+                        if (posSubtitle) posSubtitle.textContent = `Bot sedang beristirahat setelah Stop Loss beruntun demi menjaga modal (${restRemainingMin > 0 ? restRemainingMin + 'm lagi' : 'aktif'}). Seluruh screening dan pemesanan order dijeda.`;
+                        if (posLevBadge) posLevBadge.textContent = "CIRCUIT BREAKER";
+                    } else {
+                        if (posTypeBadge) { posTypeBadge.textContent = "STANDBY"; posTypeBadge.className = "badge badge-neutral"; }
+                        if (posSymbolText) posSymbolText.textContent = "Menunggu Sinyal Presisi";
+                        if (posSubtitle) posSubtitle.textContent = "Sedang menyisir semesta koin mencari setup konfluensi tinggi (Minimal Skor 85/100).";
+                        if (posLevBadge) posLevBadge.textContent = "50X ISOLATED";
+                    }
                 }
 
                 // 7. Target Analisis & Rotasi Koin (Real-Time Synchronized)
-                if (d.rotation_status) {
+                if (isBotResting) {
+                    liveTargetSymbol = "";
+                    currentCoinData = null;
                     const rotEl = document.getElementById('badgeRotNumber');
                     if (rotEl) {
-                        rotEl.textContent = d.rotation_status.replace(" - Perlindungan Portofolio", "").trim().toUpperCase();
+                        rotEl.textContent = `ISTIRAHAT CIRCUIT BREAKER (${restRemainingMin > 0 ? restRemainingMin + 'M LAGI' : 'AKTIF'})`;
+                        rotEl.className = "px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse";
                     }
-                }
-                if (d.current_coin && d.current_coin.symbol) {
+                    const symEl = document.getElementById('liveActiveSymbol');
+                    if (symEl) symEl.textContent = "ISTIRAHAT";
+                    const metEl = document.getElementById('liveActiveMetrics');
+                    if (metEl) metEl.textContent = `Mode Perlindungan Modal: Bot sedang beristirahat setelah Stop Loss beruntun demi menjaga modal (Sisa jeda ${restRemainingMin > 0 ? restRemainingMin : 'beberapa'} menit). Animasi pemindaian dinonaktifkan.`;
+                } else if (d.current_coin && d.current_coin.symbol) {
                     liveTargetSymbol = d.current_coin.symbol;
                     currentCoinData = d.current_coin;
+                    if (d.rotation_status) {
+                        const rotEl = document.getElementById('badgeRotNumber');
+                        if (rotEl) {
+                            rotEl.textContent = d.rotation_status.replace(" - Perlindungan Portofolio", "").trim().toUpperCase();
+                            rotEl.className = "px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gold/10 text-gold border border-gold/20";
+                        }
+                    }
                     const symEl = document.getElementById('liveActiveSymbol');
                     if (symEl) symEl.textContent = d.current_coin.symbol;
 
@@ -1650,6 +1710,13 @@ def get_dashboard_html() -> str:
                 } else if (!hasOpenPos) {
                     liveTargetSymbol = "";
                     currentCoinData = null;
+                    if (d.rotation_status) {
+                        const rotEl = document.getElementById('badgeRotNumber');
+                        if (rotEl) {
+                            rotEl.textContent = d.rotation_status.replace(" - Perlindungan Portofolio", "").trim().toUpperCase();
+                            rotEl.className = "px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gold/10 text-gold border border-gold/20";
+                        }
+                    }
                     const symEl = document.getElementById('liveActiveSymbol');
                     if (symEl) symEl.textContent = "STANDBY";
                     const metEl = document.getElementById('liveActiveMetrics');

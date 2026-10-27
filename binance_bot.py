@@ -169,6 +169,29 @@ class BinanceScalper:
             self.total_pnl_usd = summary.get("total_pnl_usd", 0.0)
             self.trade_history = db.get_recent_trades(50)
             
+            # Cek pengaman Circuit Breaker langsung dari 2 trade terakhir di database
+            recent_trades = db.get_recent_trades(2)
+            if len(recent_trades) >= 2 and all(t.get("result") == "LOSS" for t in recent_trades):
+                last_trade = recent_trades[0]
+                closed_at = last_trade.get("closed_at") or last_trade.get("created_at")
+                if closed_at:
+                    try:
+                        import datetime
+                        if isinstance(closed_at, str):
+                            dt = datetime.datetime.fromisoformat(closed_at.replace("Z", "+00:00"))
+                            last_loss_ts = dt.timestamp()
+                        else:
+                            last_loss_ts = float(closed_at)
+                        pause_sec = getattr(config, "CIRCUIT_BREAKER_PAUSE_HOURS", 2.0) * 3600.0
+                        now_ts = time.time()
+                        if now_ts < (last_loss_ts + pause_sec):
+                            self.circuit_breaker_until = max(self.circuit_breaker_until, last_loss_ts + pause_sec)
+                            self.consecutive_losses = 2
+                            cb_wib = time.strftime('%H:%M:%S', time.gmtime(self.circuit_breaker_until + 7 * 3600))
+                            console.log(f"[bold yellow]🛡️ Circuit Breaker diverifikasi dari DB: Istirahat hingga {cb_wib} WIB ({int((self.circuit_breaker_until - now_ts) / 60)}m lagi)[/bold yellow]")
+                    except Exception as e_cb:
+                        console.log(f"[dim]DB CB check notice: {e_cb}[/dim]")
+
             # Muat snapshot saldo terakhir dari database jika ada
             snap = db.get_latest_wallet_snapshot()
             if snap and snap.get("total_wallet", 0.0) > 0:
@@ -670,8 +693,16 @@ class BinanceScalper:
             pnl_pct = self.active_position.get("unrealized_pnl_pct", 0.0)
             self.current_rotation_info = f"Fokus Memantau Posisi Aktif: {sym} {side} @ {entry:.4f} (PnL: {pnl_pct:+.2f}%) - Pemindaian koin semesta dijeda"
             return
-        is_cb_active = (time.time() < self.circuit_breaker_until)
-        cb_rem_m = max(1, int((self.circuit_breaker_until - time.time()) / 60)) if is_cb_active else 0
+
+        # Sesuai instruksi user: Jika Circuit Breaker aktif (setelah Stop Loss beruntun), ISTIRAHAT TOTAL!
+        # Mengistirahatkan scanner: Tidak scanning koin, tidak membuka order, dan mematikan laser animasi.
+        now_ts = time.time()
+        if now_ts < self.circuit_breaker_until:
+            cb_rem_m = max(1, int((self.circuit_breaker_until - now_ts) / 60))
+            self.current_rotation_info = f"Istirahat Circuit Breaker ({cb_rem_m}m lagi - Perlindungan Modal Anti-Chop)"
+            self.current_coin_analysis = {}
+            self.active_signals = []
+            return
 
         # Target Surplus Bulanan: >= 10.0% dikunci otomatis (Sesuai Hasil Backtest 2 Tahun 24/24 Bulan Win)
         bal = self.get_futures_balance()
@@ -683,6 +714,12 @@ class BinanceScalper:
             self.monthly_profit_locked = False
             self.save_bot_state()
 
+        if self.monthly_profit_locked:
+            self.current_rotation_info = f"🏆 TARGET SURPLUS BULANAN {self.current_month} TERCAPAI - PROFIT DIKUNCI AMAN (Trading dijeda untuk mengamankan modal hingga bulan baru)"
+            self.current_coin_analysis = {}
+            self.active_signals = []
+            return
+
         if cur_wallet > 0 and self.month_start_wallet > 0:
             month_roi = ((cur_wallet - self.month_start_wallet) / self.month_start_wallet) * 100.0
             target_roi = getattr(config, "MONTHLY_TARGET_SURPLUS_PCT", 10.0)
@@ -690,6 +727,8 @@ class BinanceScalper:
                 self.monthly_profit_locked = True
                 self.save_bot_state()
                 self.current_rotation_info = f"🏆 TARGET SURPLUS BULANAN {self.current_month} TERCAPAI ({month_roi:+.2f}%) - PROFIT DIKUNCI AMAN (Trading dijeda untuk mengamankan modal hingga bulan baru)"
+                self.current_coin_analysis = {}
+                self.active_signals = []
                 return
 
         t_start = time.time()
@@ -711,10 +750,7 @@ class BinanceScalper:
             q_vol = item["quoteVolume"]
             rank = rot_idx + 1
 
-            if is_cb_active:
-                self.current_rotation_info = f"Rotasi {rank}/{total_univ} (Jeda Order CB: {cb_rem_m}m - {sym})"
-            else:
-                self.current_rotation_info = f"Rotasi {rank}/{total_univ} (Analisis Menyeluruh: {sym})"
+            self.current_rotation_info = f"Rotasi {rank}/{total_univ} (Analisis Menyeluruh: {sym})"
 
             bal = self.get_futures_balance()
             cap = bal["available"] if bal["available"] >= 1.0 else config.DEFAULT_CAPITAL
@@ -783,10 +819,7 @@ class BinanceScalper:
 
                 # Eksekusi jika tidak ada posisi atau order aktif
                 if not self.active_position and not self.active_order and not self.client.is_banned():
-                    if is_cb_active:
-                        console.log(f"[bold yellow]🛡️ Sinyal {sym} terdeteksi (Skor: {sig.get('score')}) namun dilewati karena Circuit Breaker aktif ({cb_rem_m}m lagi). Portofolio terlindungi.[/bold yellow]")
-                    else:
-                        self.execute_limit_order(sig)
+                    self.execute_limit_order(sig)
 
             self.last_scan_duration_sec = round(time.time() - t_start, 2)
             self.last_scan_time = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -817,6 +850,15 @@ class BinanceScalper:
         target_price = sig["entry_price"]
 
         now = time.time()
+        if now < self.circuit_breaker_until:
+            rem_m = max(1, int((self.circuit_breaker_until - now) / 60))
+            console.log(f"[yellow]🛡️ Order {symbol} dicegah: Circuit Breaker sedang aktif ({rem_m}m lagi). Portofolio terlindungi.[/yellow]")
+            return False
+
+        if self.monthly_profit_locked:
+            console.log(f"[yellow]🏆 Order {symbol} dicegah: Target surplus bulanan telah tercapai dan profit dikunci aman.[/yellow]")
+            return False
+
         cooldown_until = self._symbol_order_cooldown.get(symbol, 0.0)
         if now < cooldown_until:
             rem = int(cooldown_until - now)
@@ -1383,7 +1425,9 @@ class BinanceScalper:
                 avail_usdt = bal["available"]
                 
                 # 5. Jika ada sinyal valid dan saldo tersedia cukup
-                if self.active_signals and not self.active_order and not self.active_position:
+                if time.time() < self.circuit_breaker_until or self.monthly_profit_locked:
+                    self.active_signals = []
+                elif self.active_signals and not self.active_order and not self.active_position:
                     best_signal = self.active_signals[0]
                     sym = best_signal.get("symbol", "")
                     if time.time() < self._symbol_order_cooldown.get(sym, 0.0):
