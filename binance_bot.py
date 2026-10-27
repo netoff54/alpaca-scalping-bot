@@ -459,9 +459,11 @@ class BinanceScalper:
         else:
             real_pnl_pct = (real_pnl_usd / c_notional * 100) if c_notional > 0 else 0.0
 
-        # Sesuai instruksi pengguna: SL BEP dihitung sebagai LOSS (karena kena Stop Loss)
-        is_bep = (real_pnl_usd > 0.0 and real_pnl_pct < 1.5) or closed_pos.get("bep_activated", False)
-        res = "WIN" if (real_pnl_usd > 0.0 and not is_bep) else "LOSS"
+        # Sesuai instruksi pengguna:
+        # - WIN: Jika hasil profit riil > 0 dan persentase >= 1.5% (Take Profit penuh tercapai)
+        # - LOSS: Jika rugi (pnl <= 0) atau terkena Stop Loss BEP (pnl < 1.5%)
+        is_real_win = (real_pnl_usd > 0.0 and real_pnl_pct >= 1.5)
+        res = "WIN" if is_real_win else "LOSS"
         margin_used = round((c_notional / c_lev) if c_lev > 0 else (c_notional / 20.0), 4)
 
         sc_ver = closed_pos.get("screening_version") or ("v1_legacy" if sym == "SPXUSDT" else "v2_new_screening")
@@ -664,6 +666,7 @@ class BinanceScalper:
         if time.time() < self.circuit_breaker_until:
             rem_m = int((self.circuit_breaker_until - time.time()) / 60)
             self.current_rotation_info = f"Circuit Breaker Aktif ({rem_m}m lagi - Perlindungan Portofolio)"
+            self.current_coin_analysis = {}
             return
 
         # Target Surplus Bulanan: >= 10.0% dikunci otomatis (Sesuai Hasil Backtest 2 Tahun 24/24 Bulan Win)

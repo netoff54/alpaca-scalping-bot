@@ -1633,6 +1633,13 @@ def get_dashboard_html() -> str:
                         existing.score = score;
                         existing.analyzed = true;
                     }
+                } else if (!hasOpenPos) {
+                    liveTargetSymbol = "";
+                    currentCoinData = null;
+                    const symEl = document.getElementById('liveActiveSymbol');
+                    if (symEl) symEl.textContent = "--USDT";
+                    const metEl = document.getElementById('liveActiveMetrics');
+                    if (metEl) metEl.textContent = d.rotation_status || "Menyiapkan Analisis...";
                 }
 
                 // 8. Navbar Info
