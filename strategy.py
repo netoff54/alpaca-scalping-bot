@@ -457,39 +457,50 @@ def analyze_coin_comprehensive(
     if signal_side and final_score >= config.MIN_SETUP_SCORE and effective_leverage >= min_leverage:
         entry_price = latest_price
 
-        # Structural Invalidation SL & True 1:2.0 RRR
+        # Structural Invalidation SL & True 1:2.0 Net RRR
         if getattr(config, "STRUCTURAL_SL_ENABLED", True):
             p_low = ohlcv_ltf[-2][3] if len(ohlcv_ltf) >= 2 else c_low
             p_high = ohlcv_ltf[-2][2] if len(ohlcv_ltf) >= 2 else c_high
-            min_r = getattr(config, "MIN_SL_PERCENT", 0.0080)
+            min_r = getattr(config, "MIN_SL_PERCENT", 0.0070)
             max_r = getattr(config, "MAX_SL_PERCENT", 0.0200)
 
             if signal_side == "BUY":
                 base_low = min(c_low, p_low, ema21) if setup_name == "TREND_RETEST" else min(c_low, p_low)
-                raw_sl = base_low * 0.998
+                raw_sl = base_low * 0.9985
                 risk_dist = entry_price - raw_sl
                 risk_dist = max(entry_price * min_r, min(entry_price * max_r, risk_dist))
                 sl_price = entry_price - risk_dist
-                tp_price = entry_price + (risk_dist * config.RR_RATIO)
             else:
                 base_high = max(c_high, p_high, ema21) if setup_name == "TREND_RETEST" else max(c_high, p_high)
-                raw_sl = base_high * 1.002
+                raw_sl = base_high * 1.0015
                 risk_dist = raw_sl - entry_price
                 risk_dist = max(entry_price * min_r, min(entry_price * max_r, risk_dist))
                 sl_price = entry_price + risk_dist
-                tp_price = entry_price - (risk_dist * config.RR_RATIO)
 
             sl_percent = risk_dist / entry_price
-            tp_percent = (risk_dist * config.RR_RATIO) / entry_price
+            maker_fee = getattr(config, "MAKER_FEE_RATE", 0.0002)
+            taker_fee = getattr(config, "TAKER_FEE_RATE", 0.0005)
+            funding_buf = getattr(config, "FUNDING_BUFFER", 0.0001)
+
+            net_loss = sl_percent + maker_fee + taker_fee + funding_buf
+            net_win = 2.0 * net_loss
+            tp_percent = net_win + maker_fee + maker_fee + funding_buf
+            tp_dist = entry_price * tp_percent
+            tp_price = entry_price + tp_dist if signal_side == "BUY" else entry_price - tp_dist
         else:
             sl_percent = config.SL_PERCENT
-            tp_percent = config.TP_PERCENT
+            maker_fee = getattr(config, "MAKER_FEE_RATE", 0.0002)
+            taker_fee = getattr(config, "TAKER_FEE_RATE", 0.0005)
+            funding_buf = getattr(config, "FUNDING_BUFFER", 0.0001)
+            net_loss = sl_percent + maker_fee + taker_fee + funding_buf
+            net_win = 2.0 * net_loss
+            tp_percent = net_win + maker_fee + maker_fee + funding_buf
             sl_dist = entry_price * sl_percent
             tp_dist = entry_price * tp_percent
             sl_price = entry_price - sl_dist if signal_side == "BUY" else entry_price + sl_dist
             tp_price = entry_price + tp_dist if signal_side == "BUY" else entry_price - tp_dist
 
-        bep_trigger_percent = sl_percent * 1.4
+        bep_trigger_percent = max(0.0128, sl_percent * 1.6)
         bep_trigger_dist = entry_price * bep_trigger_percent
         bep_trigger_price = entry_price + bep_trigger_dist if signal_side == "BUY" else entry_price - bep_trigger_dist
 

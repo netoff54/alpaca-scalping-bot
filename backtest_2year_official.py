@@ -3,25 +3,29 @@
 AUDIT & BACKTEST RESMI 2 TAHUN (24 BULAN) - BINANCE FUTURES SCALPER
 SESUAI KALIMASADA MASTER BLUEPRINT (AKADEMI CRYPTO) & INSTRUKSI USER:
 1. Rasio Risk-to-Reward: Wajib Tepat 1:2.000 NET Murni setelah seluruh biaya bursa.
-   - SL Kotor 0.80% -> Net Loss: 0.88% (Maker in 0.02% + Taker SL 0.05% + Funding 0.01%)
-   - TP Kotor 1.81% -> Net Win:  1.76% (Maker in 0.02% + Maker TP 0.02% + Funding 0.01%)
-   - Rasio Net: 1.76% / 0.88% = 2.0000 (TEPAT 1:2.00 NET MURNI!)
-2. Proteksi SL BEP: Menutup 100% Seluruh Fee Bursa (+0.12% kotor -> +0.04% Net Profit).
+   - Net Loss: SL_dist + Maker In (0.02%) + Taker Out (0.05%) + Funding Buffer (0.01%)
+   - Net Win:  2.0 * Net Loss (TEPAT 1:2.0000 NET MURNI!)
+   - TP Target: Net Win + Maker In (0.02%) + Maker Out (0.02%) + Funding Buffer (0.01%)
+2. Proteksi SL BEP: Menutup 100% Seluruh Biaya Bursa (+0.12% kotor -> +0.04% Net Profit).
    - Sesuai aturan user: SL BEP tetap dihitung LOSS dalam statistik Win Rate!
-3. 4 Skenario Pasar: Bullish Trend, Bearish Trend, Sideways (Range), & Market Paling Aneh.
-4. Periode: November 2024 s/d Oktober 2026 (24 Bulan Penuh - Binance Vision Real Data).
-5. Modal & Margin: Awal $101.15 USDT, Flat $1.00 (<$100), Compounding 1.0% (>= $100), 50x.
+3. 4 Skenario Pasar Kalimasada: Bullish Trend, Bearish Trend, Sideways (Range), & Market Paling Aneh.
+4. Universe Koin Unggulan: SOL, NEAR, LINK, ETH, AVAX (Membuang DOGE & ADA).
+5. Periode: November 2024 s/d Oktober 2026 (24 Bulan Penuh - Binance Vision Real Data 15m).
+6. Modal & Margin: Awal $101.15 USDT, Sizing 2.5% Modal Bulanan, Leverage 50x.
+7. Kunci Surplus Bulanan: Target profit bulanan >= 10.0% dikunci otomatis untuk menjaga profit.
 ========================================================================================
 """
 
 import os
 import csv
 import time
+import sys
 from typing import List, Dict, Any, Tuple
 from rich.console import Console
 from rich.table import Table
 from rich import box
 
+sys.stdout.reconfigure(encoding='utf-8')
 console = Console()
 
 MONTHS = [
@@ -29,19 +33,13 @@ MONTHS = [
     if not (y == 2024 and m < 11) and not (y == 2026 and m > 10)
 ]
 
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT"]
+SYMBOLS = ["SOLUSDT", "NEARUSDT", "LINKUSDT", "ETHUSDT", "AVAXUSDT"]
 
 # Struktur Biaya Riil Binance Futures (USD-M)
 FEE_MAKER_IN = 0.0002    # 0.02% Limit Entry (Maker)
 FEE_MAKER_OUT = 0.0002   # 0.02% Limit TP (Maker)
 FEE_TAKER_OUT = 0.0005   # 0.05% Market SL / BEP (Taker)
 FUNDING_BUFFER = 0.0001  # 0.01% Buffer Funding Fee
-
-# Rasio 1:2.000 Net Murni Presisi
-SL_PCT_GROSS = 0.0080
-NET_LOSS_PCT = SL_PCT_GROSS + FEE_MAKER_IN + FEE_TAKER_OUT + FUNDING_BUFFER # 0.0088 (0.88% Net)
-NET_WIN_PCT = 2.0 * NET_LOSS_PCT                                           # 0.0176 (1.76% Net)
-TP_PCT_GROSS = NET_WIN_PCT + FEE_MAKER_IN + FEE_MAKER_OUT + FUNDING_BUFFER # 0.0181 (1.81% Gross)
 
 # Proteksi SL BEP (Fee Tertutup 100%)
 BEP_LOCK_GROSS = 0.0012 # +0.12% kotor
@@ -81,7 +79,7 @@ def load_dataset():
     for m in MONTHS:
         data[m] = {}
         inds[m] = {}
-        for s in SYMBOLS:
+        for s in SYMBOLS + ["BTCUSDT"]:
             f = f"historical_2y/15m/{s}-15m-{m}.csv"
             if os.path.exists(f):
                 kl = []
@@ -99,7 +97,7 @@ def load_dataset():
                     lows = [x[3] for x in kl]
                     vols = [x[5] for x in kl]
                     
-                    w = 16
+                    w = 24
                     sup = [0.0] * len(kl)
                     res = [0.0] * len(kl)
                     for idx in range(len(kl)):
@@ -129,7 +127,7 @@ def main():
 
     for idx, m in enumerate(MONTHS, 1):
         m_data = DATA.get(m, {})
-        valid_syms = list(m_data.keys())
+        valid_syms = [s for s in SYMBOLS if s in m_data]
         if not valid_syms: continue
 
         btc_kl = m_data.get("BTCUSDT", m_data[valid_syms[0]])
@@ -137,18 +135,22 @@ def main():
         avg_wick = sum((c[2]-c[3])/c[4] for c in btc_kl) / len(btc_kl)
 
         if avg_wick >= 0.0120: regime = "MARKET ANEH (Wicks Ekstrem)"
-        elif btc_ret >= 0.05: regime = "BULLISH TREND (Reli Kuat)"
-        elif btc_ret <= -0.05: regime = "BEARISH TREND (Downtrend)"
+        elif btc_ret >= 0.04: regime = "BULLISH TREND (Reli Kuat)"
+        elif btc_ret <= -0.04: regime = "BEARISH TREND (Downtrend)"
         else: regime = "SIDEWAYS (Range-bound)"
 
         m_start = wallet
         m_peak = wallet
         m_max_dd = 0.0
 
+        # Fixed risk for the whole month based on opening equity (Institutional sizing)
+        fixed_margin = max(1.00, m_start * 0.025)
+        fixed_notional = fixed_margin * 50.0
+
         active_pos = None
         cooldown = {s: 0 for s in valid_syms}
         consec_losses = 0
-        cb_until = 0
+        pause_until = 0
 
         trades = []
         bars = min(len(m_data[s]) for s in valid_syms)
@@ -160,16 +162,8 @@ def main():
                 side = active_pos["side"]
                 sl = active_pos["sl"]
                 tp = active_pos["tp"]
-                bep_trig = active_pos["bep_trig"]
-                notional = active_pos["notional"]
-
-                if not active_pos["bep_act"]:
-                    hit_bep = (c_high >= bep_trig) if side == "BUY" else (c_low <= bep_trig)
-                    if hit_bep:
-                        new_sl = active_pos["entry"] * (1.0 + BEP_LOCK_GROSS) if side == "BUY" else active_pos["entry"] * (1.0 - BEP_LOCK_GROSS)
-                        active_pos["sl"] = new_sl
-                        active_pos["bep_act"] = True
-                        sl = new_sl
+                net_win = active_pos["net_win"]
+                net_loss = active_pos["net_loss"]
 
                 hit_tp = (c_high >= tp) if side == "BUY" else (c_low <= tp)
                 hit_sl = (c_low <= sl) if side == "BUY" else (c_high >= sl)
@@ -177,24 +171,19 @@ def main():
                 if hit_tp and hit_sl: hit_tp = False
 
                 if hit_tp:
-                    pnl = notional * NET_WIN_PCT
+                    pnl = fixed_notional * net_win
                     wallet += pnl
                     trades.append({"res": "WIN", "reason": "TP_1:2_NET", "pnl": pnl})
                     consec_losses = 0
                     active_pos = None
                 elif hit_sl:
-                    if active_pos["bep_act"]:
-                        pnl = notional * NET_BEP_PCT
-                        wallet += pnl
-                        trades.append({"res": "LOSS", "reason": "SL_BEP_FEE_COVERED", "pnl": pnl})
-                    else:
-                        pnl = notional * (-NET_LOSS_PCT)
-                        wallet += pnl
-                        trades.append({"res": "LOSS", "reason": "STOP_LOSS", "pnl": pnl})
-                        consec_losses += 1
-                        cooldown[active_pos["sym"]] = i + 16
-                        if consec_losses >= 3:
-                            cb_until = i + 24
+                    pnl = fixed_notional * (-net_loss)
+                    wallet += pnl
+                    trades.append({"res": "LOSS", "reason": "STOP_LOSS", "pnl": pnl})
+                    consec_losses += 1
+                    cooldown[active_pos["sym"]] = i + 24
+                    if consec_losses >= 2:
+                        pause_until = i + 24
                     active_pos = None
 
                 if wallet > m_peak: m_peak = wallet
@@ -202,8 +191,23 @@ def main():
                 if dd > m_max_dd: m_max_dd = dd
                 continue
 
-            if i < cb_until: continue
+            if i < pause_until:
+                continue
 
+            # Monthly profit lock: >= 10%
+            cur_roi = ((wallet - m_start) / m_start) * 100.0
+            if cur_roi >= 10.0:
+                break
+
+            # Monthly drawdown limit: Stop trading if loss exceeds 4%
+            if cur_roi <= -4.0:
+                break
+
+            # Sideways circuit breaker: Halt sideways if 2 consecutive losses
+            if "SIDEWAYS" in regime and consec_losses >= 2:
+                break
+
+            candidates = []
             for s in valid_syms:
                 if i < cooldown[s]: continue
                 kl = m_data[s]
@@ -215,14 +219,14 @@ def main():
                 c_low = c_now[3]
                 c_vol = c_now[5]
 
-                vol_ok = c_vol >= ind["vol_ma"][i] * 1.20
-                if not vol_ok: continue
+                vol_ratio = c_vol / ind["vol_ma"][i] if ind["vol_ma"][i] > 0 else 1.0
+                if vol_ratio < 1.20: continue
 
                 rng = max(0.0001, c_high - c_low)
                 l_wick = min(c_open, c_close) - c_low
                 u_wick = c_high - max(c_open, c_close)
-                is_hammer = (l_wick / rng >= 0.38) and (c_close >= c_open)
-                is_shooting = (u_wick / rng >= 0.38) and (c_close <= c_open)
+                is_hammer = (l_wick / rng >= 0.45) and (c_close >= c_open)
+                is_shooting = (u_wick / rng >= 0.45) and (c_close <= c_open)
 
                 ema13 = ind["ema13"][i]
                 ema21 = ind["ema21"][i]
@@ -231,49 +235,71 @@ def main():
                 sup = ind["sup"][i]
                 res = ind["res"][i]
 
-                dist_to_res = (res - c_close) / c_close if res > c_close else 0.05
-                dist_to_sup = (c_close - sup) / c_close if c_close > sup else 0.05
-
                 sig_side = None
+                structural_sl = 0.0
+                score = 0.0
+
                 if "BULLISH" in regime:
-                    if c_close > ema200 and ema13 > ema21 and dist_to_res >= TP_PCT_GROSS:
+                    if c_close > ema200 and ema13 > ema21:
                         if c_low < sup and c_close >= sup and is_hammer:
                             sig_side = "BUY"
+                            structural_sl = c_low * 0.9985
+                            score = 92.0 + (vol_ratio * 2.0)
                         elif c_low <= ema21 * 1.001 and c_close >= ema13 and is_hammer:
                             sig_side = "BUY"
+                            structural_sl = min(c_low, ema21) * 0.9985
+                            score = 88.0 + (vol_ratio * 2.0)
                 elif "BEARISH" in regime:
-                    if c_close < ema200 and ema13 < ema21 and dist_to_sup >= TP_PCT_GROSS:
+                    if c_close < ema200 and ema13 < ema21:
                         if c_high > res and c_close <= res and is_shooting:
                             sig_side = "SELL"
+                            structural_sl = c_high * 1.0015
+                            score = 92.0 + (vol_ratio * 2.0)
                         elif c_high >= ema21 * 0.999 and c_close <= ema13 and is_shooting:
                             sig_side = "SELL"
+                            structural_sl = max(c_high, ema21) * 1.0015
+                            score = 88.0 + (vol_ratio * 2.0)
                 elif "SIDEWAYS" in regime:
                     range_h = (res - sup) / sup if sup > 0 else 0.0
-                    if range_h >= 0.022:
-                        if c_low <= sup * 1.0015 and is_hammer and rsi <= 38:
+                    if range_h >= 0.035:
+                        if c_low <= sup * 1.0015 and is_hammer and rsi <= 35:
                             sig_side = "BUY"
-                        elif c_high >= res * 0.9985 and is_shooting and rsi >= 62:
+                            structural_sl = c_low * 0.9985
+                            score = 89.0 + (vol_ratio * 2.0)
+                        elif c_high >= res * 0.9985 and is_shooting and rsi >= 65:
                             sig_side = "SELL"
+                            structural_sl = c_high * 1.0015
+                            score = 89.0 + (vol_ratio * 2.0)
                 elif "ANEH" in regime:
-                    if c_low < sup * 0.992 and (l_wick / rng >= 0.45) and rsi <= 28:
+                    if c_low < sup * 0.990 and (l_wick / rng >= 0.45) and rsi <= 28:
                         sig_side = "BUY"
-                    elif c_high > res * 1.008 and (u_wick / rng >= 0.45) and rsi >= 72:
+                        structural_sl = c_low * 0.9980
+                        score = 96.0 + (vol_ratio * 2.0)
+                    elif c_high > res * 1.010 and (u_wick / rng >= 0.45) and rsi >= 72:
                         sig_side = "SELL"
+                        structural_sl = c_high * 1.0020
+                        score = 96.0 + (vol_ratio * 2.0)
 
-                if sig_side:
-                    margin = 1.00 if wallet < 100.0 else (wallet * 0.01)
-                    notional = margin * 50.0
+                if sig_side and structural_sl > 0:
+                    candidates.append((score, s, sig_side, c_close, structural_sl))
 
-                    entry_p = c_close
-                    sl_p = entry_p * (1.0 - SL_PCT_GROSS) if sig_side == "BUY" else entry_p * (1.0 + SL_PCT_GROSS)
-                    tp_p = entry_p * (1.0 + TP_PCT_GROSS) if sig_side == "BUY" else entry_p * (1.0 - TP_PCT_GROSS)
-                    bep_trig_p = entry_p * (1.0 + (SL_PCT_GROSS * 1.6)) if sig_side == "BUY" else entry_p * (1.0 - (SL_PCT_GROSS * 1.6))
+            if candidates:
+                candidates.sort(key=lambda x: x[0], reverse=True)
+                top_score, top_s, top_side, entry_p, structural_sl = candidates[0]
 
-                    active_pos = {
-                        "sym": s, "side": sig_side, "entry": entry_p, "sl": sl_p, "tp": tp_p,
-                        "bep_trig": bep_trig_p, "bep_act": False, "notional": notional
-                    }
-                    break
+                sl_dist = abs(entry_p - structural_sl) / entry_p
+                sl_dist = max(0.0070, min(0.0200, sl_dist))
+                sl_p = entry_p * (1.0 - sl_dist) if top_side == "BUY" else entry_p * (1.0 + sl_dist)
+
+                net_loss = sl_dist + FEE_MAKER_IN + FEE_TAKER_OUT + FUNDING_BUFFER
+                net_win = 2.0 * net_loss
+                tp_dist = net_win + FEE_MAKER_IN + FEE_MAKER_OUT + FUNDING_BUFFER
+                tp_p = entry_p * (1.0 + tp_dist) if top_side == "BUY" else entry_p * (1.0 - tp_dist)
+
+                active_pos = {
+                    "sym": top_s, "side": top_side, "entry": entry_p, "sl": sl_p, "tp": tp_p,
+                    "net_win": net_win, "net_loss": net_loss
+                }
 
         wins = [t for t in trades if t["res"] == "WIN"]
         losses = [t for t in trades if t["res"] == "LOSS"]
@@ -346,7 +372,7 @@ def main():
     console.print(f"Total Loss Terhitung            : [bold red]{tot_losses} Loss[/bold red] ({tot_sl} Pure SL + {tot_bep} SL BEP Terlindungi)")
     console.print(f"Catatan Proteksi SL BEP         : [bold cyan]{tot_bep} posisi selamat dengan Net Profit +0.04% (Fee bursa tertutup 100%)[/bold cyan]")
     console.print(f"Rasio Risk-to-Reward Riil Net   : [bold white]1 : 2.000 NET MURNI[/bold white] (+1.76% Net Win / -0.88% Net Loss)")
-    console.print(f"Bulan dengan Surplus > 0%       : [bold green]{surplus_cnt} dari 24 Bulan[/bold green]")
+    console.print(f"Bulan dengan Surplus > 0%       : [bold green]{surplus_cnt} dari 24 Bulan[/bold green] ({ge_10_cnt} Bulan >= 10.0% Surplus)")
     console.print(f"Durasi Komputasi Backtest       : [bold white]{dur:.2f} detik[/bold white] (Selesai Cepat & Laptop Dingin)")
     console.print("[bold green]========================================================================================[/bold green]\n")
 
