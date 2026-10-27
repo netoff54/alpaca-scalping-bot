@@ -69,20 +69,21 @@ class BotConfig:
     RSI_PERIOD: int = 14                   # Relative Strength Index (Poin 7 Kalimasada)
     VOLUME_SPIKE_FACTOR: float = 1.15      # Konfirmasi volume transaksi >= 115% rata-rata
 
-    # --- Risk / Reward Ratio Kalibrasi Grid Kalimasada (Win Rate >= 50%, Surplus >= 10%/bulan) ---
-    SL_PERCENT: float = 0.0080             # Stop Loss presisi 0.80% (Cepat batasi risiko, hindari wick noise)
-    TP_PERCENT: float = 0.0150             # Take Profit presisi 1.50% (Sering tercapai pada ekspansi impulsive 15m)
-    BEP_PROFIT_TRIGGER: float = 0.0100     # Pemicu Break-Even saat profit mencapai +1.00%
-    BEP_LOCK_PROFIT: float = 0.0030        # Kunci profit bersih saat BEP aktif (+0.30% setelah fee bursa)
-    RR_RATIO: float = 1.875                # Rasio Risk-to-Reward Net Bersih 1:1.875
+    # --- Risk / Reward Ratio Kalibrasi Grid Kalimasada (Wajib 1:2.0 NET Murni) ---
+    SL_PERCENT: float = 0.0080             # Stop Loss presisi 0.80% kotor (Net Loss: 0.88% setelah seluruh fee)
+    TP_PERCENT: float = 0.0181             # Take Profit presisi 1.81% kotor (Net Win: 1.76% setelah seluruh fee)
+    RR_RATIO: float = 2.000                # Rasio Risk-to-Reward Net Bersih Tepat 1:2.000 (1.76% / 0.88% = 2.000)
+    BEP_PROFIT_TRIGGER: float = 0.0128     # Pemicu Break-Even saat profit mencapai 1.6R (+1.28%)
+    BEP_LOCK_PROFIT: float = 0.0012        # Kunci profit kotor +0.12% saat BEP aktif (+0.04% Net Profit, 100% fee tertutup total!)
     STRUCTURAL_SL_ENABLED: bool = True     # Stop Loss struktural berbasis ekor lilin Price Action
-    MIN_SL_PERCENT: float = 0.0080         # Batas bawah risiko 0.80% (Anti-Wick Noise Altcoin)
+    MIN_SL_PERCENT: float = 0.0080         # Batas bawah risiko 0.80% (Anti-Wick Noise)
     MAX_SL_PERCENT: float = 0.0120         # Batas atas risiko 1.20% (Terkontrol ketat)
     BTC_FILTER_ENABLED: bool = True        # Kompas Makro BTC (Dilarang Long Altcoin jika BTC di bawah EMA 200 4 Jam)
     POST_SL_COOLDOWN_HOURS: float = 4.0    # Jeda cooldown 4 jam per koin setelah Stop Loss (Anti-Chop & Anti-Revenge Trading)
     CONSECUTIVE_LOSS_CIRCUIT_BREAKER: int = 3 # Circuit Breaker portofolio jika 3 loss berturut-turut
-    CIRCUIT_BREAKER_PAUSE_HOURS: float = 36.0 # Jeda 36 jam untuk mendinginkan portofolio saat badai pasar
+    CIRCUIT_BREAKER_PAUSE_HOURS: float = 24.0 # Jeda 24 jam untuk mendinginkan portofolio saat badai pasar
     MAX_SPREAD_PERCENT: float = 0.0008     # Batas maksimal spread bid-ask 0.08% (Anti-Slippage & Anti-Illiquid Books)
     MAKER_FEE_RATE: float = 0.0002         # 0.02% maker fee pada Binance Futures
+    TAKER_FEE_RATE: float = 0.0005         # 0.05% taker fee pada Binance Futures
 
 config = BotConfig()

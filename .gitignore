@@ -12,5 +12,15 @@ klines_cache.json
 klines_1month_cache.json
 data_1year/
 data_2year_samples/
+historical_2y/
+test_*.py
+tune_*.py
+experiment_*.py
+analyze_*.py
+calibrate_*.py
+generate_*.py
+run_*.py
+find_*.py
 download_*.py
 *.jsonl
+!backtest_2year_official.py
