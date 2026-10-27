@@ -1,6 +1,6 @@
 [
   {
-    "id": 119,
+    "id": 120,
     "symbol": "GRASSUSDT",
     "side": "BUY",
     "entry_price": 0.6785,
@@ -15,6 +15,25 @@
     "result": "WIN",
     "screening_version": "v2_new_screening",
     "created_at": "27 Oct 2026 12:51",
+    "is_vps_session": true
+  },
+  {
+    "id": 119,
+    "symbol": "APRUSDT",
+    "side": "BUY",
+    "entry_price": 0.03282,
+    "exit_price": 0.03354,
+    "qty": 610.0,
+    "notional": 20.0202,
+    "margin_used": 1.001,
+    "leverage": 20,
+    "commission": 0.014234,
+    "binance_trade_id": "187670258",
+    "pnl_usd": 0.4392,
+    "pnl_pct": 2.19,
+    "result": "WIN",
+    "screening_version": "v2_new_screening",
+    "created_at": "27 Oct 2026 12:11",
     "is_vps_session": true
   },
   {

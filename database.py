@@ -66,31 +66,32 @@ class NeonDatabase:
                 """)
                 conn.commit()
 
-                # Seed jika data masih sedikit
-                cur.execute("SELECT COUNT(*) FROM trades;")
-                count = cur.fetchone()[0]
-                if count < 50 and os.path.exists(SEED_JSON_PATH):
+                # Seed jika ada trade baru di seed file
+                if os.path.exists(SEED_JSON_PATH):
                     with open(SEED_JSON_PATH, "r", encoding="utf-8") as f:
                         seeds = json.load(f)
-                    for t in seeds:
-                        cur.execute("""
-                            INSERT OR REPLACE INTO trades (
-                                id, symbol, side, entry_price, exit_price, qty, notional,
-                                margin_used, leverage, commission, binance_trade_id,
-                                pnl_usd, pnl_pct, result, screening_version, closed_at, created_at
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-                        """, (
-                            t["id"], t["symbol"], t.get("side", "BUY"),
-                            float(t.get("entry_price") or 0.0), float(t.get("exit_price") or 0.0),
-                            float(t.get("qty") or 0.0), float(t.get("notional") or 0.0),
-                            float(t.get("margin_used") or 1.0), int(t.get("leverage") or 20),
-                            float(t.get("commission") or 0.0), str(t.get("binance_trade_id") or ""),
-                            float(t.get("pnl_usd") or 0.0), float(t.get("pnl_pct") or 0.0),
-                            t.get("result", "WIN"), t.get("screening_version", "v1_legacy"),
-                            str(t.get("created_at") or ""), str(t.get("created_at") or "")
-                        ))
-                    conn.commit()
-                    console.log(f"[bold green]Database SQLite lokal berhasil di-seed dengan {len(seeds)} trade.[/bold green]")
+                    cur.execute("SELECT COUNT(*) FROM trades;")
+                    count = cur.fetchone()[0]
+                    if count < len(seeds):
+                        for t in seeds:
+                            cur.execute("""
+                                INSERT OR REPLACE INTO trades (
+                                    id, symbol, side, entry_price, exit_price, qty, notional,
+                                    margin_used, leverage, commission, binance_trade_id,
+                                    pnl_usd, pnl_pct, result, screening_version, closed_at, created_at
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                            """, (
+                                t["id"], t["symbol"], t.get("side", "BUY"),
+                                float(t.get("entry_price") or 0.0), float(t.get("exit_price") or 0.0),
+                                float(t.get("qty") or 0.0), float(t.get("notional") or 0.0),
+                                float(t.get("margin_used") or 1.0), int(t.get("leverage") or 20),
+                                float(t.get("commission") or 0.0), str(t.get("binance_trade_id") or ""),
+                                float(t.get("pnl_usd") or 0.0), float(t.get("pnl_pct") or 0.0),
+                                t.get("result", "WIN"), t.get("screening_version", "v1_legacy"),
+                                str(t.get("created_at") or ""), str(t.get("created_at") or "")
+                            ))
+                        conn.commit()
+                        console.log(f"[bold green]Database SQLite lokal berhasil disinkronkan dengan {len(seeds)} trade.[/bold green]")
         except Exception as e:
             console.log(f"[dim]SQLite init error: {e}[/dim]")
 
@@ -462,7 +463,7 @@ class NeonDatabase:
             console.log(f"[dim]DB summary error: {e}[/dim]")
         return {"total_trades": 0, "winning_trades": 0, "total_pnl_usd": 0.0}
 
-    def _get_recent_trades_sqlite(self, limit: int = 50) -> List[Dict[str, Any]]:
+    def _get_recent_trades_sqlite(self, limit: int = 500) -> List[Dict[str, Any]]:
         """Mengambil riwayat trade langsung dari database lokal SQLite (indestructible)."""
         try:
             with self._get_sqlite_conn() as conn:
@@ -480,7 +481,7 @@ class NeonDatabase:
             console.log(f"[dim]SQLite get recent trades notice: {err}[/dim]")
             return []
 
-    def get_recent_trades(self, limit: int = 50) -> List[Dict[str, Any]]:
+    def get_recent_trades(self, limit: int = 500) -> List[Dict[str, Any]]:
         """Mengambil riwayat trade terakhir dari Neon Tech atau otomatis fallback ke SQLite lokal."""
         try:
             with self.get_connection() as conn:

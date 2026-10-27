@@ -390,7 +390,7 @@ def leverage_stats():
     }
 @app.get("/api/trade-history")
 @app.get("/trade-history")
-def trade_history(limit: int = 100):
+def trade_history(limit: int = 500):
     """
     Mengambil riwayat trade langsung dari database Neon Tech:
     Dibersihkan agar JSON-serializable dan menandai trade sesi VPS terkini.
