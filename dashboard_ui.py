@@ -1044,6 +1044,7 @@ def get_dashboard_html() -> str:
         let activeTradeTab = 'session';
         let liveTargetSymbol = 'BTCUSDT';
         let currentCoinData = null;
+        let currentActivePosition = null;
         let lastKnownWallet = 99.54;
         let tick = 0;
 
@@ -1165,6 +1166,9 @@ def get_dashboard_html() -> str:
             const centerX = canvasW / 2;
             const centerY = canvasH / 2;
 
+            // Cek apakah sedang ada posisi terbuka (Instruksi User: saat open posisi, tema berubah menjadi putih & panah kuning)
+            const hasOpenPos = !!(currentActivePosition && currentActivePosition.symbol);
+
             // 1. Gambar latar belakang halus bintang / partikel redup
             ctx.fillStyle = "rgba(255, 255, 255, 0.03)";
             for (let i = 0; i < 20; i++) {
@@ -1173,8 +1177,10 @@ def get_dashboard_html() -> str:
                 ctx.fillRect(sx, sy, 1.5, 1.5);
             }
 
-            // 2. Tentukan target bubble yang sedang dianalisis
-            const cleanTarget = liveTargetSymbol.replace("USDT", "").trim();
+            // 2. Tentukan target bubble yang sedang dihubungkan
+            // Jika ada posisi aktif, target dihubungkan langsung ke koin posisi tersebut
+            let targetSymRaw = hasOpenPos ? currentActivePosition.symbol : liveTargetSymbol;
+            const cleanTarget = (targetSymRaw || "").replace("USDT", "").trim();
             let activeBubble = null;
 
             // Cari di daftar bubble, jika belum ada, buat bubble baru (bubble tetap standby)
@@ -1208,48 +1214,106 @@ def get_dashboard_html() -> str:
                     activeBubble.score = currentCoinData.score;
                 }
 
-                // A. Garis luar bercahaya emas (Aura Glow Line)
-                ctx.strokeStyle = "rgba(240, 185, 11, 0.35)";
-                ctx.lineWidth = 4;
-                ctx.beginPath();
-                ctx.moveTo(centerX, centerY);
-                ctx.lineTo(activeBubble.x, activeBubble.y);
-                ctx.stroke();
-
-                // B. Tali inti bersinar (Core Beam)
-                ctx.strokeStyle = "rgba(255, 235, 150, 0.95)";
-                ctx.lineWidth = 1.5;
-                ctx.shadowColor = "#f0b90b";
-                ctx.shadowBlur = 8;
-                ctx.beginPath();
-                ctx.moveTo(centerX, centerY);
-                ctx.lineTo(activeBubble.x, activeBubble.y);
-                ctx.stroke();
-                ctx.shadowBlur = 0;
-
-                // C. Partikel data bergerak mengalir di tali dari Binance ke koin
-                const particleCount = 2;
-                for (let p = 0; p < particleCount; p++) {
-                    const progress = ((tick * 1.5 + p * 30) % 60) / 60;
-                    const px = centerX + (activeBubble.x - centerX) * progress;
-                    const py = centerY + (activeBubble.y - centerY) * progress;
-
-                    ctx.fillStyle = "#ffffff";
-                    ctx.shadowColor = "#ffffff";
-                    ctx.shadowBlur = 6;
+                if (hasOpenPos) {
+                    // --- TEMA OPEN POSISI: JARINGAN PUTIH & TANDA PANAH KUNING ---
+                    // A. Garis luar bercahaya putih (Aura White Glow)
+                    ctx.strokeStyle = "rgba(255, 255, 255, 0.40)";
+                    ctx.lineWidth = 4.5;
                     ctx.beginPath();
-                    ctx.arc(px, py, 2.5, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.shadowBlur = 0;
-                }
+                    ctx.moveTo(centerX, centerY);
+                    ctx.lineTo(activeBubble.x, activeBubble.y);
+                    ctx.stroke();
 
-                // D. Gelombang pulsa melingkar di koin target (Expanding Ripple)
-                const ripple = (tick % 40) / 40;
-                ctx.strokeStyle = `rgba(240, 185, 11, ${1 - ripple})`;
-                ctx.lineWidth = 1.5;
-                ctx.beginPath();
-                ctx.arc(activeBubble.x, activeBubble.y, 16 + ripple * 16, 0, Math.PI * 2);
-                ctx.stroke();
+                    // B. Tali inti bersinar putih murni (Pure White Beam)
+                    ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
+                    ctx.lineWidth = 1.8;
+                    ctx.shadowColor = "#ffffff";
+                    ctx.shadowBlur = 10;
+                    ctx.beginPath();
+                    ctx.moveTo(centerX, centerY);
+                    ctx.lineTo(activeBubble.x, activeBubble.y);
+                    ctx.stroke();
+                    ctx.shadowBlur = 0;
+
+                    // C. Tanda Panah Bergerak Warna Kuning Cerah (Directional Yellow Arrows)
+                    const angle = Math.atan2(activeBubble.y - centerY, activeBubble.x - centerX);
+                    const arrowCount = 2;
+                    for (let a = 0; a < arrowCount; a++) {
+                        const progress = ((tick * 1.5 + a * 30) % 60) / 60;
+                        const ax = centerX + (activeBubble.x - centerX) * progress;
+                        const ay = centerY + (activeBubble.y - centerY) * progress;
+
+                        ctx.save();
+                        ctx.translate(ax, ay);
+                        ctx.rotate(angle);
+                        ctx.fillStyle = "#F0B90B";
+                        ctx.strokeStyle = "#F3BA2F";
+                        ctx.lineWidth = 1.5;
+                        ctx.shadowColor = "#F0B90B";
+                        ctx.shadowBlur = 8;
+                        ctx.beginPath();
+                        ctx.moveTo(8, 0);
+                        ctx.lineTo(-6, -5);
+                        ctx.lineTo(-3, 0);
+                        ctx.lineTo(-6, 5);
+                        ctx.closePath();
+                        ctx.fill();
+                        ctx.stroke();
+                        ctx.restore();
+                    }
+
+                    // D. Gelombang pulsa melingkar putih di koin posisi aktif
+                    const ripple = (tick % 40) / 40;
+                    ctx.strokeStyle = `rgba(255, 255, 255, ${1 - ripple})`;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.arc(activeBubble.x, activeBubble.y, 16 + ripple * 16, 0, Math.PI * 2);
+                    ctx.stroke();
+                } else {
+                    // --- TEMA PEMINDAIAN NORMAL: JARINGAN EMAS / KUNING ---
+                    // A. Garis luar bercahaya emas (Aura Glow Line)
+                    ctx.strokeStyle = "rgba(240, 185, 11, 0.35)";
+                    ctx.lineWidth = 4;
+                    ctx.beginPath();
+                    ctx.moveTo(centerX, centerY);
+                    ctx.lineTo(activeBubble.x, activeBubble.y);
+                    ctx.stroke();
+
+                    // B. Tali inti bersinar (Core Beam)
+                    ctx.strokeStyle = "rgba(255, 235, 150, 0.95)";
+                    ctx.lineWidth = 1.5;
+                    ctx.shadowColor = "#f0b90b";
+                    ctx.shadowBlur = 8;
+                    ctx.beginPath();
+                    ctx.moveTo(centerX, centerY);
+                    ctx.lineTo(activeBubble.x, activeBubble.y);
+                    ctx.stroke();
+                    ctx.shadowBlur = 0;
+
+                    // C. Partikel data bergerak mengalir di tali dari Binance ke koin
+                    const particleCount = 2;
+                    for (let p = 0; p < particleCount; p++) {
+                        const progress = ((tick * 1.5 + p * 30) % 60) / 60;
+                        const px = centerX + (activeBubble.x - centerX) * progress;
+                        const py = centerY + (activeBubble.y - centerY) * progress;
+
+                        ctx.fillStyle = "#ffffff";
+                        ctx.shadowColor = "#ffffff";
+                        ctx.shadowBlur = 6;
+                        ctx.beginPath();
+                        ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.shadowBlur = 0;
+                    }
+
+                    // D. Gelombang pulsa melingkar di koin target (Expanding Ripple)
+                    const ripple = (tick % 40) / 40;
+                    ctx.strokeStyle = `rgba(240, 185, 11, ${1 - ripple})`;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.arc(activeBubble.x, activeBubble.y, 16 + ripple * 16, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
             }
 
             // 5. GAMBAR SELURUH BUBBLE KOIN (STANDBY DI KANVAS & UKURAN FLEKSIBEL OTOMATIS)
@@ -1265,9 +1329,17 @@ def get_dashboard_html() -> str:
                 ctx.arc(b.x, b.y, r, 0, Math.PI * 2);
 
                 if (isActive) {
-                    ctx.fillStyle = "rgba(240, 185, 11, 0.25)";
-                    ctx.shadowColor = "rgba(240, 185, 11, 0.6)";
-                    ctx.shadowBlur = 12;
+                    if (hasOpenPos) {
+                        // Bubble koin aktif: Cahaya Putih (White Glow)
+                        ctx.fillStyle = "rgba(255, 255, 255, 0.30)";
+                        ctx.shadowColor = "#ffffff";
+                        ctx.shadowBlur = 16;
+                    } else {
+                        // Pemindaian normal: Kuning emas
+                        ctx.fillStyle = "rgba(240, 185, 11, 0.25)";
+                        ctx.shadowColor = "rgba(240, 185, 11, 0.6)";
+                        ctx.shadowBlur = 12;
+                    }
                 } else if (b.analyzed && b.score >= 65) {
                     ctx.fillStyle = "rgba(14, 203, 129, 0.14)";
                     ctx.shadowBlur = 0;
@@ -1278,9 +1350,9 @@ def get_dashboard_html() -> str:
                 ctx.fill();
 
                 // B. Border Lingkaran
-                ctx.lineWidth = isActive ? 1.8 : 1;
+                ctx.lineWidth = isActive ? 2 : 1;
                 if (isActive) {
-                    ctx.strokeStyle = "#F0B90B";
+                    ctx.strokeStyle = hasOpenPos ? "#FFFFFF" : "#F0B90B";
                 } else if (b.analyzed && b.score >= 65) {
                     ctx.strokeStyle = "rgba(14, 203, 129, 0.4)";
                 } else {
@@ -1292,7 +1364,7 @@ def get_dashboard_html() -> str:
                 // C. Teks Simbol Koin di Tengah Bubble (Otomatis skala font)
                 let fontSize = 8.5;
                 if (currentBaseR < 7.0) {
-                    fontSize = 0; // Jika koin sudah ratusan dan sangat padat, teks hanya untuk koin aktif
+                    fontSize = 0;
                 } else if (currentBaseR < 9.0) {
                     fontSize = 6.5;
                 } else if (currentBaseR < 11.0) {
@@ -1300,7 +1372,7 @@ def get_dashboard_html() -> str:
                 }
 
                 if (isActive) {
-                    ctx.font = "bold 9px 'JetBrains Mono'";
+                    ctx.font = "bold 9.5px 'JetBrains Mono'";
                     ctx.textAlign = "center";
                     ctx.textBaseline = "middle";
                     ctx.fillStyle = "#FFFFFF";
@@ -1313,40 +1385,45 @@ def get_dashboard_html() -> str:
                     ctx.fillText(b.sym, b.x, b.y);
                 }
 
-                // D. Skor kecil di atas bubble jika aktif
-                if (isActive && currentCoinData && currentCoinData.score) {
+                // D. Skor / Label kecil di atas bubble jika aktif
+                if (isActive) {
                     ctx.font = "bold 8px 'JetBrains Mono'";
-                    ctx.fillStyle = "#F0B90B";
-                    ctx.fillText(`${currentCoinData.score}/100`, b.x, b.y - r - 5);
+                    if (hasOpenPos) {
+                        ctx.fillStyle = "#FFFFFF";
+                        ctx.fillText("POSISI AKTIF", b.x, b.y - r - 5);
+                    } else if (currentCoinData && currentCoinData.score) {
+                        ctx.fillStyle = "#F0B90B";
+                        ctx.fillText(`${currentCoinData.score}/100`, b.x, b.y - r - 5);
+                    }
                 }
             });
 
             // 6. GAMBAR NODE HUB PUSAT BINANCE CORE
             const hubPulse = 20 + Math.sin(tick * 0.05) * 2;
             
-            // Outer Halo
-            ctx.fillStyle = "rgba(240, 185, 11, 0.12)";
+            // Outer Halo (Putih saat open posisi, Kuning saat scanning)
+            ctx.fillStyle = hasOpenPos ? "rgba(255, 255, 255, 0.20)" : "rgba(240, 185, 11, 0.12)";
             ctx.beginPath();
             ctx.arc(centerX, centerY, hubPulse + 8, 0, Math.PI * 2);
             ctx.fill();
 
             // Core Solid
             ctx.fillStyle = "#121721";
-            ctx.strokeStyle = "#F0B90B";
+            ctx.strokeStyle = hasOpenPos ? "#FFFFFF" : "#F0B90B";
             ctx.lineWidth = 2;
-            ctx.shadowColor = "rgba(240, 185, 11, 0.6)";
-            ctx.shadowBlur = 14;
+            ctx.shadowColor = hasOpenPos ? "#ffffff" : "rgba(240, 185, 11, 0.6)";
+            ctx.shadowBlur = hasOpenPos ? 16 : 14;
             ctx.beginPath();
             ctx.arc(centerX, centerY, 20, 0, Math.PI * 2);
             ctx.fill();
             ctx.stroke();
             ctx.shadowBlur = 0;
 
-            // Center Monogram Text
+            // Center Monogram Text (Putih saat open posisi, Kuning saat scanning)
             ctx.font = "bold 9px 'Plus Jakarta Sans'";
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
-            ctx.fillStyle = "#F0B90B";
+            ctx.fillStyle = hasOpenPos ? "#FFFFFF" : "#F0B90B";
             ctx.fillText("BINANCE", centerX, centerY);
 
             requestAnimationFrame(animateBubbleNetwork);
@@ -1428,6 +1505,7 @@ def get_dashboard_html() -> str:
                 const posLevBadge = document.getElementById('posLevBadge');
 
                 const pos = d.active_position;
+                currentActivePosition = (pos && pos.symbol) ? pos : null;
                 if (pos && pos.symbol) {
                     posTerminal.classList.add('is-open');
                     viewOpen.style.display = 'block';

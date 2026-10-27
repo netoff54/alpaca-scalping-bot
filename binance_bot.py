@@ -565,6 +565,14 @@ class BinanceScalper:
         """
         if self.client.is_banned() or self.client.is_scan_throttled():
             return
+        # Sesuai instruksi user: Jika sedang open posisi, berhenti analisis semesta koin & fokus memantau posisi aktif
+        if self.active_position is not None:
+            sym = self.active_position.get("symbol", "KOIN")
+            side = self.active_position.get("side", "").upper()
+            entry = self.active_position.get("entry_price", 0.0)
+            pnl_pct = self.active_position.get("unrealized_pnl_pct", 0.0)
+            self.current_rotation_info = f"Fokus Memantau Posisi Aktif: {sym} {side} @ {entry:.4f} (PnL: {pnl_pct:+.2f}%) - Pemindaian koin semesta dijeda"
+            return
         if time.time() < self.circuit_breaker_until:
             rem_m = int((self.circuit_breaker_until - time.time()) / 60)
             self.current_rotation_info = f"Circuit Breaker Aktif ({rem_m}m lagi - Perlindungan Portofolio)"
