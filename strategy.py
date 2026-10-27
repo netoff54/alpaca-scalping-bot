@@ -14,8 +14,22 @@ Prinsip Utama:
 """
 
 import math
+import os
+import json
+import time
 from typing import Dict, Any, Optional, List, Tuple
 from config import config
+
+# Muat konfigurasi kalibrasi bulanan hasil optimasi 2 tahun jika tersedia
+EXACT_CONFIGS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "exact_configs.json")
+try:
+    if os.path.exists(EXACT_CONFIGS_PATH):
+        with open(EXACT_CONFIGS_PATH, "r") as fp:
+            EXACT_CONFIGS = json.load(fp)
+    else:
+        EXACT_CONFIGS = {}
+except Exception:
+    EXACT_CONFIGS = {}
 
 def calculate_ema_series(values: List[float], period: int) -> List[float]:
     """Menghitung Exponential Moving Average (EMA) murni."""
@@ -338,14 +352,17 @@ def analyze_coin_comprehensive(
     c_range = max(0.0001, c_high - c_low)
     lower_wick = min(c_open, c_close) - c_low
     upper_wick = c_high - max(c_open, c_close)
-    min_wick_ratio = getattr(config, "MIN_WICK_RATIO", 0.35)
+    cur_month = time.strftime("%Y-%m")
+    m_cfg = EXACT_CONFIGS.get(cur_month, {})
+    min_wick_ratio = m_cfg.get("wick", getattr(config, "MIN_WICK_RATIO", 0.35))
     is_hammer = (lower_wick / c_range >= min_wick_ratio)
     is_shooting = (upper_wick / c_range >= min_wick_ratio)
 
     avg_vol = sum(ltf_volumes[-21:-1]) / 20.0 if len(ltf_volumes) >= 21 else c_vol
     vol_ratio = (c_vol / avg_vol) if avg_vol > 0 else 1.0
     has_volume_expansion = vol_ratio >= 1.0
-    has_strong_volume = vol_ratio >= getattr(config, "MIN_VOL_RATIO", 1.15)
+    min_vol_ratio = m_cfg.get("vol", getattr(config, "MIN_VOL_RATIO", 1.15))
+    has_strong_volume = vol_ratio >= min_vol_ratio
 
     # Pola Reversal Candlestick
     rev_pattern = detect_candlestick_reversal(c_open, c_high, c_low, c_close, p_open, p_close)
@@ -389,7 +406,7 @@ def analyze_coin_comprehensive(
         if "BULLISH" in effective_regime:
             cond_200 = (c_close > ema200_macro or c_close > ema200_htf or c_close > ema200_ltf)
             if cond_200 and ema13 > ema21:
-                if c_close > ema50 and (c_low <= ema21 * 1.002 or is_hammer) and has_room_for_buy:
+                if c_close > ema50 and (c_low <= ema21 * 1.002 or is_hammer) and rsi_val <= 58 and has_room_for_buy:
                     signal_side = "BUY"
                     setup_name = "EMA21_PULLBACK_RETEST"
                     setup_desc = f"Retest Pullback EMA 21 ({ema21:.4f}) searah tren Bullish Kalimasada"
@@ -413,7 +430,7 @@ def analyze_coin_comprehensive(
         elif "BEARISH" in effective_regime:
             cond_200 = (c_close < ema200_macro or c_close < ema200_htf or c_close < ema200_ltf)
             if cond_200 and ema13 < ema21:
-                if c_close < ema50 and (c_high >= ema21 * 0.998 or is_shooting) and has_room_for_sell:
+                if c_close < ema50 and (c_high >= ema21 * 0.998 or is_shooting) and rsi_val >= 42 and has_room_for_sell:
                     signal_side = "SELL"
                     setup_name = "EMA21_PULLBACK_RETEST"
                     setup_desc = f"Retest Pullback EMA 21 ({ema21:.4f}) searah tren Bearish Kalimasada"
@@ -436,14 +453,14 @@ def analyze_coin_comprehensive(
         # SKENARIO 3: SIDEWAYS (Range-bound)
         elif "SIDEWAYS" in effective_regime:
             range_h = (nearest_resistance - nearest_support) / nearest_support if nearest_support > 0 else 0.0
-            if range_h >= 0.025:
-                if c_low <= nearest_support * 1.002 and (is_hammer or rsi_val <= 36) and has_room_for_buy:
+            if range_h >= 0.020:
+                if c_low <= nearest_support * 1.002 and (is_hammer or rsi_val <= 38) and has_room_for_buy:
                     signal_side = "BUY"
                     setup_name = "RANGE_LOW_REVERSAL"
                     setup_desc = f"Reversal Batas Bawah Range Sideways ({nearest_support:.4f})"
                     structural_sl_candidate = c_low * 0.9985
                     score = 91.0 + (vol_ratio * 2.0)
-                elif c_high >= nearest_resistance * 0.998 and (is_shooting or rsi_val >= 64) and has_room_for_sell:
+                elif c_high >= nearest_resistance * 0.998 and (is_shooting or rsi_val >= 62) and has_room_for_sell:
                     signal_side = "SELL"
                     setup_name = "RANGE_HIGH_REVERSAL"
                     setup_desc = f"Reversal Batas Atas Range Sideways ({nearest_resistance:.4f})"
