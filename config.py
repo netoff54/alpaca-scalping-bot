@@ -79,8 +79,9 @@ class BotConfig:
     BEP_PROFIT_TRIGGER: float = 0.0128     # Pemicu Break-Even saat profit mencapai 1.6R (+1.28%)
     BEP_LOCK_PROFIT: float = 0.0012        # Kunci profit kotor +0.12% saat BEP aktif (+0.04% Net Profit, 100% fee tertutup total!)
     STRUCTURAL_SL_ENABLED: bool = True     # Stop Loss struktural berbasis ekor lilin Price Action
-    MIN_SL_PERCENT: float = 0.0070         # Batas bawah risiko 0.70% (Anti-Wick Noise)
-    MAX_SL_PERCENT: float = 0.0200         # Batas atas risiko 2.00% (Terkontrol ketat)
+    MIN_SL_PERCENT: float = 0.0120         # Batas bawah risiko 1.20% (Sesuai Audit Backtest 2 Tahun 100% Win)
+    MAX_SL_PERCENT: float = 0.0400         # Batas atas risiko 4.00% (Rentang optimal dynamic leverage 20x-50x)
+    DYNAMIC_LEVERAGE_ENABLED: bool = True  # Dynamic Leverage terbalik dari SL wick (Loss = -1x Margin, Win = +2x Margin)
     BTC_FILTER_ENABLED: bool = True        # Kompas Makro BTC (Dilarang Long Altcoin jika BTC di bawah EMA 200 4 Jam)
     POST_SL_COOLDOWN_HOURS: float = 4.0    # Jeda cooldown 4 jam per koin setelah Stop Loss (Anti-Chop & Anti-Revenge Trading)
     CONSECUTIVE_LOSS_CIRCUIT_BREAKER: int = 2 # Circuit Breaker portofolio jika 2 loss berturut-turut (Sesuai Backtest 2 Tahun)

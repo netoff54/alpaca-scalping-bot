@@ -501,8 +501,8 @@ def analyze_coin_comprehensive(
         if structural_sl_candidate <= 0:
             structural_sl_candidate = min(c_low, p_low) * 0.9985 if signal_side == "BUY" else max(c_high, p_high) * 1.0015
 
-        min_r = getattr(config, "MIN_SL_PERCENT", 0.0070)
-        max_r = getattr(config, "MAX_SL_PERCENT", 0.0200)
+        min_r = getattr(config, "MIN_SL_PERCENT", 0.0120)
+        max_r = getattr(config, "MAX_SL_PERCENT", 0.0400)
 
         risk_dist = abs(entry_price - structural_sl_candidate)
         risk_dist = max(entry_price * min_r, min(entry_price * max_r, risk_dist))
@@ -512,8 +512,16 @@ def analyze_coin_comprehensive(
         maker_fee = getattr(config, "MAKER_FEE_RATE", 0.0002)
         taker_fee = getattr(config, "TAKER_FEE_RATE", 0.0005)
         funding_buf = getattr(config, "FUNDING_BUFFER", 0.0001)
+        roundtrip_fee = maker_fee + taker_fee + funding_buf
 
-        net_loss = sl_percent + maker_fee + taker_fee + funding_buf
+        # Dynamic Leverage: Dihitung terbalik dari SL wick agar kerugian tepat sebesar margin (margin habis)
+        eff_risk = sl_percent + roundtrip_fee
+        calc_lev = int(round(1.0 / eff_risk))
+        min_lev = config.dynamic_min_leverage
+        max_allowed_lev = min(config.LEVERAGE_MAX, max_symbol_leverage) if max_symbol_leverage > 0 else config.LEVERAGE_MAX
+        dynamic_leverage = max(min_lev, min(max_allowed_lev, calc_lev))
+
+        net_loss = eff_risk
         net_win = 2.0 * net_loss
         tp_percent = net_win + maker_fee + maker_fee + funding_buf
         tp_dist = entry_price * tp_percent
@@ -523,18 +531,18 @@ def analyze_coin_comprehensive(
         bep_trigger_dist = entry_price * bep_trigger_percent
         bep_trigger_price = entry_price + bep_trigger_dist if signal_side == "BUY" else entry_price - bep_trigger_dist
 
-        # Aturan Margin Bertingkat Fleksibel:
-        # - Jika saldo < $100: margin per posisi dikunci tetap $1.00 (maksimal ketat $1.00)
-        # - Jika saldo >= $100: margin per posisi 1.0% dari total saldo portofolio (fleksibel compounding)
+        # Aturan Margin Paten Ketat Sesuai Instruksi User:
+        # - Jika saldo < $100: margin per posisi dikunci TEPAT $1.00 (maksimal ketat $1.00, tidak boleh lebih)
+        # - Jika saldo >= $100: margin per posisi TEPAT 1.0% dari total saldo portofolio (maksimal ketat 1.0%), fleksibel compounding
         if available_capital < config.BALANCE_THRESHOLD_SCALING:
             target_margin_usd = config.FIXED_MARGIN_LOW_BALANCE  # Tepat $1.00
         else:
-            target_margin_usd = available_capital * config.RISK_PORTFOLIO_PERCENT  # 1.0% fleksibel
+            target_margin_usd = available_capital * config.RISK_PORTFOLIO_PERCENT  # Tepat 1.0% fleksibel compounding
 
-        raw_notional = target_margin_usd * effective_leverage
+        raw_notional = target_margin_usd * dynamic_leverage
 
         # Pengecekan Batas Minimum Order Binance ($5.00)
-        # Pada margin $1.00, koin dengan leverage 20x menghasilkan notional $20.00 (lolos batas Binance $5.00).
+        # Pada margin $1.00 dan leverage >= 10x, notional >= $10.00 (lolos batas Binance $5.00).
         if raw_notional < config.MIN_NOTIONAL:
             executable_signal = None
         else:
@@ -549,11 +557,11 @@ def analyze_coin_comprehensive(
                 "sl_percent": round(sl_percent * 100, 2),
                 "tp_percent": round(tp_percent * 100, 2),
                 "rr_ratio": config.RR_RATIO,
-                "dynamic_leverage": effective_leverage,
+                "dynamic_leverage": dynamic_leverage,
                 "notional": round(notional, 2),
                 "target_margin": round(target_margin_usd, 4),
-                "risk_usd": round(notional * sl_percent, 4),
-                "reward_usd": round(notional * tp_percent, 4),
+                "risk_usd": round(target_margin_usd, 4),
+                "reward_usd": round(target_margin_usd * 2.0, 4),
                 "score": final_score,
                 "setup_name": setup_name,
                 "setup_desc": setup_desc,

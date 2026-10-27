@@ -814,15 +814,16 @@ class BinanceScalper:
             return False
 
         try:
-            # 1. Pastikan ISOLATED margin dan atur leverage dalam rentang 50x turun ke 20x (Kompatibel Akun < 30 Hari)
-            if symbol in self._symbol_leverage:
+            # 1. Pastikan ISOLATED margin dan atur leverage dinamis sesuai SL wick (Loss = -1x Margin, Win = +2x Margin)
+            target_lev = sig.get("dynamic_leverage", config.LEVERAGE_MAX)
+            curr_min_lev = config.dynamic_min_leverage
+            if symbol in self._symbol_leverage and self._symbol_leverage[symbol] == target_lev:
                 actual_leverage = self._symbol_leverage[symbol]
             else:
                 self.client.set_margin_type(symbol, "ISOLATED")
-                curr_min_lev = config.dynamic_min_leverage
                 actual_leverage = self.client.set_leverage(
                     symbol,
-                    target_leverage=config.LEVERAGE_MAX,
+                    target_leverage=target_lev,
                     min_leverage=curr_min_lev
                 )
                 if actual_leverage >= curr_min_lev:

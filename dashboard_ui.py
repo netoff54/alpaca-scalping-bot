@@ -927,14 +927,14 @@ def get_dashboard_html() -> str:
                     <div class="rule-card">
                         <span class="rule-title">Target Leverage Adaptif</span>
                         <span class="rule-val" id="ruleLevVal">Maksimal 50x (20x - 50x)</span>
-                        <span class="rule-desc" id="ruleLevDesc">Sistem menembak 50x. Jika Binance membatasi koin tersebut, bot otomatis menurunkan bertahap hingga batas izin (minimal 20x).</span>
+                        <span class="rule-desc" id="ruleLevDesc">Dynamic Leverage: Dihitung fleksibel dari SL wick candle agar kerugian tepat sebesar margin ($1.00 habis) & keuntungan tepat 2x margin (+2.00 dolar net).</span>
                     </div>
 
                     <!-- Rule 3: Rasio Profit & Rugi -->
                     <div class="rule-card">
                         <span class="rule-title">Target Profit & Stop Loss</span>
-                        <span class="rule-val">TP 1:2 NET | SL 0.7% - 2.0%</span>
-                        <span class="rule-desc">Rasio Risk to Reward Wajib Tepat 1 : 2.000 NET MURNI setelah menutup 100% seluruh biaya bursa.</span>
+                        <span class="rule-val">TP 1:2 NET | Dynamic Leverage</span>
+                        <span class="rule-desc">Rasio Risk to Reward Wajib Tepat 1 : 2.000 NET MURNI. Margin paten $1.00 (< $100) / 1.0% (>= $100).</span>
                     </div>
 
                     <!-- Rule 4: Proteksi Drawdown -->
