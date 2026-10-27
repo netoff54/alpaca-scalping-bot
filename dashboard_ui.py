@@ -1042,7 +1042,7 @@ def get_dashboard_html() -> str:
         // --- GLOBAL APP STATE ---
         let rawTradeList = [];
         let activeTradeTab = 'session';
-        let liveTargetSymbol = 'BTCUSDT';
+        let liveTargetSymbol = '';
         let currentCoinData = null;
         let currentActivePosition = null;
         let lastKnownWallet = 99.54;
@@ -1183,18 +1183,20 @@ def get_dashboard_html() -> str:
             const cleanTarget = (targetSymRaw || "").replace("USDT", "").trim();
             let activeBubble = null;
 
-            // Cari di daftar bubble, jika belum ada, buat bubble baru (bubble tetap standby)
-            for (let b of bubbleList) {
-                if (b.sym === cleanTarget) {
-                    activeBubble = b;
-                    break;
+            if (cleanTarget && cleanTarget !== "--" && cleanTarget !== "STANDBY") {
+                // Cari di daftar bubble, jika belum ada, buat bubble baru (bubble tetap standby)
+                for (let b of bubbleList) {
+                    if (b.sym === cleanTarget) {
+                        activeBubble = b;
+                        break;
+                    }
                 }
-            }
 
-            if (!activeBubble && cleanTarget && cleanTarget !== "--") {
-                activeBubble = createSpacedBubble(cleanTarget, centerX, centerY, 65);
-                activeBubble.sym = cleanTarget;
-                bubbleList.push(activeBubble);
+                if (!activeBubble && cleanTarget) {
+                    activeBubble = createSpacedBubble(cleanTarget, centerX, centerY, 65);
+                    activeBubble.sym = cleanTarget;
+                    bubbleList.push(activeBubble);
+                }
             }
 
             // 3. Update posisi gerak apung alami seluruh bubble
@@ -1436,6 +1438,8 @@ def get_dashboard_html() -> str:
                 if (!res.ok) return;
                 const d = await res.json();
 
+                const hasOpenPos = !!(d.active_position && d.active_position.symbol);
+
                 // 1. Saldo Dompet & Modal Pokok
                 const curBal = parseFloat(d.current_balance || 99.54);
                 lastKnownWallet = curBal;
@@ -1601,7 +1605,9 @@ def get_dashboard_html() -> str:
                 // 7. Target Analisis & Rotasi Koin (Real-Time Synchronized)
                 if (d.rotation_status) {
                     const rotEl = document.getElementById('badgeRotNumber');
-                    if (rotEl) rotEl.textContent = d.rotation_status.split('(')[0].trim().toUpperCase();
+                    if (rotEl) {
+                        rotEl.textContent = d.rotation_status.replace(" - Perlindungan Portofolio", "").trim().toUpperCase();
+                    }
                 }
                 if (d.current_coin && d.current_coin.symbol) {
                     liveTargetSymbol = d.current_coin.symbol;
@@ -1618,16 +1624,22 @@ def get_dashboard_html() -> str:
 
                     // Pastikan koin yang sedang dianalisis masuk ke dalam bubble konstelasi
                     const cleanSym = d.current_coin.symbol.replace("USDT", "").trim();
-                    let existing = bubbleList.find(b => b.name === cleanSym);
+                    let existing = bubbleList.find(b => b.sym === cleanSym);
                     if (!existing && cleanSym) {
                         const angle = Math.random() * Math.PI * 2;
                         const dist = 55 + Math.random() * (Math.min(canvasW, canvasH) * 0.40 - 55);
                         bubbleList.push({
-                            name: cleanSym,
+                            sym: cleanSym,
+                            baseX: canvasW / 2 + Math.cos(angle) * dist,
+                            baseY: canvasH / 2 + Math.sin(angle) * dist,
                             x: canvasW / 2 + Math.cos(angle) * dist,
                             y: canvasH / 2 + Math.sin(angle) * dist,
-                            vx: (Math.random() - 0.5) * 0.2,
-                            vy: (Math.random() - 0.5) * 0.2,
+                            floatSpeedX: 0.012 + Math.random() * 0.01,
+                            floatSpeedY: 0.01 + Math.random() * 0.012,
+                            phaseX: Math.random() * Math.PI * 2,
+                            phaseY: Math.random() * Math.PI * 2,
+                            ampX: 6 + Math.random() * 4,
+                            ampY: 5 + Math.random() * 4,
                             score: score,
                             analyzed: true
                         });
@@ -1639,9 +1651,9 @@ def get_dashboard_html() -> str:
                     liveTargetSymbol = "";
                     currentCoinData = null;
                     const symEl = document.getElementById('liveActiveSymbol');
-                    if (symEl) symEl.textContent = "--USDT";
+                    if (symEl) symEl.textContent = "STANDBY";
                     const metEl = document.getElementById('liveActiveMetrics');
-                    if (metEl) metEl.textContent = d.rotation_status || "Menyiapkan Analisis...";
+                    if (metEl) metEl.textContent = d.rotation_status || "Menyiapkan Pemindaian Presisi...";
                 }
 
                 // 8. Navbar Info

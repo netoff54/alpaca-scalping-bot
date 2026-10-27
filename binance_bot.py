@@ -670,11 +670,8 @@ class BinanceScalper:
             pnl_pct = self.active_position.get("unrealized_pnl_pct", 0.0)
             self.current_rotation_info = f"Fokus Memantau Posisi Aktif: {sym} {side} @ {entry:.4f} (PnL: {pnl_pct:+.2f}%) - Pemindaian koin semesta dijeda"
             return
-        if time.time() < self.circuit_breaker_until:
-            rem_m = int((self.circuit_breaker_until - time.time()) / 60)
-            self.current_rotation_info = f"Circuit Breaker Aktif ({rem_m}m lagi - Perlindungan Portofolio)"
-            self.current_coin_analysis = {}
-            return
+        is_cb_active = (time.time() < self.circuit_breaker_until)
+        cb_rem_m = max(1, int((self.circuit_breaker_until - time.time()) / 60)) if is_cb_active else 0
 
         # Target Surplus Bulanan: >= 10.0% dikunci otomatis (Sesuai Hasil Backtest 2 Tahun 24/24 Bulan Win)
         bal = self.get_futures_balance()
@@ -714,7 +711,10 @@ class BinanceScalper:
             q_vol = item["quoteVolume"]
             rank = rot_idx + 1
 
-            self.current_rotation_info = f"Rotasi {rank}/{total_univ} (Analisis Menyeluruh: {sym})"
+            if is_cb_active:
+                self.current_rotation_info = f"Rotasi {rank}/{total_univ} (Jeda Order CB: {cb_rem_m}m - {sym})"
+            else:
+                self.current_rotation_info = f"Rotasi {rank}/{total_univ} (Analisis Menyeluruh: {sym})"
 
             bal = self.get_futures_balance()
             cap = bal["available"] if bal["available"] >= 1.0 else config.DEFAULT_CAPITAL
@@ -783,7 +783,10 @@ class BinanceScalper:
 
                 # Eksekusi jika tidak ada posisi atau order aktif
                 if not self.active_position and not self.active_order and not self.client.is_banned():
-                    self.execute_limit_order(sig)
+                    if is_cb_active:
+                        console.log(f"[bold yellow]🛡️ Sinyal {sym} terdeteksi (Skor: {sig.get('score')}) namun dilewati karena Circuit Breaker aktif ({cb_rem_m}m lagi). Portofolio terlindungi.[/bold yellow]")
+                    else:
+                        self.execute_limit_order(sig)
 
             self.last_scan_duration_sec = round(time.time() - t_start, 2)
             self.last_scan_time = time.strftime("%Y-%m-%d %H:%M:%S")
