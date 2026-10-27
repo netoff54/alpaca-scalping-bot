@@ -386,26 +386,52 @@ def trade_history(limit: int = 100):
     """
     import datetime
     raw_trades = db.get_recent_trades(limit)
-    cleaned = []
     vps_start_ts = datetime.datetime(2026, 10, 26, 0, 0, 0)
+
+    # Jika belum ada trade sesi VPS di cache lokal, sinkronkan data riil dari Binance
+    has_vps_trade = any(
+        (t.get("closed_at") and hasattr(t.get("closed_at"), "year") and t.get("closed_at") >= vps_start_ts) or
+        ("2026-10-26" in str(t.get("closed_at") or "") or "2026-10-27" in str(t.get("closed_at") or ""))
+        for t in raw_trades
+    )
+    if not has_vps_trade:
+        try:
+            scalper.sync_historical_database_with_binance()
+            raw_trades = db.get_recent_trades(limit)
+        except Exception as e_syn:
+            print(f"[Trade-History] Auto-sync notice: {e_syn}")
+
+    cleaned = []
     for t in raw_trades:
-        created = t.get("created_at") or t.get("closed_at")
+        created = t.get("closed_at") or t.get("created_at")
+        is_vps = False
+        if created:
+            if hasattr(created, "year"):
+                is_vps = (created >= vps_start_ts)
+            else:
+                s_c = str(created)
+                is_vps = ("2026-10-26" in s_c or "2026-10-27" in s_c or "26 Oct" in s_c or "27 Oct" in s_c)
+
+        pnl_val = float(t.get("pnl_usd") or 0.0)
+        pnl_pct_val = float(t.get("pnl_pct") or 0.0)
+        res_val = "WIN" if (pnl_val > 0 and pnl_pct_val >= 1.5) else ("SL BEP" if pnl_val > 0 else "LOSS")
+
         cleaned.append({
             "id": t.get("id"),
             "symbol": t.get("symbol"),
-            "side": t.get("side"),
+            "side": t.get("side", "BUY"),
             "entry_price": float(t.get("entry_price") or 0.0),
             "exit_price": float(t.get("exit_price") or 0.0),
             "qty": float(t.get("qty") or 0.0),
             "notional": float(t.get("notional") or 0.0),
             "margin_used": float(t.get("margin_used") or 1.0),
-            "leverage": int(t.get("leverage") or 50),
+            "leverage": int(t.get("leverage") or 20),
             "commission": float(t.get("commission") or 0.0),
-            "pnl_usd": float(t.get("pnl_usd") or 0.0),
-            "pnl_pct": float(t.get("pnl_pct") or 0.0),
-            "result": t.get("result", "WIN" if float(t.get("pnl_usd") or 0.0) >= 0 else "LOSS"),
+            "pnl_usd": pnl_val,
+            "pnl_pct": pnl_pct_val,
+            "result": res_val,
             "created_at": created.strftime("%d %b %Y %H:%M") if hasattr(created, "strftime") else str(created or ""),
-            "is_vps_session": bool(created and hasattr(created, "year") and created >= vps_start_ts)
+            "is_vps_session": is_vps
         })
 
     vps_trades = [c for c in cleaned if c["is_vps_session"]]

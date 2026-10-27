@@ -72,6 +72,7 @@ class BotConfig:
     # --- Risk / Reward Ratio Presisi Dollar 1:2 NET Riil (Sudah Ditambahkan Seluruh Fee Bursa) ---
     SL_PERCENT: float = 0.0100             # Stop Loss dasar 1.00%
     TP_PERCENT: float = 0.0233             # Take Profit dasar 2.33%
+    BEP_PROFIT_TRIGGER: float = 0.0070     # Pemicu Break-Even (geser SL ke BEP saat profit mencapai +0.70% / 1R)
     RR_RATIO: float = 2.00                 # Rasio Risk-to-Reward Net Bersih 1:2.0
     STRUCTURAL_SL_ENABLED: bool = True     # Stop Loss struktural berbasis ekor lilin Price Action
     MIN_SL_PERCENT: float = 0.0080         # Batas bawah risiko 0.80% (Anti-Wick Noise Altcoin)

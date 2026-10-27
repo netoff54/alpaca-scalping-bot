@@ -181,10 +181,11 @@ class BinanceScalper:
                 notional = contracts * entry_price
                 
                 # Pertahankan SL/TP target dan status BEP
+                bep_trig_val = getattr(config, "BEP_PROFIT_TRIGGER", 0.0070)
                 if self.active_position and self.active_position.get("symbol") == symbol:
                     sl_price = self.active_position.get("sl_price", entry_price * (1.0 - config.SL_PERCENT if side == "buy" else 1.0 + config.SL_PERCENT))
                     tp_price = self.active_position.get("tp_price", entry_price * (1.0 + config.TP_PERCENT if side == "buy" else 1.0 - config.TP_PERCENT))
-                    bep_trigger_price = self.active_position.get("bep_trigger_price", entry_price * (1.0 + config.BEP_PROFIT_TRIGGER if side == "buy" else 1.0 - config.BEP_PROFIT_TRIGGER))
+                    bep_trigger_price = self.active_position.get("bep_trigger_price", entry_price * (1.0 + bep_trig_val if side == "buy" else 1.0 - bep_trig_val))
                     bep_activated = self.active_position.get("bep_activated", False)
                     opened_at = self.active_position.get("opened_at", time.time())
                     pos_leverage = self.active_position.get("leverage", int(pos.get("leverage", config.LEVERAGE)))
@@ -193,7 +194,7 @@ class BinanceScalper:
                 else:
                     sl_price = entry_price * (1.0 - config.SL_PERCENT) if side == "buy" else entry_price * (1.0 + config.SL_PERCENT)
                     tp_price = entry_price * (1.0 + config.TP_PERCENT) if side == "buy" else entry_price * (1.0 - config.TP_PERCENT)
-                    bep_trigger_price = entry_price * (1.0 + config.BEP_PROFIT_TRIGGER) if side == "buy" else entry_price * (1.0 - config.BEP_PROFIT_TRIGGER)
+                    bep_trigger_price = entry_price * (1.0 + bep_trig_val) if side == "buy" else entry_price * (1.0 - bep_trig_val)
                     bep_activated = False
                     opened_at = time.time()
                     pos_leverage = int(pos.get("leverage", config.LEVERAGE))
@@ -846,9 +847,10 @@ class BinanceScalper:
                         # Hitung ulang level SL, TP, dan BEP presisi dari harga keterisian riil (formatted_price)
                         # Menjamin rasio RR 1:2 (SL config.SL_PERCENT, TP config.TP_PERCENT) selalu dihitung dari harga eksekusi riil
                         sl_side = "SELL" if side.lower() == "buy" else "BUY"
+                        bep_trigger = getattr(config, "BEP_PROFIT_TRIGGER", 0.0070)
                         actual_sl = self.client.format_price(symbol, formatted_price * (1.0 - config.SL_PERCENT) if side.lower() == "buy" else formatted_price * (1.0 + config.SL_PERCENT))
                         actual_tp = self.client.format_price(symbol, formatted_price * (1.0 + config.TP_PERCENT) if side.lower() == "buy" else formatted_price * (1.0 - config.TP_PERCENT))
-                        actual_bep = self.client.format_price(symbol, formatted_price * (1.0 + config.BEP_PROFIT_TRIGGER) if side.lower() == "buy" else formatted_price * (1.0 - config.BEP_PROFIT_TRIGGER))
+                        actual_bep = self.client.format_price(symbol, formatted_price * (1.0 + bep_trigger) if side.lower() == "buy" else formatted_price * (1.0 - bep_trigger))
 
                         # 1. Pasang Native Stop Loss (STOP_MARKET) langsung di Matching Engine Binance
                         native_sl = self.client.create_stop_loss_order(
@@ -859,10 +861,10 @@ class BinanceScalper:
                         )
                         native_sl_id = native_sl.get("orderId") if isinstance(native_sl, dict) else None
 
-                        # Jika harga melompat agresif dan SL ditolak karena sudah terlewati (-2021 Order would immediately trigger):
-                        # Langsung eksekusi Market Close darurat DETIK ITU JUGA agar modal terlindungi seketika!
-                        if not native_sl_id and isinstance(native_sl, dict) and native_sl.get("code") == -2021:
-                            console.log(f"[bold red]🚨 Flash Spike Terdeteksi! Harga telah melompati level SL. Menutup posisi seketika dengan market close...[/bold red]")
+                        # PERLINDUNGAN MUTLAK: Jika Native Stop Loss gagal terpasang (alasan apa pun):
+                        # DILARANG MEMBIARKAN POSISI TERBUKA TANPA SL! Eksekusi Market Close detik itu juga!
+                        if not native_sl_id:
+                            console.log(f"[bold red]🚨 PERINGATAN KRITIKAL: Native Stop Loss gagal terpasang di Binance untuk {symbol} ({native_sl})! Langsung eksekusi Market Close darurat detik ini juga untuk mengamankan saldo![/bold red]")
                             m_res = self.client.create_market_close_order(symbol, sl_side, formatted_qty)
                             fill_p = float(m_res.get("avgPrice", 0.0)) if isinstance(m_res, dict) else formatted_price
                             self.active_order = None
@@ -1046,8 +1048,9 @@ class BinanceScalper:
             # --- 1. Proteksi Geser SL ke Break-Even (BEP) saat mencapai 1R (+0.7%) ---
             bep_trigger = pos.get("bep_trigger_price", 0.0)
             bep_activated = pos.get("bep_activated", False)
+            bep_trig_pct = getattr(config, "BEP_PROFIT_TRIGGER", 0.0070)
             if not bep_activated:
-                hit_bep = (current_price >= bep_trigger) if side == "buy" else (current_price <= bep_trigger) if bep_trigger > 0 else (pnl_pct >= config.BEP_PROFIT_TRIGGER)
+                hit_bep = (current_price >= bep_trigger) if side == "buy" else (current_price <= bep_trigger) if bep_trigger > 0 else (pnl_pct >= bep_trig_pct)
                 if hit_bep:
                     bep_lock = getattr(config, "BEP_LOCK_PROFIT", 0.0025) # +0.25% di atas entry
                     raw_bep = entry_price * (1.0 + bep_lock) if side == "buy" else entry_price * (1.0 - bep_lock)
@@ -1062,7 +1065,7 @@ class BinanceScalper:
                         
                     pos["sl_price"] = formatted_bep
                     pos["bep_activated"] = True
-                    console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: Profit mencapai 1R (+{config.BEP_PROFIT_TRIGGER*100:.2f}%), menggeser Native SL ke {formatted_bep} (Terkunci Untung Bersih +{bep_lock*100:.2f}% Menutup Seluruh Fee Bursa)[/bold cyan]")
+                    console.log(f"[bold cyan]🛡️ BREAK-EVEN DIAKTIFKAN pada {symbol}: Profit mencapai 1R (+{bep_trig_pct*100:.2f}%), menggeser Native SL ke {formatted_bep} (Terkunci Untung Bersih +{bep_lock*100:.2f}% Menutup Seluruh Fee Bursa)[/bold cyan]")
                     
                     # Batalkan Stop Loss lama di Binance & Pasang Native STOP_MARKET baru di harga BEP
                     # Catatan: Native TP tetap aktif di bursa untuk menangkap target profit penuh +2.00%
@@ -1223,6 +1226,14 @@ class BinanceScalper:
                 if self.active_position:
                     time.sleep(2.0)  # Langsung monitor 2.0s jika posisi baru saja terisi
                 else:
+                    # 6. Sinkronisasi berkala database dengan Binance setiap 120 detik saat standby
+                    now_sync_time = time.time()
+                    if now_sync_time - getattr(self, "_last_periodic_db_sync", 0.0) > 120.0:
+                        self._last_periodic_db_sync = now_sync_time
+                        try:
+                            self.sync_historical_database_with_binance()
+                        except Exception as e_s:
+                            console.log(f"[dim]Periodic db sync notice: {e_s}[/dim]")
                     time.sleep(config.SCAN_INTERVAL_SECONDS)
                 
             except Exception as e:

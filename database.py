@@ -393,8 +393,8 @@ class NeonDatabase:
                     """)
                     db_trades = cur.fetchall()
 
-                    # Filter record income REALIZED_PNL resmi Binance
-                    pnl_incomes = [inc for inc in incomes if inc.get("incomeType") == "REALIZED_PNL"] if incomes else []
+                    # Filter record income REALIZED_PNL dan INSURANCE_CLEAR (likuidasi) resmi Binance
+                    pnl_incomes = [inc for inc in incomes if inc.get("incomeType") in ("REALIZED_PNL", "INSURANCE_CLEAR")] if incomes else []
                     pnl_incomes.sort(key=lambda x: x.get("time", 0))
 
                     matched_count = 0
