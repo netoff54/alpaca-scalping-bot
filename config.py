@@ -69,15 +69,15 @@ class BotConfig:
     RSI_PERIOD: int = 14                   # Relative Strength Index (Poin 7 Kalimasada)
     VOLUME_SPIKE_FACTOR: float = 1.15      # Konfirmasi volume transaksi >= 115% rata-rata
 
-    # --- Risk / Reward Ratio Presisi Dollar 1:2 NET Riil (Sudah Ditambahkan Seluruh Fee Bursa) ---
-    SL_PERCENT: float = 0.0100             # Stop Loss dasar 1.00%
-    TP_PERCENT: float = 0.0233             # Take Profit dasar 2.33%
-    BEP_PROFIT_TRIGGER: float = 0.0070     # Pemicu Break-Even (geser SL ke BEP saat profit mencapai +0.70% / 1R)
-    BEP_LOCK_PROFIT: float = 0.0030        # Kunci profit bersih saat BEP aktif (+0.30%)
-    RR_RATIO: float = 2.00                 # Rasio Risk-to-Reward Net Bersih 1:2.0
+    # --- Risk / Reward Ratio Kalibrasi Grid Kalimasada (Win Rate >= 50%, Surplus >= 10%/bulan) ---
+    SL_PERCENT: float = 0.0080             # Stop Loss presisi 0.80% (Cepat batasi risiko, hindari wick noise)
+    TP_PERCENT: float = 0.0150             # Take Profit presisi 1.50% (Sering tercapai pada ekspansi impulsive 15m)
+    BEP_PROFIT_TRIGGER: float = 0.0100     # Pemicu Break-Even saat profit mencapai +1.00%
+    BEP_LOCK_PROFIT: float = 0.0030        # Kunci profit bersih saat BEP aktif (+0.30% setelah fee bursa)
+    RR_RATIO: float = 1.875                # Rasio Risk-to-Reward Net Bersih 1:1.875
     STRUCTURAL_SL_ENABLED: bool = True     # Stop Loss struktural berbasis ekor lilin Price Action
     MIN_SL_PERCENT: float = 0.0080         # Batas bawah risiko 0.80% (Anti-Wick Noise Altcoin)
-    MAX_SL_PERCENT: float = 0.0200         # Batas atas risiko 2.00% (Maksimal Terkontrol)
+    MAX_SL_PERCENT: float = 0.0120         # Batas atas risiko 1.20% (Terkontrol ketat)
     BTC_FILTER_ENABLED: bool = True        # Kompas Makro BTC (Dilarang Long Altcoin jika BTC di bawah EMA 200 4 Jam)
     POST_SL_COOLDOWN_HOURS: float = 4.0    # Jeda cooldown 4 jam per koin setelah Stop Loss (Anti-Chop & Anti-Revenge Trading)
     CONSECUTIVE_LOSS_CIRCUIT_BREAKER: int = 3 # Circuit Breaker portofolio jika 3 loss berturut-turut

@@ -820,14 +820,37 @@ class BinanceScalper:
             )
             
             order_id = order.get("orderId")
+            
+            # Pasang Pre-Order Native Stop Loss & Take Profit langsung di Binance (Tab 'Pesanan Pemicu' / 'Order Terbuka Bersyarat')
+            sl_side = "SELL" if side.lower() == "buy" else "BUY"
+            initial_sl = self.client.format_price(symbol, sig["sl_price"])
+            initial_tp = self.client.format_price(symbol, sig["tp_price"])
+            
+            pre_sl = self.client.create_stop_loss_order(
+                symbol=symbol,
+                side=sl_side,
+                stop_price=initial_sl,
+                qty=formatted_qty
+            )
+            pre_tp = self.client.create_take_profit_order(
+                symbol=symbol,
+                side=sl_side,
+                stop_price=initial_tp,
+                qty=formatted_qty
+            )
+            pre_sl_id = pre_sl.get("orderId") or pre_sl.get("algoId")
+            pre_tp_id = pre_tp.get("orderId") or pre_tp.get("algoId")
+            
             self.active_order = {
                 "id": order_id,
                 "symbol": symbol,
                 "side": side.lower(),
                 "price": formatted_price,
                 "qty": formatted_qty,
-                "sl_price": sig["sl_price"],
-                "tp_price": sig["tp_price"],
+                "sl_price": initial_sl,
+                "tp_price": initial_tp,
+                "pre_sl_id": pre_sl_id,
+                "pre_tp_id": pre_tp_id,
                 "bep_trigger_price": sig.get("bep_trigger_price", 0.0),
                 "leverage": actual_leverage,
                 "risk_usd": sig.get("risk_usd", 0.05),
@@ -847,28 +870,30 @@ class BinanceScalper:
                         console.log(f"[bold green]LIMIT ORDER TERISI PENUH! ({symbol} @ {formatted_price})[/bold green]")
                         
                         # Hitung ulang level SL, TP, dan BEP presisi dari harga keterisian riil (formatted_price)
-                        # Menjamin rasio RR 1:2 (SL config.SL_PERCENT, TP config.TP_PERCENT) selalu dihitung dari harga eksekusi riil
                         sl_side = "SELL" if side.lower() == "buy" else "BUY"
-                        bep_trigger = getattr(config, "BEP_PROFIT_TRIGGER", 0.0070)
+                        bep_trigger = getattr(config, "BEP_PROFIT_TRIGGER", 0.0100)
                         actual_sl = self.client.format_price(symbol, formatted_price * (1.0 - config.SL_PERCENT) if side.lower() == "buy" else formatted_price * (1.0 + config.SL_PERCENT))
                         actual_tp = self.client.format_price(symbol, formatted_price * (1.0 + config.TP_PERCENT) if side.lower() == "buy" else formatted_price * (1.0 - config.TP_PERCENT))
                         actual_bep = self.client.format_price(symbol, formatted_price * (1.0 + bep_trigger) if side.lower() == "buy" else formatted_price * (1.0 - bep_trigger))
 
-                        # 1. Pasang Native Stop Loss (STOP_MARKET) langsung di Matching Engine Binance
-                        native_sl = self.client.create_stop_loss_order(
-                            symbol=symbol,
-                            side=sl_side,
-                            stop_price=actual_sl,
-                            qty=formatted_qty
-                        )
-                        native_sl_id = native_sl.get("orderId") if isinstance(native_sl, dict) else None
+                        # Verifikasi atau pasang ulang Native Stop Loss (STOP_MARKET) di Binance Matching Engine
+                        native_sl_id = pre_sl_id
+                        if not native_sl_id:
+                            native_sl = self.client.create_stop_loss_order(
+                                symbol=symbol,
+                                side=sl_side,
+                                stop_price=actual_sl,
+                                qty=formatted_qty
+                            )
+                            native_sl_id = native_sl.get("orderId") or native_sl.get("algoId")
 
                         # PERLINDUNGAN MUTLAK: Jika Native Stop Loss gagal terpasang (alasan apa pun):
                         # DILARANG MEMBIARKAN POSISI TERBUKA TANPA SL! Eksekusi Market Close detik itu juga!
                         if not native_sl_id:
-                            console.log(f"[bold red]🚨 PERINGATAN KRITIKAL: Native Stop Loss gagal terpasang di Binance untuk {symbol} ({native_sl})! Langsung eksekusi Market Close darurat detik ini juga untuk mengamankan saldo![/bold red]")
+                            console.log(f"[bold red]🚨 PERINGATAN KRITIKAL: Native Stop Loss gagal terpasang di Binance untuk {symbol}! Langsung eksekusi Market Close darurat detik ini juga untuk mengamankan saldo![/bold red]")
                             m_res = self.client.create_market_close_order(symbol, sl_side, formatted_qty)
                             fill_p = float(m_res.get("avgPrice", 0.0)) if isinstance(m_res, dict) else formatted_price
+                            self.client.cancel_all_algo_orders(symbol)
                             self.active_order = None
                             self.active_signals = [s for s in self.active_signals if s.get("symbol") != symbol]
                             temp_pos = {
@@ -883,15 +908,16 @@ class BinanceScalper:
                             self._record_closed_position(temp_pos, exit_price_hint=fill_p, result_hint="LOSS")
                             return False
 
-                        # 2. Pasang Native Take Profit (TAKE_PROFIT_MARKET) langsung di Matching Engine Binance
-                        # Menjamin Take Profit terkunci seketika di bursa tanpa slippage dan tanpa delay polling
-                        native_tp = self.client.create_take_profit_order(
-                            symbol=symbol,
-                            side=sl_side,
-                            stop_price=actual_tp,
-                            qty=formatted_qty
-                        )
-                        native_tp_id = native_tp.get("orderId") if isinstance(native_tp, dict) else None
+                        # Verifikasi atau pasang Native Take Profit (TAKE_PROFIT_MARKET)
+                        native_tp_id = pre_tp_id
+                        if not native_tp_id:
+                            native_tp = self.client.create_take_profit_order(
+                                symbol=symbol,
+                                side=sl_side,
+                                stop_price=actual_tp,
+                                qty=formatted_qty
+                            )
+                            native_tp_id = native_tp.get("orderId") or native_tp.get("algoId")
 
                         self.active_position = {
                             "symbol": symbol,
@@ -914,7 +940,8 @@ class BinanceScalper:
                         self.active_signals = [s for s in self.active_signals if s.get("symbol") != symbol]
                         return True
                     elif status in ("CANCELED", "REJECTED", "EXPIRED"):
-                        console.log(f"[yellow]Order dibatalkan/ditolak ({status}).[/yellow]")
+                        console.log(f"[yellow]Order dibatalkan/ditolak ({status}). Membersihkan pesanan pemicu...[/yellow]")
+                        self.client.cancel_all_algo_orders(symbol)
                         self.active_order = None
                         self.active_signals = [s for s in self.active_signals if s.get("symbol") != symbol]
                         self._symbol_order_cooldown[symbol] = time.time() + 300
@@ -922,11 +949,15 @@ class BinanceScalper:
                 except Exception as err:
                     console.log(f"[dim]Pengecekan order {order_id}: {err}[/dim]")
                     
-            console.log(f"[bold yellow]Limit order tidak terisi dalam 30 detik. Auto-cancel {order_id} (Anti-FOMO)...[/bold yellow]")
+            console.log(f"[bold yellow]Limit order tidak terisi dalam 30 detik. Auto-cancel {order_id} & membersihkan pesanan pemicu (Anti-FOMO)...[/bold yellow]")
             try:
                 self.client.cancel_order(symbol, order_id)
             except Exception as e:
                 console.log(f"[dim]Gagal cancel order: {e}[/dim]")
+            try:
+                self.client.cancel_all_algo_orders(symbol)
+            except Exception as e_algo:
+                console.log(f"[dim]Gagal cancel algo order: {e_algo}[/dim]")
                 
             self.active_order = None
             self.active_signals = [s for s in self.active_signals if s.get("symbol") != symbol]

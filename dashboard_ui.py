@@ -1617,7 +1617,7 @@ def get_dashboard_html() -> str:
                     resultBadge = '<span class="badge badge-green" style="font-size: 8px;">WIN</span>';
                 } else if (isSlBep) {
                     pnlColor = 'var(--binance-gold)';
-                    resultBadge = '<span class="badge badge-gold" style="font-size: 8px;">SL BEP</span>';
+                    resultBadge = '<span class="badge badge-gold" style="font-size: 8px;">SL BEP (LOSS)</span>';
                 }
 
                 html += `
