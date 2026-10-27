@@ -1,43 +1,48 @@
 """
-DASHBOARD WEB MOBILE-FRIENDLY PROFESIONAL TRADING BOT KALIMASADA (BINANCE FUTURES)
-- Desain Institusional Pro (Clean SVG Micro-Icons, Bebas Emoji Template Murahan)
-- Terminal Posisi Aktif Real-Time (Menggantikan grafik, lengkap dengan Margin, Leverage, SL/TP Gauge)
-- Riwayat Trade Berfokus Sesi VPS Terkini (Dengan opsi beralih ke Riwayat Lengkap)
-- Radar Jaringan Koin Animasi (Canvas 60 FPS: Binance Hub + Sinar Laser Target Koin)
-- 0% Beban Tambahan di VPS (<0.5 MB RAM), 0% Cooldown Binance (100% RAM/DB Cache).
+HTML & JavaScript Web Dashboard - Institutional Crypto Terminal (Mobile-First)
+Antarmuka pemantauan 24/7 Binance Futures Autonomous Scalper.
+Desain Dark Obsidian Glassmorphism dengan Konstelasi Bubble Jaringan Koin,
+Terminal Posisi Aktif, Penjelasan Proteksi Drawdown & Margin Dinamis, serta Riwayat Win Rate.
 """
 
-DASHBOARD_HTML = """<!DOCTYPE html>
+def get_dashboard_html() -> str:
+    return """<!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Binance Futures Scalper | Institutional Terminal</title>
-    <!-- Google Fonts -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#070a10">
+    <title>Binance Futures Scalper — Institutional Terminal</title>
+
+    <!-- Google Fonts: Plus Jakarta Sans & JetBrains Mono -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
     <style>
         :root {
-            --bg-base: #06090e;
+            --bg-base: #06080e;
             --bg-card: #0c1017;
-            --bg-card-sub: #111722;
-            --bg-card-hover: #161e2c;
-            --bg-glass: rgba(12, 16, 23, 0.88);
+            --bg-card-sub: #131922;
             --border-card: rgba(255, 255, 255, 0.07);
-            --border-focus: rgba(240, 185, 11, 0.4);
-            --text-primary: #f8fafc;
-            --text-secondary: #94a3b8;
-            --text-dim: #475569;
+            --border-card-subtle: rgba(255, 255, 255, 0.04);
+            
             --binance-gold: #F0B90B;
-            --binance-gold-soft: rgba(240, 185, 11, 0.12);
+            --binance-gold-hover: #fcd535;
+            --gold-glow: rgba(240, 185, 11, 0.22);
             --bull-green: #0ecb81;
-            --bull-green-soft: rgba(14, 203, 129, 0.12);
+            --bull-glow: rgba(14, 203, 129, 0.25);
             --bear-red: #f6465d;
-            --bear-red-soft: rgba(246, 70, 93, 0.12);
-            --cyan-accent: #38bdf8;
-            --font-main: 'Plus Jakarta Sans', -apple-system, sans-serif;
+            --bear-glow: rgba(246, 70, 93, 0.25);
+            --cyan-accent: #00e5ff;
+            
+            --text-primary: #eaecef;
+            --text-secondary: #9aa4b2;
+            --text-dim: #5a6677;
+
+            --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             --font-mono: 'JetBrains Mono', monospace;
         }
 
@@ -51,110 +56,163 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         body {
             background-color: var(--bg-base);
             color: var(--text-primary);
-            font-family: var(--font-main);
-            min-height: 100vh;
-            padding-bottom: 90px;
+            font-family: var(--font-sans);
+            font-size: 13px;
+            line-height: 1.45;
+            padding-bottom: 50px;
             overflow-x: hidden;
             -webkit-font-smoothing: antialiased;
         }
 
-        /* Top Bar */
-        .topbar {
-            position: sticky;
-            top: 0;
-            z-index: 100;
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            background: var(--bg-glass);
-            border-bottom: 1px solid var(--border-card);
-            padding: 12px 18px;
+        /* Ambient subtle background glow */
+        body::before {
+            content: '';
+            position: fixed;
+            top: -120px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 600px;
+            height: 300px;
+            background: radial-gradient(circle, rgba(240, 185, 11, 0.05) 0%, rgba(6, 8, 14, 0) 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .container {
+            max-width: 680px;
+            margin: 0 auto;
+            padding: 12px 14px;
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        /* 1. TOP NAVBAR / HEADER */
+        .top-navbar {
             display: flex;
             justify-content: space-between;
             align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border-card-subtle);
         }
 
-        .brand-container {
+        .brand-block {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
         }
 
-        .brand-logo-polygon {
+        .brand-icon {
             width: 32px;
             height: 32px;
-            background: linear-gradient(135deg, #F0B90B, #c49503);
             border-radius: 8px;
-            display: grid;
-            place-items: center;
-            box-shadow: 0 0 16px rgba(240, 185, 11, 0.3);
+            background: rgba(240, 185, 11, 0.12);
+            border: 1px solid rgba(240, 185, 11, 0.35);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--binance-gold);
+            box-shadow: 0 0 15px var(--gold-glow);
         }
 
-        .brand-logo-polygon svg {
+        .brand-icon svg {
             width: 18px;
             height: 18px;
-            fill: #000;
         }
 
-        .brand-meta h1 {
-            font-size: 14.5px;
+        .brand-text h1 {
+            font-size: 14px;
             font-weight: 800;
-            letter-spacing: -0.3px;
+            letter-spacing: 0.3px;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .brand-text p {
+            font-size: 10px;
+            color: var(--text-dim);
+            font-family: var(--font-mono);
+            letter-spacing: 0.2px;
+        }
+
+        .nav-right-meta {
             display: flex;
             align-items: center;
             gap: 8px;
         }
 
-        .brand-meta p {
-            font-size: 11px;
-            color: var(--text-secondary);
+        .live-status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 9px;
+            background: rgba(14, 203, 129, 0.08);
+            border: 1px solid rgba(14, 203, 129, 0.25);
+            border-radius: 20px;
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--bull-green);
             font-family: var(--font-mono);
         }
 
-        .status-pill {
+        .live-dot {
+            width: 6px;
+            height: 6px;
+            background: var(--bull-green);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--bull-green);
+            animation: pulseDot 2s infinite ease-in-out;
+        }
+
+        @keyframes pulseDot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+
+        .btn-refresh {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            color: var(--text-secondary);
+            border-radius: 8px;
+            width: 30px;
+            height: 30px;
             display: flex;
             align-items: center;
-            gap: 6px;
-            padding: 5px 10px;
-            border-radius: 20px;
-            background: var(--bull-green-soft);
-            border: 1px solid rgba(14, 203, 129, 0.25);
-            font-size: 11px;
-            font-weight: 700;
-            font-family: var(--font-mono);
-            color: var(--bull-green);
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
         }
 
-        .pulse-indicator {
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
-            background-color: var(--bull-green);
-            box-shadow: 0 0 8px var(--bull-green);
-            animation: pulse-dot 1.8s infinite;
+        .btn-refresh:active {
+            transform: scale(0.92);
+            color: var(--binance-gold);
+            border-color: var(--binance-gold);
         }
 
-        @keyframes pulse-dot {
-            0% { transform: scale(0.9); opacity: 0.8; }
-            50% { transform: scale(1.2); opacity: 1; }
-            100% { transform: scale(0.9); opacity: 0.8; }
+        .btn-refresh svg {
+            width: 14px;
+            height: 14px;
         }
 
-        /* Container Layout */
-        .app-container {
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 16px;
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
+        /* 2. OVERVIEW METRICS GRID (4 CARDS) */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
         }
 
-        /* Card Primitive */
         .card {
             background: var(--bg-card);
             border: 1px solid var(--border-card);
-            border-radius: 16px;
-            padding: 16px;
+            border-radius: 14px;
+            padding: 12px 14px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
             position: relative;
             overflow: hidden;
             transition: border-color 0.2s;
@@ -164,212 +222,208 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 8px;
+            margin-bottom: 4px;
         }
 
         .card-label {
-            font-size: 11px;
-            font-weight: 700;
-            color: var(--text-secondary);
+            font-size: 10.5px;
+            font-weight: 600;
+            color: var(--text-dim);
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.4px;
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 5px;
         }
 
         .card-label svg {
-            width: 14px;
-            height: 14px;
-            stroke: var(--text-secondary);
+            width: 13px;
+            height: 13px;
+            opacity: 0.7;
         }
 
-        /* Badges */
         .badge {
-            font-size: 10px;
+            font-size: 9px;
             font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
             font-family: var(--font-mono);
-            padding: 2.5px 7px;
-            border-radius: 6px;
-            text-transform: uppercase;
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
+            letter-spacing: 0.2px;
         }
 
-        .badge-gold {
-            background: var(--binance-gold-soft);
-            color: var(--binance-gold);
-            border: 1px solid rgba(240, 185, 11, 0.3);
-        }
-
-        .badge-green {
-            background: var(--bull-green-soft);
-            color: var(--bull-green);
-            border: 1px solid rgba(14, 203, 129, 0.3);
-        }
-
-        .badge-red {
-            background: var(--bear-red-soft);
-            color: var(--bear-red);
-            border: 1px solid rgba(246, 70, 93, 0.3);
-        }
-
-        .badge-cyan {
-            background: rgba(56, 189, 248, 0.12);
-            color: var(--cyan-accent);
-            border: 1px solid rgba(56, 189, 248, 0.3);
-        }
-
-        .badge-neutral {
-            background: rgba(255, 255, 255, 0.05);
-            color: var(--text-secondary);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        /* Metric Grid */
-        .metric-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-        }
+        .badge-gold { background: rgba(240, 185, 11, 0.15); color: var(--binance-gold); border: 1px solid rgba(240, 185, 11, 0.3); }
+        .badge-green { background: rgba(14, 203, 129, 0.12); color: var(--bull-green); border: 1px solid rgba(14, 203, 129, 0.3); }
+        .badge-red { background: rgba(246, 70, 93, 0.12); color: var(--bear-red); border: 1px solid rgba(246, 70, 93, 0.3); }
+        .badge-cyan { background: rgba(0, 229, 255, 0.12); color: var(--cyan-accent); border: 1px solid rgba(0, 229, 255, 0.3); }
+        .badge-neutral { background: rgba(255, 255, 255, 0.05); color: var(--text-secondary); border: 1px solid rgba(255, 255, 255, 0.08); }
 
         .metric-value {
-            font-size: 22px;
+            font-size: 19px;
             font-weight: 800;
-            letter-spacing: -0.5px;
             font-family: var(--font-mono);
-            color: var(--text-primary);
-            line-height: 1.1;
-            margin-top: 2px;
+            letter-spacing: -0.5px;
+            color: #ffffff;
+            margin: 2px 0;
         }
 
         .metric-sub {
-            font-size: 11px;
-            color: var(--text-dim);
-            margin-top: 6px;
-            font-family: var(--font-mono);
-            display: flex;
-            align-items: center;
-            gap: 4px;
+            font-size: 10px;
+            color: var(--text-secondary);
+            font-family: var(--font-sans);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
-        /* 2. LIVE POSITION TERMINAL (REPLACES CHART) */
+        /* 3. TERMINAL POSISI AKTIF / SINYAL PRESISI */
         .position-terminal {
-            background: linear-gradient(180deg, #0f141f 0%, #0a0e16 100%);
+            background: var(--bg-card);
             border: 1px solid var(--border-card);
-            border-radius: 18px;
-            padding: 18px;
+            border-radius: 16px;
+            padding: 16px;
             position: relative;
+            overflow: hidden;
         }
 
         .position-terminal.is-open {
-            border-color: rgba(14, 203, 129, 0.35);
-            box-shadow: 0 0 24px rgba(14, 203, 129, 0.08);
+            border-color: rgba(240, 185, 11, 0.4);
+            box-shadow: 0 4px 20px rgba(240, 185, 11, 0.06);
         }
 
         .pos-header-flex {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            margin-bottom: 14px;
+            margin-bottom: 12px;
         }
 
-        .pos-symbol-block h2 {
-            font-size: 18px;
-            font-weight: 800;
-            font-family: var(--font-mono);
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .pos-symbol-block p {
-            font-size: 11px;
-            color: var(--text-secondary);
-            margin-top: 3px;
-        }
-
-        /* Metrics Table in Position */
-        .pos-spec-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-            background: rgba(0, 0, 0, 0.35);
-            padding: 12px;
-            border-radius: 12px;
-            border: 1px solid rgba(255, 255, 255, 0.04);
-            margin-bottom: 14px;
-        }
-
-        .pos-spec-item {
+        .pos-symbol-block {
             display: flex;
             flex-direction: column;
             gap: 3px;
         }
 
+        .pos-symbol-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .pos-symbol-text {
+            font-size: 16px;
+            font-weight: 800;
+            font-family: var(--font-mono);
+            color: #ffffff;
+            letter-spacing: 0.3px;
+        }
+
+        .pos-subtitle {
+            font-size: 11px;
+            color: var(--text-secondary);
+            line-height: 1.4;
+        }
+
+        .pos-pnl-block {
+            text-align: right;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .pos-pnl-val {
+            font-size: 18px;
+            font-weight: 800;
+            font-family: var(--font-mono);
+        }
+
+        .pos-pnl-pct {
+            font-size: 11px;
+            font-family: var(--font-mono);
+            font-weight: 600;
+        }
+
+        /* Grid Spesifikasi Posisi Terbuka */
+        .pos-specs-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+            background: var(--bg-card-sub);
+            border-radius: 12px;
+            padding: 12px;
+            border: 1px solid var(--border-card-subtle);
+            margin-bottom: 12px;
+        }
+
+        .pos-spec-item {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
         .pos-spec-label {
             font-size: 9.5px;
-            font-weight: 600;
-            text-transform: uppercase;
             color: var(--text-dim);
+            text-transform: uppercase;
+            font-weight: 600;
         }
 
         .pos-spec-val {
-            font-size: 12px;
+            font-size: 12.5px;
             font-weight: 700;
             font-family: var(--font-mono);
             color: var(--text-primary);
         }
 
-        /* Price Gauge Bar */
+        /* Gauge SL / TP */
         .gauge-container {
-            margin-top: 10px;
-            background: rgba(0, 0, 0, 0.25);
+            background: rgba(0, 0, 0, 0.35);
             border-radius: 10px;
-            padding: 12px;
-            border: 1px solid rgba(255, 255, 255, 0.04);
+            padding: 10px 12px;
+            border: 1px solid var(--border-card-subtle);
         }
 
         .gauge-label-row {
             display: flex;
             justify-content: space-between;
-            font-size: 10px;
+            font-size: 10.5px;
             font-family: var(--font-mono);
             margin-bottom: 6px;
         }
 
         .gauge-track {
             height: 6px;
-            background: #1e293b;
-            border-radius: 10px;
+            background: #1a2230;
+            border-radius: 3px;
             position: relative;
             overflow: visible;
         }
 
         .gauge-fill {
-            height: 100%;
-            border-radius: 10px;
-            background: linear-gradient(90deg, var(--bear-red) 0%, var(--binance-gold) 50%, var(--bull-green) 100%);
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            background: linear-gradient(90deg, var(--bear-red) 0%, #f0b90b 50%, var(--bull-green) 100%);
+            border-radius: 3px;
             width: 100%;
+            opacity: 0.6;
         }
 
         .gauge-pin {
             position: absolute;
-            top: -4px;
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
+            top: -5px;
+            width: 6px;
+            height: 16px;
             background: #ffffff;
-            border: 2.5px solid var(--cyan-accent);
-            box-shadow: 0 0 8px var(--cyan-accent);
+            border: 2px solid var(--binance-gold);
+            border-radius: 3px;
             transform: translateX(-50%);
-            transition: left 0.4s ease;
+            box-shadow: 0 0 8px rgba(240, 185, 11, 0.8);
+            transition: left 0.3s;
         }
 
-        /* Standby State in Position Terminal */
+        /* Standby Hunting Box */
         .standby-box {
-            padding: 8px 4px;
             display: flex;
             flex-direction: column;
             gap: 12px;
@@ -378,28 +432,31 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .standby-headline {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 12px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-card-subtle);
         }
 
         .standby-icon {
             width: 38px;
             height: 38px;
             border-radius: 10px;
-            background: rgba(56, 189, 248, 0.1);
-            border: 1px solid rgba(56, 189, 248, 0.2);
-            display: grid;
-            place-items: center;
-            color: var(--cyan-accent);
+            background: rgba(240, 185, 11, 0.08);
+            border: 1px solid rgba(240, 185, 11, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--binance-gold);
+            flex-shrink: 0;
         }
 
         .standby-icon svg {
             width: 20px;
             height: 20px;
-            stroke: var(--cyan-accent);
         }
 
         .standby-text h3 {
-            font-size: 14px;
+            font-size: 13.5px;
             font-weight: 700;
             color: var(--text-primary);
         }
@@ -408,59 +465,77 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             font-size: 11px;
             color: var(--text-secondary);
             margin-top: 2px;
+            line-height: 1.4;
         }
 
         .standby-rules-list {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(2, 1fr);
             gap: 8px;
-            margin-top: 4px;
         }
 
         .rule-card {
-            background: rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.04);
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--border-card-subtle);
             border-radius: 10px;
-            padding: 9px 12px;
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
         }
 
-        .rule-card p:first-child {
+        .rule-card .rule-title {
             font-size: 9.5px;
             color: var(--text-dim);
             text-transform: uppercase;
             font-weight: 700;
+            letter-spacing: 0.3px;
         }
 
-        .rule-card p:last-child {
+        .rule-card .rule-val {
             font-size: 12px;
             font-family: var(--font-mono);
             font-weight: 700;
             color: var(--text-primary);
-            margin-top: 3px;
         }
 
-        /* 3. ANIMATED COIN RADAR (CANVAS) */
-        .radar-card {
+        .rule-card .rule-desc {
+            font-size: 10px;
+            color: var(--text-secondary);
+            line-height: 1.35;
+            margin-top: 2px;
+        }
+
+        /* 4. KONSTELASI JARINGAN BUBBLE KOIN (BUKAN RADAR) */
+        .bubble-net-card {
             background: var(--bg-card);
             border: 1px solid var(--border-card);
-            border-radius: 18px;
+            border-radius: 16px;
             padding: 16px;
         }
 
-        #radarCanvas {
+        .bubble-canvas-wrapper {
+            position: relative;
             width: 100%;
-            height: 240px;
+            height: 380px;
+            background: #070a10;
             border-radius: 12px;
-            background: radial-gradient(circle at center, #0e1420 0%, #06090e 100%);
-            border: 1px solid rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        #bubbleCanvas {
+            width: 100%;
+            height: 100%;
             display: block;
         }
 
         .active-scan-footer {
             margin-top: 10px;
             padding: 10px 14px;
-            background: rgba(240, 185, 11, 0.06);
-            border: 1px solid rgba(240, 185, 11, 0.18);
+            background: rgba(240, 185, 11, 0.05);
+            border: 1px solid rgba(240, 185, 11, 0.16);
             border-radius: 12px;
             display: flex;
             justify-content: space-between;
@@ -474,7 +549,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         .active-scan-left span {
-            font-size: 10px;
+            font-size: 9.5px;
             color: var(--text-dim);
             text-transform: uppercase;
             font-weight: 700;
@@ -488,16 +563,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         .active-scan-right {
             text-align: right;
-            font-size: 11px;
+            font-size: 10.5px;
             font-family: var(--font-mono);
             color: var(--text-secondary);
+            line-height: 1.4;
         }
 
-        /* 4. TRADE HISTORY SECTION */
+        /* 5. RIWAYAT POSISI & EKSEKUSI + WIN RATE */
         .history-card {
             background: var(--bg-card);
             border: 1px solid var(--border-card);
-            border-radius: 18px;
+            border-radius: 16px;
             padding: 16px;
         }
 
@@ -507,12 +583,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             padding: 3px;
             border-radius: 10px;
             border: 1px solid rgba(255, 255, 255, 0.05);
-            margin-bottom: 12px;
+            margin: 10px 0;
         }
 
         .history-tab-btn {
             flex: 1;
-            padding: 7px 10px;
+            padding: 8px 10px;
             font-size: 11px;
             font-weight: 700;
             background: none;
@@ -525,30 +601,60 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         .history-tab-btn.active {
             background: var(--bg-card-sub);
-            color: var(--text-primary);
+            color: #ffffff;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        /* Win Rate & Performance Mini Strip */
+        .stats-overview-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+
+        .stat-mini-card {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border-card-subtle);
+            border-radius: 8px;
+            padding: 7px 6px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .stat-mini-label {
+            font-size: 8.5px;
+            color: var(--text-dim);
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .stat-mini-val {
+            font-size: 12px;
+            font-family: var(--font-mono);
+            font-weight: 800;
+            color: #ffffff;
         }
 
         .trade-items-wrapper {
             display: flex;
             flex-direction: column;
             gap: 8px;
-            max-height: 290px;
+            max-height: 310px;
             overflow-y: auto;
         }
 
         .trade-card-item {
-            padding: 11px 14px;
+            padding: 10px 12px;
             background: rgba(255, 255, 255, 0.02);
             border: 1px solid rgba(255, 255, 255, 0.04);
-            border-radius: 12px;
+            border-radius: 10px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-        }
-
-        .trade-card-item:hover {
-            background: rgba(255, 255, 255, 0.04);
         }
 
         .trade-col-left {
@@ -560,14 +666,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .trade-col-left .ticker-row {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             font-weight: 700;
-            font-size: 13px;
+            font-size: 12.5px;
             font-family: var(--font-mono);
         }
 
         .trade-col-left .date-row {
-            font-size: 10px;
+            font-size: 9.5px;
             color: var(--text-dim);
             font-family: var(--font-mono);
         }
@@ -580,18 +686,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         .trade-col-right .pnl-text {
-            font-size: 13.5px;
+            font-size: 13px;
             font-weight: 800;
             font-family: var(--font-mono);
         }
 
         .trade-col-right .price-row {
-            font-size: 10px;
+            font-size: 9.5px;
             color: var(--text-secondary);
             font-family: var(--font-mono);
         }
 
-        /* 5. LOGS TERMINAL */
+        /* 6. LOGS TERMINAL */
         .logs-box-card {
             background: #05070a;
             border: 1px solid var(--border-card);
@@ -599,98 +705,78 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             padding: 14px;
         }
 
-        .logs-box-terminal {
-            font-family: var(--font-mono);
-            font-size: 10.5px;
-            color: #94a3b8;
-            height: 160px;
-            overflow-y: auto;
-            background: #020306;
-            border-radius: 10px;
-            padding: 10px 12px;
-            line-height: 1.5;
-            word-break: break-all;
-            border: 1px solid rgba(255, 255, 255, 0.03);
-            margin-top: 8px;
-        }
-
-        /* Bottom Sticky Bar */
-        .bottom-nav {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            z-index: 200;
-            background: var(--bg-glass);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border-top: 1px solid var(--border-card);
+        .logs-header-row {
             display: flex;
-            justify-content: space-around;
-            padding: 8px 10px 14px;
-            max-width: 600px;
-            margin: 0 auto;
-        }
-
-        .nav-link-btn {
-            background: none;
-            border: none;
-            color: var(--text-dim);
-            font-size: 10px;
-            font-weight: 600;
-            display: flex;
-            flex-direction: column;
+            justify-content: space-between;
             align-items: center;
-            gap: 4px;
-            cursor: pointer;
-            padding: 6px 14px;
+            margin-bottom: 10px;
+        }
+
+        .logs-content {
+            background: #000000;
+            border: 1px solid rgba(255, 255, 255, 0.05);
             border-radius: 10px;
-            transition: all 0.2s;
+            padding: 10px;
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: #79879c;
+            height: 180px;
+            overflow-y: auto;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-all;
         }
 
-        .nav-link-btn.active {
-            color: var(--binance-gold);
-            background: var(--binance-gold-soft);
-        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); }
 
-        .nav-link-btn svg {
-            width: 18px;
-            height: 18px;
-            stroke-width: 2;
-            stroke: currentColor;
-            fill: none;
+        @media (max-width: 480px) {
+            .container { padding: 10px 12px; gap: 12px; }
+            .metric-value { font-size: 17px; }
+            .bubble-canvas-wrapper { height: 340px; }
+            .stats-overview-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
         }
     </style>
 </head>
 <body>
-
-    <!-- Header Topbar -->
-    <header class="topbar">
-        <div class="brand-container">
-            <div class="brand-logo-polygon">
-                <!-- Binance Hexagon Icon -->
-                <svg viewBox="0 0 24 24"><path d="M12 2L4 7v10l8 5 8-5V7l-8-5zm0 3.3L17.7 8 12 11.7 6.3 8 12 5.3zM6 9.8l5 3.3v6.3l-5-3.3V9.8zm12 6.3l-5 3.3v-6.3l5-3.3v6.3z"/></svg>
+    <div class="container">
+        <!-- 1. TOP NAVBAR -->
+        <header class="top-navbar">
+            <div class="brand-block">
+                <div class="brand-icon">
+                    <!-- Binance Diamond Monogram SVG -->
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 2L6 8l2.5 2.5L12 7l3.5 3.5L18 8l-6-6zm0 15l-3.5-3.5L6 16l6 6 6-6-2.5-2.5L12 17zm-6-7l-3.5 3.5L6 17l2.5-2.5L5 11l1-1zm12 0l-1 1 2.5 2.5L18 17l3.5-3.5L18 10zM12 9l-2.5 2.5L12 14l2.5-2.5L12 9z"/>
+                    </svg>
+                </div>
+                <div class="brand-text">
+                    <h1>BINANCE PRO <span class="badge badge-gold">AUTONOMOUS</span></h1>
+                    <p id="topUptime">UPTIME: MEMUAT...</p>
+                </div>
             </div>
-            <div class="brand-meta">
-                <h1>BINANCE FUTURES <span class="badge badge-gold">PRO</span></h1>
-                <p id="topUptime">UPTIME: MEMUAT...</p>
+            <div class="nav-right-meta">
+                <div class="live-status-pill">
+                    <span class="live-dot"></span>
+                    <span id="wsStatusText">427 KOIN LIVE</span>
+                </div>
+                <button class="btn-refresh" onclick="forceSync()" title="Refresh Dashboard">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                    </svg>
+                </button>
             </div>
-        </div>
-        <div class="status-pill">
-            <div class="pulse-indicator"></div>
-            <span id="wsStatusText">829 KOIN LIVE</span>
-        </div>
-    </header>
+        </header>
 
-    <div class="app-container">
-
-        <!-- 1. METRIC CARDS GRID -->
-        <div class="metric-grid" id="sec-metrics">
-            <!-- Saldo Sekarang -->
+        <!-- 2. OVERVIEW METRICS GRID (4 CARDS) -->
+        <section class="metrics-grid">
+            <!-- Card 1: Saldo Dompet -->
             <div class="card">
                 <div class="card-label-row">
                     <span class="card-label">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4M3 5v14a2 2 0 0 0 2 2h16v-5M18 12a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4M3 5v14a2 2 0 0 0 2 2h16v-5M18 12a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg>
                         Saldo Dompet
                     </span>
                     <span class="badge badge-gold">LIVE</span>
@@ -699,100 +785,99 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div class="metric-sub" id="valAvailBal">Tersedia: $0.00 USDT</div>
             </div>
 
-            <!-- Modal Pokok (Auto Top-Up) -->
+            <!-- Card 2: Modal Pokok -->
             <div class="card">
                 <div class="card-label-row">
                     <span class="card-label">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
                         Modal Pokok
                     </span>
                     <span class="badge badge-cyan">P2P SYNC</span>
                 </div>
                 <div class="metric-value" id="valInitialCap">$101.15</div>
-                <div class="metric-sub" id="valTopUpNotice">Auto-Detect Top-Up</div>
+                <div class="metric-sub" id="valTopUpNotice">Sinkronisasi Otomatis Top-Up</div>
             </div>
 
-            <!-- Net Hasil Trading -->
+            <!-- Card 3: Net PnL -->
             <div class="card">
                 <div class="card-label-row">
                     <span class="card-label">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                        Net PnL Riil
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                        Hasil Bersih
                     </span>
                     <span class="badge" id="badgeRoi">0.00%</span>
                 </div>
                 <div class="metric-value" id="valNetPnl">$0.00</div>
-                <div class="metric-sub" id="valPnlSubtext">Selaras Buku Resmi</div>
+                <div class="metric-sub" id="valPnlSubtext">Selaras Buku Resmi Binance</div>
             </div>
 
-            <!-- Mode Modal Buffer / Compounding -->
+            <!-- Card 4: Manajemen Modal -->
             <div class="card">
                 <div class="card-label-row">
                     <span class="card-label">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                        Manajemen Modal
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                        Aturan Modal
                     </span>
-                    <span class="badge badge-neutral" id="badgeMode">BUFFER</span>
+                    <span class="badge badge-neutral" id="badgeMode">BUFFER AKTIF</span>
                 </div>
-                <div class="metric-value" style="font-size: 17px;" id="valModeDesc">Flat $1.00</div>
-                <div class="metric-sub" id="valModeTarget">Comp 1% saat $\ge$ $100</div>
+                <div class="metric-value" style="font-size: 16px;" id="valModeDesc">Flat $1.00 USDT</div>
+                <div class="metric-sub" id="valModeTarget">Compounding 1% aktif saat saldo mencapai $100</div>
             </div>
-        </div>
+        </section>
 
-        <!-- 2. POSISI AKTIF (TERMINAL LENGKAP - PENGGANTI GRAFIK) -->
-        <div class="position-terminal" id="sec-position">
+        <!-- 3. TERMINAL POSISI AKTIF & STATUS HUNTING -->
+        <section class="position-terminal" id="sec-position">
             <div class="pos-header-flex">
                 <div class="pos-symbol-block">
-                    <h2 id="posSymbolTitle">
-                        <span id="posTypeBadge" class="badge badge-neutral">STANDBY</span>
-                        <span id="posSymbolText">Tidak Ada Posisi Terbuka</span>
-                    </h2>
-                    <p id="posSubtitle">Mesin otonom siap mengeksekusi order saat kriteria terpenuhi.</p>
+                    <div class="pos-symbol-row">
+                        <span class="badge badge-neutral" id="posTypeBadge">STANDBY</span>
+                        <span class="pos-symbol-text" id="posSymbolText">Menunggu Sinyal Presisi</span>
+                        <span class="badge badge-gold" id="posLevBadge">50X ISOLATED</span>
+                    </div>
+                    <div class="pos-subtitle" id="posSubtitle">
+                        Sedang menyisir semesta koin mencari setup konfluensi tinggi (Minimal Skor 80/100).
+                    </div>
                 </div>
-                <span class="badge badge-gold" id="posLevBadge">50X ISOLATED</span>
+                <div class="pos-pnl-block" id="posPnlBlock" style="display: none;">
+                    <span class="pos-pnl-val" id="posPnlVal">$0.00</span>
+                    <span class="pos-pnl-pct" id="posPnlPct">0.00%</span>
+                </div>
             </div>
 
-            <!-- A. TAMPILAN SAAT POSISI SEDANG TERBUKA (ACTIVE TRADE) -->
+            <!-- A. POSISI TERBUKA (LIVE TRADE) -->
             <div id="viewPosOpen" style="display: none;">
-                <div class="pos-spec-grid">
+                <div class="pos-specs-grid">
                     <div class="pos-spec-item">
-                        <span class="pos-spec-label">Margin Digunakan</span>
-                        <span class="pos-spec-val" id="specMargin">$1.00 USDT</span>
+                        <span class="pos-spec-label">Margin Terpakai</span>
+                        <span class="pos-spec-val" id="specMargin">$0.00 USDT</span>
                     </div>
                     <div class="pos-spec-item">
-                        <span class="pos-spec-label">Nilai Notional</span>
-                        <span class="pos-spec-val" id="specNotional">$50.00 USDT</span>
+                        <span class="pos-spec-label">Ukuran Posisi (Notional)</span>
+                        <span class="pos-spec-val" id="specNotional">$0.00 USDT</span>
                     </div>
                     <div class="pos-spec-item">
                         <span class="pos-spec-label">Harga Entry</span>
                         <span class="pos-spec-val" id="specEntry">$0.00</span>
                     </div>
                     <div class="pos-spec-item">
-                        <span class="pos-spec-label">Mark Price</span>
+                        <span class="pos-spec-label">Harga Pasar Terkini</span>
                         <span class="pos-spec-val" id="specMark">$0.00</span>
                     </div>
-                </div>
-
-                <div class="pos-spec-grid">
                     <div class="pos-spec-item">
-                        <span class="pos-spec-label">Unrealized PnL</span>
-                        <span class="pos-spec-val" id="specUnPnl" style="color: var(--bull-green);">+$0.00</span>
+                        <span class="pos-spec-label">Target Take Profit (+2.5%)</span>
+                        <span class="pos-spec-val" style="color: var(--bull-green);" id="specTp">$0.00</span>
                     </div>
                     <div class="pos-spec-item">
-                        <span class="pos-spec-label">Target Take Profit</span>
-                        <span class="pos-spec-val" id="specTp" style="color: var(--bull-green);">$0.00</span>
+                        <span class="pos-spec-label">Batas Stop Loss (-1.0%)</span>
+                        <span class="pos-spec-val" style="color: var(--bear-red);" id="specSl">$0.00</span>
                     </div>
-                    <div class="pos-spec-item">
-                        <span class="pos-spec-label">Batas Stop Loss</span>
-                        <span class="pos-spec-val" id="specSl" style="color: var(--bear-red);">$0.00</span>
-                    </div>
-                    <div class="pos-spec-item">
-                        <span class="pos-spec-label">Harga Likuidasi</span>
-                        <span class="pos-spec-val" id="specLiq">$0.00</span>
+                    <div class="pos-spec-item" style="grid-column: span 2;">
+                        <span class="pos-spec-label">Estimasi Harga Likuidasi</span>
+                        <span class="pos-spec-val" id="specLiq" style="color: var(--binance-gold);">$0.00</span>
                     </div>
                 </div>
 
-                <!-- SL - Entry - TP Gauge -->
+                <!-- SL - Entry - TP Visual Gauge -->
                 <div class="gauge-container">
                     <div class="gauge-label-row">
                         <span style="color: var(--bear-red);">SL: <strong id="gaugeSlVal">0.00</strong></span>
@@ -806,359 +891,497 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- B. TAMPILAN SAAT STANDBY (HUNTING MODE) -->
+            <!-- B. TAMPILAN STANDBY (PENCARIAN SINYAL AKTIF) -->
             <div id="viewPosStandby" class="standby-box">
                 <div class="standby-headline">
                     <div class="standby-icon">
-                        <!-- Crosshair / Radar Target SVG -->
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><path d="M22 12h-4M6 12H2M12 6V2M12 22v-4"/><circle cx="12" cy="12" r="3"/></svg>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/><path d="M22 12h-4M6 12H2M12 6V2M12 22v-4"/><circle cx="12" cy="12" r="3"/>
+                        </svg>
                     </div>
                     <div class="standby-text">
                         <h3>Pencarian Sinyal Kalimasada Aktif</h3>
-                        <p>Memindai 500 koin semesta. Hanya membuka posisi saat skor konfluensi $\ge$ 80.</p>
+                        <p>Memindai 500 koin semesta 24/7. Hanya membuka posisi saat skor konfluensi mencapai minimal 80 dari 100.</p>
                     </div>
                 </div>
 
                 <div class="standby-rules-list">
+                    <!-- Rule 1: Margin -->
                     <div class="rule-card">
-                        <p>Alokasi Margin Posisi</p>
-                        <p id="ruleMarginVal">Tepat $1.00 USDT</p>
+                        <span class="rule-title">Alokasi Margin Posisi</span>
+                        <span class="rule-val" id="ruleMarginVal">Tepat $1.00 USDT</span>
+                        <span class="rule-desc" id="ruleMarginDesc">Mode Buffer: Saldo di bawah $100 USDT, alokasi dipatok tetap $1.00 per posisi agar modal aman.</span>
                     </div>
+
+                    <!-- Rule 2: Leverage -->
                     <div class="rule-card">
-                        <p>Target Leverage</p>
-                        <p id="ruleLevVal">50x Isolated Margin</p>
+                        <span class="rule-title">Target Leverage Adaptif</span>
+                        <span class="rule-val" id="ruleLevVal">Maksimal 50x (20x - 50x)</span>
+                        <span class="rule-desc" id="ruleLevDesc">Sistem menembak 50x. Jika Binance membatasi koin tersebut, bot otomatis menurunkan bertahap hingga batas izin (minimal 20x).</span>
                     </div>
+
+                    <!-- Rule 3: Rasio Profit & Rugi -->
                     <div class="rule-card">
-                        <p>Risk / Reward Rasio</p>
-                        <p>1:2.0 Net Bersih</p>
+                        <span class="rule-title">Target Profit & Stop Loss</span>
+                        <span class="rule-val">TP +2.5% | SL -1.0%</span>
+                        <span class="rule-desc">Rasio Risk to Reward 1 : 2.5 (Potensi profit 2.5 kali lebih besar dari risiko kerugian).</span>
                     </div>
+
+                    <!-- Rule 4: Proteksi Drawdown -->
                     <div class="rule-card">
-                        <p>Proteksi Drawdown</p>
-                        <p>Circuit Breaker 36 Jam</p>
+                        <span class="rule-title">Proteksi Drawdown Modal</span>
+                        <span class="rule-val">Stop Loss 1% & Circuit Breaker</span>
+                        <span class="rule-desc">Posisi langsung dipotong rugi jika minus 1% dari margin ($0.01 saat margin $1.00). Jeda otomatis jika 3 kali rugi beruntun.</span>
                     </div>
                 </div>
             </div>
-        </div>
+        </section>
 
-        <!-- 3. ANIMATED COIN RADAR (CANVAS) -->
-        <div class="radar-card" id="sec-radar">
+        <!-- 4. KONSTELASI JARINGAN BUBBLE KOIN (BUKAN RADAR) -->
+        <section class="bubble-net-card" id="sec-bubbles">
             <div class="card-label-row">
                 <span class="card-label">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>
-                    Radar Jaringan Koin (Multi-Timeframe 15m, 1h, 4h)
+                    <!-- Connected Nodes / Constellation SVG -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                        <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+                    </svg>
+                    Jaringan Konstelasi Bubble Koin (Multi-Timeframe)
                 </span>
                 <span class="badge badge-gold" id="badgeRotNumber">ROTASI --/500</span>
             </div>
 
-            <canvas id="radarCanvas"></canvas>
+            <!-- Canvas Jaringan Bubble Luas & Renggang -->
+            <div class="bubble-canvas-wrapper">
+                <canvas id="bubbleCanvas"></canvas>
+            </div>
 
             <div class="active-scan-footer">
                 <div class="active-scan-left">
-                    <span>Target Analisis Saat Ini</span>
+                    <span>Koin yang Sedang Dianalisis</span>
                     <strong id="liveActiveSymbol">--USDT</strong>
                 </div>
                 <div class="active-scan-right" id="liveActiveMetrics">
-                    Kedalaman 1.000 Candle | S&R Teruji
+                    Memuat Analisis Multi-Timeframe 15m, 1h, 4h...
                 </div>
             </div>
-        </div>
+        </section>
 
-        <!-- 4. RIWAYAT POSISI & EKSEKUSI (MULAI DARI SEKARANG SAJA) -->
-        <div class="history-card" id="sec-trades">
+        <!-- 5. RIWAYAT POSISI & EKSEKUSI (DENGAN WIN RATE) -->
+        <section class="history-card" id="sec-trades">
             <div class="card-label-row">
                 <span class="card-label">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                    </svg>
                     Riwayat Posisi & Eksekusi
                 </span>
-                <span class="badge badge-neutral" id="tradeSummaryPill">0 TRADE SESI INI</span>
+                <span class="badge badge-neutral" id="tradeSummaryPill">0 TRADE</span>
             </div>
 
-            <!-- Segmented Filter Tab: Mulai Dari Sekarang vs Semua -->
+            <!-- Tab Switcher: Sesi VPS Terkini vs Seluruh Riwayat -->
             <div class="history-tab-group">
                 <button class="history-tab-btn active" id="tabVpsSession" onclick="switchTradeTab('session')">Sesi VPS Terkini</button>
                 <button class="history-tab-btn" id="tabAllHistory" onclick="switchTradeTab('all')">Seluruh Riwayat (113 Trade)</button>
             </div>
 
-            <!-- Container List Trades -->
-            <div class="trade-items-wrapper" id="tradesContainer">
-                <div style="text-align: center; padding: 25px 10px; color: var(--text-dim); font-size: 11.5px;">
-                    Memuat riwayat trade...
+            <!-- Performance Win Rate Mini Strip -->
+            <div class="stats-overview-grid">
+                <div class="stat-mini-card">
+                    <span class="stat-mini-label">WIN RATE</span>
+                    <span class="stat-mini-val" id="statWinRate" style="color: var(--bull-green);">0.0%</span>
+                </div>
+                <div class="stat-mini-card">
+                    <span class="stat-mini-label">TOTAL EKSEKUSI</span>
+                    <span class="stat-mini-val" id="statTotalTrades">0 Trade</span>
+                </div>
+                <div class="stat-mini-card">
+                    <span class="stat-mini-label">WIN / LOSS</span>
+                    <span class="stat-mini-val" id="statWinLoss">0W / 0L</span>
+                </div>
+                <div class="stat-mini-card">
+                    <span class="stat-mini-label">TOTAL PNL</span>
+                    <span class="stat-mini-val" id="statNetPnlTrade">$0.00</span>
                 </div>
             </div>
-        </div>
 
-        <!-- 5. TERMINAL LOGS SERVER -->
-        <div class="logs-box-card" id="sec-logs">
-            <div class="card-label-row">
+            <!-- Kontainer Daftar Transaksi -->
+            <div class="trade-items-wrapper" id="tradesContainer">
+                <div style="text-align: center; padding: 24px; color: var(--text-dim); font-size: 11px;">
+                    Memuat riwayat transaksi...
+                </div>
+            </div>
+        </section>
+
+        <!-- 6. LIVE ENGINE LOGS -->
+        <section class="logs-box-card" id="sec-logs">
+            <div class="logs-header-row">
                 <span class="card-label">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-                    Terminal Logs VPS (Real-Time)
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+                    </svg>
+                    Feed Log Mesin VPS
                 </span>
-                <span class="badge badge-neutral" style="font-size: 9.5px;">SYSTEMD 24/7</span>
+                <span class="badge badge-neutral" id="logScrollBadge">AUTO-SCROLL ON</span>
             </div>
-            <div class="logs-box-terminal" id="terminalLogsBox">
-                Memuat baris log backend...
-            </div>
-        </div>
-
+            <div class="logs-content" id="terminalLogs">Menghubungkan stream log...</div>
+        </section>
     </div>
 
-    <!-- Bottom Sticky Mobile Navigation -->
-    <nav class="bottom-nav">
-        <button class="nav-link-btn active" onclick="jumpToSection('sec-metrics', this)">
-            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-            <span>Overview</span>
-        </button>
-        <button class="nav-link-btn" onclick="jumpToSection('sec-position', this)">
-            <svg viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
-            <span>Posisi</span>
-        </button>
-        <button class="nav-link-btn" onclick="jumpToSection('sec-radar', this)">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
-            <span>Radar</span>
-        </button>
-        <button class="nav-link-btn" onclick="jumpToSection('sec-trades', this)">
-            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-            <span>Riwayat</span>
-        </button>
-        <button class="nav-link-btn" onclick="jumpToSection('sec-logs', this)">
-            <svg viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-            <span>Logs</span>
-        </button>
-    </nav>
-
-    <!-- Client Script Logic -->
     <script>
-        function jumpToSection(id, btn) {
-            document.querySelectorAll('.nav-link-btn').forEach(b => b.classList.remove('active'));
-            if(btn) btn.classList.add('active');
-            const el = document.getElementById(id);
-            if (el) {
-                const yOffset = -70;
-                const y = el.getBoundingClientRect().top + window.pageYOffset + yOffset;
-                window.scrollTo({top: y, behavior: 'smooth'});
-            }
-        }
+        // --- GLOBAL APP STATE ---
+        let rawTradeList = [];
+        let activeTradeTab = 'session';
+        let liveTargetSymbol = 'BTCUSDT';
+        let currentCoinData = null;
+        let lastKnownWallet = 99.54;
+        let tick = 0;
 
-        // --- 1. RADAR CANVAS ANIMATION ENGINE (60 FPS) ---
-        const rCanvas = document.getElementById('radarCanvas');
-        const rCtx = rCanvas.getContext('2d');
-        const dpr = window.devicePixelRatio || 1;
-        let cW = 0, cH = 0;
+        // --- 1. JARINGAN KONSTELASI BUBBLE KOIN (BUKAN RADAR) ---
+        const canvas = document.getElementById('bubbleCanvas');
+        const ctx = canvas.getContext('2d');
 
-        function resizeRadar() {
-            const rect = rCanvas.getBoundingClientRect();
-            cW = rect.width;
-            cH = rect.height;
-            rCanvas.width = cW * dpr;
-            rCanvas.height = cH * dpr;
-            rCtx.scale(dpr, dpr);
-        }
-        window.addEventListener('resize', resizeRadar);
-        resizeRadar();
-
-        let liveTargetSymbol = "LINKUSDT";
-        let radarCoins = [
-            { sym: "BTC", struct: "SIDEWAYS", angle: 0.1, distRatio: 0.38, speed: 0.003 },
-            { sym: "ETH", struct: "SIDEWAYS", angle: 0.8, distRatio: 0.36, speed: 0.0035 },
-            { sym: "SOL", struct: "BULLISH", angle: 1.4, distRatio: 0.39, speed: 0.0028 },
-            { sym: "LINK", struct: "SIDEWAYS", angle: 2.1, distRatio: 0.37, speed: 0.0032 },
-            { sym: "PUMP", struct: "BEARISH", angle: 2.7, distRatio: 0.38, speed: 0.004 },
-            { sym: "DOGE", struct: "SIDEWAYS", angle: 3.4, distRatio: 0.35, speed: 0.0031 },
-            { sym: "AVAX", struct: "BULLISH", angle: 4.1, distRatio: 0.39, speed: 0.0027 },
-            { sym: "NEAR", struct: "BULLISH", angle: 4.8, distRatio: 0.37, speed: 0.0034 },
-            { sym: "AAVE", struct: "UPTREND", angle: 5.5, distRatio: 0.38, speed: 0.0029 }
+        // Kumpulan awal koin-koin crypto semesta populer
+        const INITIAL_COINS = [
+            'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'DOGE', 'ADA', 'AVAX', 'LINK', 'SUI',
+            'NEAR', 'PEPE', 'WIF', 'TIA', 'INJ', 'OP', 'ARB', 'APT', 'RENDER', 'FET',
+            'FTM', 'SEI', 'GALA', 'STX', 'LDO', 'AR', 'RUNE', 'KAS', 'DYDX', 'JUP',
+            'PYTH', 'WLD', 'AAVE', 'UNI', 'PENDLE', 'TON', 'LTC', 'BCH', 'FIL', 'ATOM',
+            'DOT', 'CRV', 'BLUR', 'SAND', 'MANA', 'GRT', 'ALGO', 'ICP', 'QNT', 'THETA'
         ];
 
-        let tick = 0;
-        function renderRadar() {
-            tick++;
-            rCtx.clearRect(0, 0, cW, cH);
-            const midX = cW / 2;
-            const midY = cH / 2;
-            const maxR = Math.min(cW, cH) * 0.42;
+        let bubbleList = [];
+        let canvasW = 600;
+        let canvasH = 380;
 
-            // 1. Dotted concentric radar circles
-            for (let r = 0.2; r <= 0.85; r += 0.22) {
-                rCtx.strokeStyle = "rgba(255, 255, 255, 0.04)";
-                rCtx.lineWidth = 1;
-                rCtx.setLineDash([2, 4]);
-                rCtx.beginPath();
-                rCtx.arc(midX, midY, maxR * r, 0, Math.PI * 2);
-                rCtx.stroke();
-            }
-            rCtx.setLineDash([]);
-
-            // 2. Dynamic radar sweep line
-            const sweepAngle = (tick * 0.015) % (Math.PI * 2);
-            rCtx.strokeStyle = "rgba(240, 185, 11, 0.15)";
-            rCtx.lineWidth = 1.5;
-            rCtx.beginPath();
-            rCtx.moveTo(midX, midY);
-            rCtx.lineTo(midX + Math.cos(sweepAngle) * maxR, midY + Math.sin(sweepAngle) * maxR);
-            rCtx.stroke();
-
-            // 3. Find active target node
-            let targetNode = null;
-            radarCoins.forEach(coin => {
-                coin.angle += coin.speed;
-                const d = maxR * coin.distRatio;
-                coin.x = midX + Math.cos(coin.angle) * d;
-                coin.y = midY + Math.sin(coin.angle) * d;
-
-                const cleanTarget = liveTargetSymbol.replace("USDT","");
-                if (coin.sym === cleanTarget || coin.sym + "USDT" === liveTargetSymbol) {
-                    targetNode = coin;
-                }
-            });
-
-            // 4. Energy Beam from BINANCE HUB to Active Target
-            if (targetNode) {
-                // Outer glow beam
-                rCtx.strokeStyle = "rgba(240, 185, 11, 0.75)";
-                rCtx.lineWidth = 2;
-                rCtx.shadowColor = "#F0B90B";
-                rCtx.shadowBlur = 10;
-                rCtx.beginPath();
-                rCtx.moveTo(midX, midY);
-                rCtx.lineTo(targetNode.x, targetNode.y);
-                rCtx.stroke();
-                rCtx.shadowBlur = 0;
-
-                // Moving particle packet
-                const partProgress = (tick % 45) / 45;
-                const partX = midX + (targetNode.x - midX) * partProgress;
-                const partY = midY + (targetNode.y - midY) * partProgress;
-                rCtx.fillStyle = "#ffffff";
-                rCtx.beginPath();
-                rCtx.arc(partX, partY, 3, 0, Math.PI * 2);
-                rCtx.fill();
-            }
-
-            // 5. Draw Binance Core Hub
-            const hubPulse = 18 + Math.sin(tick * 0.06) * 3;
-            rCtx.fillStyle = "rgba(240, 185, 11, 0.12)";
-            rCtx.beginPath();
-            rCtx.arc(midX, midY, hubPulse + 8, 0, Math.PI * 2);
-            rCtx.fill();
-
-            // Core Polygon
-            rCtx.fillStyle = "#F0B90B";
-            rCtx.shadowColor = "rgba(240, 185, 11, 0.5)";
-            rCtx.shadowBlur = 14;
-            rCtx.beginPath();
-            rCtx.arc(midX, midY, 18, 0, Math.PI * 2);
-            rCtx.fill();
-            rCtx.shadowBlur = 0;
-
-            // Core Label
-            rCtx.fillStyle = "#000000";
-            rCtx.font = "bold 8.5px 'JetBrains Mono'";
-            rCtx.textAlign = "center";
-            rCtx.textBaseline = "middle";
-            rCtx.fillText("BINANCE", midX, midY);
-
-            // 6. Draw Orbiting Coin Satellites
-            radarCoins.forEach(coin => {
-                const isTarget = (coin === targetNode);
-                const nRadius = isTarget ? 15 : 12;
-
-                if (isTarget) {
-                    rCtx.strokeStyle = "#F0B90B";
-                    rCtx.lineWidth = 2;
-                    rCtx.shadowColor = "#F0B90B";
-                    rCtx.shadowBlur = 8;
-                    rCtx.beginPath();
-                    rCtx.arc(coin.x, coin.y, nRadius + 4, 0, Math.PI * 2);
-                    rCtx.stroke();
-                    rCtx.shadowBlur = 0;
-                }
-
-                let color = "#334155";
-                if (coin.struct.includes("BULL") || coin.struct.includes("UP")) color = "#0ecb81";
-                else if (coin.struct.includes("BEAR") || coin.struct.includes("DOWN")) color = "#f6465d";
-                else color = "#38bdf8";
-
-                if (isTarget) color = "#F0B90B";
-
-                rCtx.fillStyle = color;
-                rCtx.beginPath();
-                rCtx.arc(coin.x, coin.y, nRadius, 0, Math.PI * 2);
-                rCtx.fill();
-
-                rCtx.fillStyle = "#0b1017";
-                rCtx.beginPath();
-                rCtx.arc(coin.x, coin.y, nRadius - 2.5, 0, Math.PI * 2);
-                rCtx.fill();
-
-                rCtx.fillStyle = isTarget ? "#F0B90B" : "#f8fafc";
-                rCtx.font = isTarget ? "bold 9px 'JetBrains Mono'" : "600 8px 'JetBrains Mono'";
-                rCtx.textAlign = "center";
-                rCtx.textBaseline = "middle";
-                rCtx.fillText(coin.sym, coin.x, coin.y);
-            });
-
-            requestAnimationFrame(renderRadar);
+        function resizeCanvas() {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            canvasW = rect.width;
+            canvasH = rect.height;
+            canvas.width = canvasW * dpr;
+            canvas.height = canvasH * dpr;
+            ctx.scale(dpr, dpr);
+            redistributeBubblesIfEmpty();
         }
-        renderRadar();
 
-        // --- 2. DATA POLLING & POSITION LOGIC ---
-        let rawTradeList = [];
-        let activeTradeTab = 'session'; // 'session' or 'all'
+        window.addEventListener('resize', resizeCanvas);
 
-        async function fetchDashboard() {
+        // Inisialisasi bubble dengan penyebaran luas (jarak lega, tidak mepet)
+        function initBubbles() {
+            bubbleList = [];
+            const centerX = canvasW / 2;
+            const centerY = canvasH / 2;
+            const minCenterDist = 65; // Jarak minimal dari hub Binance tengah
+
+            INITIAL_COINS.forEach((sym, idx) => {
+                const b = createSpacedBubble(sym, centerX, centerY, minCenterDist);
+                bubbleList.push(b);
+            });
+        }
+
+        function createSpacedBubble(sym, centerX, centerY, minCenterDist) {
+            let posX = 0, posY = 0, valid = false, attempts = 0;
+            const margin = 28;
+
+            while (!valid && attempts < 100) {
+                attempts++;
+                posX = margin + Math.random() * (canvasW - margin * 2);
+                posY = margin + Math.random() * (canvasH - margin * 2);
+
+                const distCenter = Math.hypot(posX - centerX, posY - centerY);
+                if (distCenter < minCenterDist) continue;
+
+                // Cek jarak dengan bubble lain agar tidak mepet (minimal 42px)
+                let tooClose = false;
+                for (let other of bubbleList) {
+                    if (Math.hypot(posX - other.baseX, posY - other.baseY) < 42) {
+                        tooClose = true;
+                        break;
+                    }
+                }
+                if (!tooClose) valid = true;
+            }
+
+            return {
+                sym: sym,
+                baseX: posX,
+                baseY: posY,
+                x: posX,
+                y: posY,
+                radius: 13,
+                floatSpeedX: 0.012 + Math.random() * 0.01,
+                floatSpeedY: 0.01 + Math.random() * 0.012,
+                phaseX: Math.random() * Math.PI * 2,
+                phaseY: Math.random() * Math.PI * 2,
+                ampX: 7 + Math.random() * 5,
+                ampY: 6 + Math.random() * 5,
+                analyzed: false,
+                score: 50
+            };
+        }
+
+        function redistributeBubblesIfEmpty() {
+            if (bubbleList.length === 0) {
+                initBubbles();
+            } else {
+                // Skala ulang posisi dasar bubble mengikuti dimensi canvas baru
+                const centerX = canvasW / 2;
+                const centerY = canvasH / 2;
+                bubbleList.forEach(b => {
+                    b.baseX = Math.min(canvasW - 30, Math.max(30, b.baseX));
+                    b.baseY = Math.min(canvasH - 30, Math.max(30, b.baseY));
+                });
+            }
+        }
+
+        // Animasi Loop Konstelasi Bubble Koin (60 FPS)
+        function animateBubbleNetwork() {
+            tick++;
+            ctx.clearRect(0, 0, canvasW, canvasH);
+
+            const centerX = canvasW / 2;
+            const centerY = canvasH / 2;
+
+            // 1. Gambar latar belakang halus bintang / partikel redup
+            ctx.fillStyle = "rgba(255, 255, 255, 0.03)";
+            for (let i = 0; i < 20; i++) {
+                const sx = (Math.sin(i * 99 + tick * 0.002) * 0.5 + 0.5) * canvasW;
+                const sy = (Math.cos(i * 77 + tick * 0.002) * 0.5 + 0.5) * canvasH;
+                ctx.fillRect(sx, sy, 1.5, 1.5);
+            }
+
+            // 2. Tentukan target bubble yang sedang dianalisis
+            const cleanTarget = liveTargetSymbol.replace("USDT", "").trim();
+            let activeBubble = null;
+
+            // Cari di daftar bubble, jika belum ada, buat bubble baru (bubble tetap standby)
+            for (let b of bubbleList) {
+                if (b.sym === cleanTarget) {
+                    activeBubble = b;
+                    break;
+                }
+            }
+
+            if (!activeBubble && cleanTarget && cleanTarget !== "--") {
+                activeBubble = createSpacedBubble(cleanTarget, centerX, centerY, 65);
+                activeBubble.sym = cleanTarget;
+                bubbleList.push(activeBubble);
+            }
+
+            // 3. Update posisi gerak apung alami seluruh bubble
+            bubbleList.forEach(b => {
+                b.x = b.baseX + Math.sin(tick * b.floatSpeedX + b.phaseX) * b.ampX;
+                b.y = b.baseY + Math.cos(tick * b.floatSpeedY + b.phaseY) * b.ampY;
+
+                // Batas kanvas agar tidak keluar area
+                b.x = Math.max(20, Math.min(canvasW - 20, b.x));
+                b.y = Math.max(20, Math.min(canvasH - 20, b.y));
+            });
+
+            // 4. GAMBAR TALI JARINGAN KONEKSI DARI BINANCE KE KOIN AKTIF
+            if (activeBubble) {
+                activeBubble.analyzed = true;
+                if (currentCoinData && currentCoinData.score) {
+                    activeBubble.score = currentCoinData.score;
+                }
+
+                // A. Garis luar bercahaya emas (Aura Glow Line)
+                ctx.strokeStyle = "rgba(240, 185, 11, 0.35)";
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.moveTo(centerX, centerY);
+                ctx.lineTo(activeBubble.x, activeBubble.y);
+                ctx.stroke();
+
+                // B. Tali inti bersinar (Core Beam)
+                ctx.strokeStyle = "rgba(255, 235, 150, 0.95)";
+                ctx.lineWidth = 1.5;
+                ctx.shadowColor = "#f0b90b";
+                ctx.shadowBlur = 8;
+                ctx.beginPath();
+                ctx.moveTo(centerX, centerY);
+                ctx.lineTo(activeBubble.x, activeBubble.y);
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+
+                // C. Partikel data bergerak mengalir di tali dari Binance ke koin
+                const particleCount = 2;
+                for (let p = 0; p < particleCount; p++) {
+                    const progress = ((tick * 1.5 + p * 30) % 60) / 60;
+                    const px = centerX + (activeBubble.x - centerX) * progress;
+                    const py = centerY + (activeBubble.y - centerY) * progress;
+
+                    ctx.fillStyle = "#ffffff";
+                    ctx.shadowColor = "#ffffff";
+                    ctx.shadowBlur = 6;
+                    ctx.beginPath();
+                    ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+                }
+
+                // D. Gelombang pulsa melingkar di koin target (Expanding Ripple)
+                const ripple = (tick % 40) / 40;
+                ctx.strokeStyle = `rgba(240, 185, 11, ${1 - ripple})`;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(activeBubble.x, activeBubble.y, 16 + ripple * 16, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+            // 5. GAMBAR SELURUH BUBBLE KOIN (STANDBY DI KANVAS)
+            bubbleList.forEach(b => {
+                const isActive = (b === activeBubble);
+                const r = isActive ? 16 + Math.sin(tick * 0.08) * 1.5 : b.radius;
+
+                // A. Background Lingkaran Bubble
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, r, 0, Math.PI * 2);
+
+                if (isActive) {
+                    ctx.fillStyle = "rgba(240, 185, 11, 0.25)";
+                    ctx.shadowColor = "rgba(240, 185, 11, 0.6)";
+                    ctx.shadowBlur = 12;
+                } else if (b.analyzed && b.score >= 65) {
+                    ctx.fillStyle = "rgba(14, 203, 129, 0.14)";
+                    ctx.shadowBlur = 0;
+                } else {
+                    ctx.fillStyle = "rgba(18, 24, 35, 0.85)";
+                    ctx.shadowBlur = 0;
+                }
+                ctx.fill();
+
+                // B. Border Lingkaran
+                ctx.lineWidth = isActive ? 1.8 : 1;
+                if (isActive) {
+                    ctx.strokeStyle = "#F0B90B";
+                } else if (b.analyzed && b.score >= 65) {
+                    ctx.strokeStyle = "rgba(14, 203, 129, 0.4)";
+                } else {
+                    ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+                }
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+
+                // C. Teks Simbol Koin di Tengah Bubble
+                ctx.font = isActive ? "bold 9px 'JetBrains Mono'" : "500 8px 'JetBrains Mono'";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillStyle = isActive ? "#FFFFFF" : "rgba(234, 236, 239, 0.75)";
+                ctx.fillText(b.sym, b.x, b.y);
+
+                // D. Skor kecil di atas bubble jika aktif
+                if (isActive && currentCoinData && currentCoinData.score) {
+                    ctx.font = "bold 8px 'JetBrains Mono'";
+                    ctx.fillStyle = "#F0B90B";
+                    ctx.fillText(`${currentCoinData.score}/100`, b.x, b.y - r - 5);
+                }
+            });
+
+            // 6. GAMBAR NODE HUB PUSAT BINANCE CORE
+            const hubPulse = 20 + Math.sin(tick * 0.05) * 2;
+            
+            // Outer Halo
+            ctx.fillStyle = "rgba(240, 185, 11, 0.12)";
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, hubPulse + 8, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Core Solid
+            ctx.fillStyle = "#121721";
+            ctx.strokeStyle = "#F0B90B";
+            ctx.lineWidth = 2;
+            ctx.shadowColor = "rgba(240, 185, 11, 0.6)";
+            ctx.shadowBlur = 14;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, 20, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            // Center Monogram Text
+            ctx.font = "bold 9px 'Plus Jakarta Sans'";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillStyle = "#F0B90B";
+            ctx.fillText("BINANCE", centerX, centerY);
+
+            requestAnimationFrame(animateBubbleNetwork);
+        }
+
+        // --- 2. LIVE DASHBOARD DATA SYNC ---
+        async function fetchDashboardSummary() {
             try {
                 const res = await fetch('/api/dashboard-summary');
                 if (!res.ok) return;
                 const d = await res.json();
 
-                // 1. Balance & Capital
-                const cur = parseFloat(d.current_balance || 99.5399);
-                const init = parseFloat(d.initial_capital || 101.15);
-                const avail = parseFloat(d.available_balance || cur);
-                const net = parseFloat(d.net_pnl_usd || (cur - init));
-                const roi = parseFloat(d.roi_pct || ((net / init) * 100));
+                // 1. Saldo Dompet & Modal Pokok
+                const curBal = parseFloat(d.current_balance || 99.54);
+                lastKnownWallet = curBal;
+                document.getElementById('valCurrentBal').textContent = `$${curBal.toFixed(2)}`;
+                document.getElementById('valAvailBal').textContent = `Tersedia: $${parseFloat(d.available_balance || curBal).toFixed(2)} USDT`;
 
-                document.getElementById('valCurrentBal').textContent = '$' + cur.toFixed(2);
-                document.getElementById('valAvailBal').textContent = `Tersedia: $${avail.toFixed(2)} USDT`;
-                document.getElementById('valInitialCap').textContent = '$' + init.toFixed(2);
-                document.getElementById('valTopUpNotice').textContent = `Setoran Pokok: $${init.toFixed(2)}`;
+                const initCap = parseFloat(d.initial_capital || 101.15);
+                document.getElementById('valInitialCap').textContent = `$${initCap.toFixed(2)}`;
 
-                // 2. Net PnL Styling
-                const pnlEl = document.getElementById('valNetPnl');
-                const roiBadge = document.getElementById('badgeRoi');
-                pnlEl.textContent = (net >= 0 ? '+$' : '-$') + Math.abs(net).toFixed(2);
-                roiBadge.textContent = (roi >= 0 ? '+' : '') + roi.toFixed(2) + '%';
+                // 2. Net PnL & ROI
+                const netPnl = parseFloat(d.net_pnl_usd || (curBal - initCap));
+                const roiPct = parseFloat(d.roi_pct || ((netPnl / initCap) * 100));
+                const elPnl = document.getElementById('valNetPnl');
+                const badgeRoi = document.getElementById('badgeRoi');
 
-                if (net >= 0) {
-                    pnlEl.style.color = 'var(--bull-green)';
-                    roiBadge.className = 'badge badge-green';
+                const pnlSign = netPnl >= 0 ? '+' : '';
+                elPnl.textContent = `${pnlSign}$${netPnl.toFixed(2)} USDT`;
+                badgeRoi.textContent = `${pnlSign}${roiPct.toFixed(2)}%`;
+
+                if (netPnl >= 0) {
+                    elPnl.style.color = "var(--bull-green)";
+                    badgeRoi.className = "badge badge-green";
                 } else {
-                    pnlEl.style.color = 'var(--bear-red)';
-                    roiBadge.className = 'badge badge-red';
+                    elPnl.style.color = "var(--bear-red)";
+                    badgeRoi.className = "badge badge-red";
                 }
 
-                // 3. Modal Mode (Buffer / Compounding)
+                // 3. Manajemen Modal Dinamis (Buffer vs Compounding)
                 const badgeMode = document.getElementById('badgeMode');
                 const valModeDesc = document.getElementById('valModeDesc');
-                if (cur < 100.0) {
-                    badgeMode.textContent = "FLAT BUFFER";
-                    badgeMode.className = "badge badge-gold";
-                    valModeDesc.textContent = "Flat $1.00";
-                    document.getElementById('ruleMarginVal').textContent = "Tepat $1.00 (Saldo < $100)";
+                const valModeTarget = document.getElementById('valModeTarget');
+                const ruleMarginVal = document.getElementById('ruleMarginVal');
+                const ruleMarginDesc = document.getElementById('ruleMarginDesc');
+
+                if (curBal < 100.0) {
+                    badgeMode.textContent = "BUFFER AKTIF";
+                    badgeMode.className = "badge badge-neutral";
+                    valModeDesc.textContent = "Flat $1.00 USDT";
+                    valModeTarget.textContent = "Compounding 1% aktif saat saldo mencapai $100";
+                    
+                    ruleMarginVal.textContent = "Tepat $1.00 USDT";
+                    ruleMarginDesc.textContent = `Mode Buffer: Saldo saat ini $${curBal.toFixed(2)} (di bawah $100 USDT). Alokasi dipatok tetap $1.00 per posisi agar modal aman.`;
                 } else {
-                    badgeMode.textContent = "COMPOUNDING";
-                    badgeMode.className = "badge badge-green";
-                    valModeDesc.textContent = "Comp 1.0% (" + (cur * 0.01).toFixed(2) + " USD)";
-                    document.getElementById('ruleMarginVal').textContent = "1.0% Saldo ($" + (cur * 0.01).toFixed(2) + ")";
+                    const compMargin = (curBal * 0.01).toFixed(2);
+                    badgeMode.textContent = "COMPOUNDING 1%";
+                    badgeMode.className = "badge badge-gold";
+                    valModeDesc.textContent = `1.0% = $${compMargin} USDT`;
+                    valModeTarget.textContent = "Bunga berbunga aktif dari total saldo";
+
+                    ruleMarginVal.textContent = `1.0% = $${compMargin} USDT`;
+                    ruleMarginDesc.textContent = `Mode Compounding: Saldo di atas $100 USDT (atau setelah top-up). Alokasi modal otomatis bertumbuh 1.0% dari saldo.`;
                 }
 
-                // 4. Active Position Terminal Logic
+                // 4. Target Leverage Adaptif
+                const maxCoinLev = d.coin_max_leverage || 50;
+                document.getElementById('ruleLevVal').textContent = `Maksimal 50x (Adaptif 20x - 50x)`;
+                document.getElementById('ruleLevDesc').textContent = `Sistem menembak 50x. Jika Binance membatasi koin tersebut, bot otomatis menurunkan ke 49x, 48x, hingga batas yang diizinkan (minimal aman 20x). Koin saat ini mendukung hingga: ${maxCoinLev}x.`;
+
+                // 5. Status Terminal Posisi Aktif
                 const posTerminal = document.getElementById('sec-position');
                 const viewOpen = document.getElementById('viewPosOpen');
                 const viewStandby = document.getElementById('viewPosStandby');
-                const posSymbolText = document.getElementById('posSymbolText');
+                const posPnlBlock = document.getElementById('posPnlBlock');
                 const posTypeBadge = document.getElementById('posTypeBadge');
+                const posSymbolText = document.getElementById('posSymbolText');
                 const posSubtitle = document.getElementById('posSubtitle');
                 const posLevBadge = document.getElementById('posLevBadge');
 
@@ -1167,45 +1390,48 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     posTerminal.classList.add('is-open');
                     viewOpen.style.display = 'block';
                     viewStandby.style.display = 'none';
+                    posPnlBlock.style.display = 'flex';
 
-                    const isLong = (pos.side === 'BUY' || pos.side === 'LONG');
-                    posTypeBadge.textContent = isLong ? "LONG" : "SHORT";
-                    posTypeBadge.className = isLong ? "badge badge-green" : "badge badge-red";
+                    const isBuy = (pos.side === 'BUY' || pos.side === 'LONG');
+                    posTypeBadge.textContent = isBuy ? 'LONG' : 'SHORT';
+                    posTypeBadge.className = isBuy ? 'badge badge-green' : 'badge badge-red';
+
                     posSymbolText.textContent = pos.symbol;
-                    posSubtitle.textContent = `Posisi live aktif | Dibuka pada harga $${parseFloat(pos.entry_price || 0).toFixed(4)}`;
+                    posSubtitle.textContent = `Posisi aktif dieksekusi pada ${pos.entry_time || 'Baru saja'}.`;
                     posLevBadge.textContent = `${pos.leverage || 50}X ISOLATED`;
 
-                    document.getElementById('specMargin').textContent = `$${parseFloat(pos.margin || 1.0).toFixed(2)} USDT`;
-                    document.getElementById('specNotional').textContent = `$${parseFloat(pos.notional || 50.0).toFixed(2)} USDT`;
-                    document.getElementById('specEntry').textContent = `$${parseFloat(pos.entry_price || 0).toFixed(4)}`;
-                    document.getElementById('specMark').textContent = `$${parseFloat(pos.mark_price || pos.entry_price || 0).toFixed(4)}`;
+                    // PnL Kalkulasi Live
+                    const unrPnl = parseFloat(pos.unrealized_pnl_usd || 0.0);
+                    const unrPct = parseFloat(pos.unrealized_pnl_pct || 0.0);
+                    const pnlSignPos = unrPnl >= 0 ? '+' : '';
+                    
+                    document.getElementById('posPnlVal').textContent = `${pnlSignPos}$${unrPnl.toFixed(4)}`;
+                    document.getElementById('posPnlVal').style.color = unrPnl >= 0 ? 'var(--bull-green)' : 'var(--bear-red)';
+                    document.getElementById('posPnlPct').textContent = `${pnlSignPos}${unrPct.toFixed(2)}%`;
+                    document.getElementById('posPnlPct').style.color = unrPnl >= 0 ? 'var(--bull-green)' : 'var(--bear-red)';
 
-                    const unPnl = parseFloat(pos.unrealized_pnl || 0);
-                    const unPnlEl = document.getElementById('specUnPnl');
-                    unPnlEl.textContent = (unPnl >= 0 ? '+$' : '-$') + Math.abs(unPnl).toFixed(4);
-                    unPnlEl.style.color = unPnl >= 0 ? 'var(--bull-green)' : 'var(--bear-red)';
+                    // Spesifikasi Posisi
+                    document.getElementById('specMargin').textContent = `$${parseFloat(pos.margin_used || 1.0).toFixed(2)} USDT`;
+                    document.getElementById('specNotional').textContent = `$${parseFloat(pos.notional_value || 50.0).toFixed(2)} USDT`;
+                    document.getElementById('specEntry').textContent = `$${parseFloat(pos.entry_price || 0.0).toFixed(4)}`;
+                    document.getElementById('specMark').textContent = `$${parseFloat(pos.current_price || pos.entry_price || 0.0).toFixed(4)}`;
+                    document.getElementById('specTp').textContent = `$${parseFloat(pos.tp_price || 0.0).toFixed(4)}`;
+                    document.getElementById('specSl').textContent = `$${parseFloat(pos.sl_price || 0.0).toFixed(4)}`;
+                    document.getElementById('specLiq').textContent = pos.liquidation_price ? `$${parseFloat(pos.liquidation_price).toFixed(4)}` : 'Aman (Jauh)';
 
-                    document.getElementById('specTp').textContent = `$${parseFloat(pos.tp_price || 0).toFixed(4)}`;
-                    document.getElementById('specSl').textContent = `$${parseFloat(pos.sl_price || 0).toFixed(4)}`;
-                    document.getElementById('specLiq').textContent = pos.liquidation_price ? `$${parseFloat(pos.liquidation_price).toFixed(4)}` : "Aman (>15%)";
+                    // Visual Gauge
+                    document.getElementById('gaugeEntryVal').textContent = parseFloat(pos.entry_price || 0.0).toFixed(4);
+                    document.getElementById('gaugeSlVal').textContent = parseFloat(pos.sl_price || 0.0).toFixed(4);
+                    document.getElementById('gaugeTpVal').textContent = parseFloat(pos.tp_price || 0.0).toFixed(4);
 
-                    // Update SL-Entry-TP Gauge
-                    const entryP = parseFloat(pos.entry_price || 0);
-                    const markP = parseFloat(pos.mark_price || entryP);
-                    const slP = parseFloat(pos.sl_price || (entryP * 0.99));
-                    const tpP = parseFloat(pos.tp_price || (entryP * 1.02));
-
-                    document.getElementById('gaugeSlVal').textContent = slP.toFixed(2);
-                    document.getElementById('gaugeEntryVal').textContent = entryP.toFixed(2);
-                    document.getElementById('gaugeTpVal').textContent = tpP.toFixed(2);
+                    const ep = parseFloat(pos.entry_price || 0.0);
+                    const cp = parseFloat(pos.current_price || ep);
+                    const sl = parseFloat(pos.sl_price || (ep * 0.99));
+                    const tp = parseFloat(pos.tp_price || (ep * 1.025));
 
                     let pinPct = 50;
-                    if (isLong) {
-                        const totalRange = (tpP - slP) || 1;
-                        pinPct = Math.max(5, Math.min(95, ((markP - slP) / totalRange) * 100));
-                    } else {
-                        const totalRange = (slP - tpP) || 1;
-                        pinPct = Math.max(5, Math.min(95, ((slP - markP) / totalRange) * 100));
+                    if (tp !== sl) {
+                        pinPct = Math.max(5, Math.min(95, ((cp - sl) / (tp - sl)) * 100));
                     }
                     document.getElementById('gaugeLivePin').style.left = pinPct + '%';
 
@@ -1213,37 +1439,41 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     posTerminal.classList.remove('is-open');
                     viewOpen.style.display = 'none';
                     viewStandby.style.display = 'block';
+                    posPnlBlock.style.display = 'none';
 
                     posTypeBadge.textContent = "STANDBY";
                     posTypeBadge.className = "badge badge-neutral";
                     posSymbolText.textContent = "Menunggu Sinyal Presisi";
-                    posSubtitle.textContent = "Sedang menyisir semesta koin mencari setup confluence A+ (Skor $\ge$ 80).";
+                    posSubtitle.textContent = "Sedang menyisir semesta koin mencari setup konfluensi tinggi (Minimal Skor 80/100).";
                     posLevBadge.textContent = "50X ISOLATED";
                 }
 
-                // 5. Radar Live Target & Rotation
+                // 6. Target Analisis & Rotasi Koin
                 if (d.rotation_status) {
                     document.getElementById('badgeRotNumber').textContent = d.rotation_status.split('(')[0].trim().toUpperCase();
                 }
                 if (d.current_coin && d.current_coin.symbol) {
                     liveTargetSymbol = d.current_coin.symbol;
+                    currentCoinData = d.current_coin;
                     document.getElementById('liveActiveSymbol').textContent = d.current_coin.symbol;
+
                     const struct = d.current_coin.market_structure_1h || "SIDEWAYS";
+                    const macro = d.current_coin.macro_trend_4h || "NETRAL";
                     const score = d.current_coin.score || 50;
-                    const volM = d.current_coin.vol_24h_m ? `$${d.current_coin.vol_24h_m.toFixed(1)}M` : "";
-                    document.getElementById('liveActiveMetrics').textContent = `Struktur: ${struct} | Skor: ${score}/100 ${volM ? '| Vol: ' + volM : ''}`;
+                    const price = d.current_coin.price ? `$${d.current_coin.price}` : "";
+                    document.getElementById('liveActiveMetrics').textContent = `Struktur: ${struct} | Makro 4h: ${macro} | Skor: ${score}/100 ${price ? '| ' + price : ''}`;
                 }
 
-                // 6. Header Info
+                // 7. Navbar Info
                 document.getElementById('topUptime').textContent = `UPTIME: ${(d.uptime_str || 'AKTIF 24/7').toUpperCase()}`;
-                document.getElementById('wsStatusText').textContent = `${d.tracked_symbols_count || 829} KOIN LIVE`;
+                document.getElementById('wsStatusText').textContent = `${d.tracked_symbols_count || 427} KOIN LIVE`;
 
             } catch (err) {
                 console.warn("Dashboard sync notice:", err);
             }
         }
 
-        // --- 3. TRADE HISTORY ENGINE (VPS SESSION VS ALL) ---
+        // --- 3. TRADE HISTORY & WIN RATE ENGINE ---
         async function fetchTradeHistory() {
             try {
                 const res = await fetch('/api/trade-history');
@@ -1267,7 +1497,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const container = document.getElementById('tradesContainer');
             const summaryPill = document.getElementById('tradeSummaryPill');
 
-            // Filter trades based on active tab
+            // Filter riwayat berdasarkan tab yang aktif
             let listToRender = [];
             if (activeTradeTab === 'session') {
                 listToRender = rawTradeList.filter(t => t.is_vps_session === true);
@@ -1277,28 +1507,58 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 summaryPill.textContent = `${rawTradeList.length} TOTAL TRADE`;
             }
 
+            // Hitung Statistik Win Rate & PnL
+            let winCount = 0;
+            let lossCount = 0;
+            let totalPnl = 0.0;
+
+            listToRender.forEach(t => {
+                const pnl = parseFloat(t.pnl_usd || 0.0);
+                totalPnl += pnl;
+                if (t.result === 'WIN' || pnl >= 0) {
+                    winCount++;
+                } else {
+                    lossCount++;
+                }
+            });
+
+            const totalTrades = listToRender.length;
+            const winRate = totalTrades > 0 ? ((winCount / totalTrades) * 100).toFixed(1) : "0.0";
+
+            document.getElementById('statWinRate').textContent = `${winRate}%`;
+            document.getElementById('statTotalTrades').textContent = `${totalTrades} Trade`;
+            document.getElementById('statWinLoss').textContent = `${winCount}W / ${lossCount}L`;
+
+            const pnlSign = totalPnl >= 0 ? '+' : '';
+            const elStatPnl = document.getElementById('statNetPnlTrade');
+            elStatPnl.textContent = `${pnlSign}$${totalPnl.toFixed(2)}`;
+            elStatPnl.style.color = totalPnl >= 0 ? 'var(--bull-green)' : 'var(--bear-red)';
+
+            // Tampilan jika belum ada transaksi di sesi ini
             if (listToRender.length === 0) {
                 if (activeTradeTab === 'session') {
                     container.innerHTML = `
                         <div style="text-align: center; padding: 22px 14px; background: rgba(0,0,0,0.25); border-radius: 12px; border: 1px solid rgba(255,255,255,0.03);">
                             <div style="color: var(--binance-gold); font-size: 13px; font-weight: 700; margin-bottom: 4px;">Belum Ada Posisi Baru di Sesi VPS Ini</div>
                             <p style="color: var(--text-secondary); font-size: 11px; line-height: 1.5; max-width: 440px; margin: 0 auto;">
-                                Bot aktif sejak 26 Okt 2026. Mesin disiplin memindai semesta 500 koin dan hanya mengeksekusi order saat setup confluence (Skor $\ge$ 80, S&R teruji $\ge$ 2x, dan Liquidity Sweep) terkonfirmasi.
+                                Bot aktif sejak 26 Oktober 2026. Mesin disiplin memindai 500 koin semesta dan hanya mengeksekusi order jika seluruh kriteria terpenuhi: Minimal Skor 80 dari 100, pantulan Support & Resistance teruji minimal 2 kali, dan konfirmasi Liquidity Sweep. Transaksi baru akan otomatis tercatat di sini seketika order dieksekusi.
                             </p>
                         </div>
                     `;
                 } else {
-                    container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-dim); font-size: 12px;">Tidak ada riwayat trade.</div>';
+                    container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-dim); font-size: 12px;">Tidak ada riwayat transaksi.</div>';
                 }
                 return;
             }
 
+            // Render Kartu Transaksi
             let html = '';
             listToRender.forEach(t => {
                 const isWin = (t.result === 'WIN' || parseFloat(t.pnl_usd || 0) >= 0);
                 const pnlVal = parseFloat(t.pnl_usd || 0);
                 const pnlColor = isWin ? 'var(--bull-green)' : 'var(--bear-red)';
                 const sideColor = (t.side === 'BUY' || t.side === 'LONG') ? 'badge-green' : 'badge-red';
+                const sign = pnlVal >= 0 ? '+' : '';
 
                 html += `
                     <div class="trade-card-item">
@@ -1308,14 +1568,16 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                 <span>${t.symbol}</span>
                                 <span class="badge badge-neutral" style="font-size: 9px;">${t.leverage || 50}x</span>
                             </div>
-                            <div class="date-row">${t.created_at || 'Selesai'}</div>
+                            <div class="date-row">
+                                ${t.created_at || '-'} • Margin $${parseFloat(t.margin_used || 1.0).toFixed(2)}
+                            </div>
                         </div>
                         <div class="trade-col-right">
                             <div class="pnl-text" style="color: ${pnlColor};">
-                                ${pnlVal >= 0 ? '+$' : '-$'}${Math.abs(pnlVal).toFixed(4)}
+                                ${sign}$${pnlVal.toFixed(4)} (${sign}${parseFloat(t.pnl_pct || 0).toFixed(2)}%)
                             </div>
                             <div class="price-row">
-                                In: $${parseFloat(t.entry_price || 0).toFixed(4)} &bull; Out: $${parseFloat(t.exit_price || 0).toFixed(4)}
+                                Entry: ${parseFloat(t.entry_price || 0).toFixed(4)} → Exit: ${parseFloat(t.exit_price || 0).toFixed(4)}
                             </div>
                         </div>
                     </div>
@@ -1325,39 +1587,41 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         // --- 4. LIVE LOGS TERMINAL ---
+        let autoScrollLogs = true;
         async function fetchLogs() {
             try {
-                const res = await fetch('/api/logs');
+                const res = await fetch('/api/logs?lines=40');
                 if (!res.ok) return;
                 const d = await res.json();
-                const term = document.getElementById('terminalLogsBox');
-                if (d.logs && d.logs.length > 0) {
-                    term.innerHTML = d.logs.map(l => {
-                        let color = '#94a3b8';
-                        if (l.includes("Sukses") || l.includes("TERHUBUNG") || l.includes("200 OK")) color = '#0ecb81';
-                        else if (l.includes("Error") || l.includes("WARN") || l.includes("code': -")) color = '#f6465d';
-                        else if (l.includes("Rotasi") || l.includes("Auto-Sync")) color = '#F0B90B';
-                        return `<div style="color: ${color};">${escapeHtml(l)}</div>`;
-                    }).join('');
-                    term.scrollTop = term.scrollHeight;
+                const logBox = document.getElementById('terminalLogs');
+                if (d.logs && Array.isArray(d.logs)) {
+                    logBox.textContent = d.logs.join('\\n');
+                    if (autoScrollLogs) {
+                        logBox.scrollTop = logBox.scrollHeight;
+                    }
                 }
             } catch (err) {
-                console.warn("Logs poll notice:", err);
+                console.warn("Logs fetch notice:", err);
             }
         }
 
-        function escapeHtml(t) {
-            return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        function forceSync() {
+            fetchDashboardSummary();
+            fetchTradeHistory();
+            fetchLogs();
         }
 
-        // --- Initial Starts & Polling ---
-        fetchDashboard();
-        fetchTradeHistory();
-        fetchLogs();
+        // Inisialisasi awal saat halaman dibuka
+        window.addEventListener('DOMContentLoaded', () => {
+            resizeCanvas();
+            animateBubbleNetwork();
+            forceSync();
 
-        setInterval(fetchDashboard, 3000);   // Poll dashboard & position every 3s
-        setInterval(fetchTradeHistory, 15000); // Refresh trades every 15s
-        setInterval(fetchLogs, 5000);        // Refresh logs every 5s
+            // Interval Sinkronisasi
+            setInterval(fetchDashboardSummary, 2500);
+            setInterval(fetchTradeHistory, 6000);
+            setInterval(fetchLogs, 3500);
+        });
     </script>
 </body>
 </html>

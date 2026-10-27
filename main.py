@@ -103,8 +103,11 @@ def api_dashboard_summary():
     live_pos = scalper.active_position
     mode = "FLAT $1.00" if cur_wallet < 100.0 else "COMPOUNDING 1.0%"
 
-    # 4. Koin yang Sedang Dianalisis Saat Ini
+    # 4. Koin yang Sedang Dianalisis Saat Ini & Batas Leverage
     curr_coin = scalper.current_coin_analysis if scalper.current_coin_analysis else {}
+    curr_sym = curr_coin.get("symbol", "")
+    max_lev_map = getattr(scalper.client, "_symbols_max_leverage", {})
+    coin_max_lev = int(max_lev_map.get(curr_sym, 50)) if curr_sym and max_lev_map else 50
 
     # 5. Uptime sistem
     uptime_sec = int(time.time() - START_TIME)
@@ -126,6 +129,9 @@ def api_dashboard_summary():
         "active_position": live_pos,
         "rotation_status": scalper.current_rotation_info,
         "current_coin": curr_coin,
+        "coin_max_leverage": coin_max_lev,
+        "target_max_leverage": 50,
+        "target_min_leverage": 20,
         "tracked_symbols_count": tracked_count,
         "uptime_str": uptime_str,
         "websocket_status": "LIVE_STREAMING" if ws_alive else "STANDBY"
