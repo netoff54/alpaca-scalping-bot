@@ -933,15 +933,15 @@ def get_dashboard_html() -> str:
                     <!-- Rule 3: Rasio Profit & Rugi -->
                     <div class="rule-card">
                         <span class="rule-title">Target Profit & Stop Loss</span>
-                        <span class="rule-val">TP +2.5% | SL -1.0%</span>
-                        <span class="rule-desc">Rasio Risk to Reward 1 : 2.5 (Potensi profit 2.5 kali lebih besar dari risiko kerugian).</span>
+                        <span class="rule-val">TP 1:2 NET | SL 0.7% - 2.0%</span>
+                        <span class="rule-desc">Rasio Risk to Reward Wajib Tepat 1 : 2.000 NET MURNI setelah menutup 100% seluruh biaya bursa.</span>
                     </div>
 
                     <!-- Rule 4: Proteksi Drawdown -->
                     <div class="rule-card">
-                        <span class="rule-title">Proteksi Drawdown Modal</span>
-                        <span class="rule-val">Stop Loss 1% & Circuit Breaker</span>
-                        <span class="rule-desc">Posisi langsung dipotong rugi jika minus 1% dari margin ($0.01 saat margin $1.00). Jeda otomatis jika 3 kali rugi beruntun.</span>
+                        <span class="rule-title">Proteksi Drawdown & Target Surplus</span>
+                        <span class="rule-val">Circuit Breaker & Kunci 10%</span>
+                        <span class="rule-desc">Jeda otomatis 2 jam jika 2x rugi beruntun. Target surplus bulanan >= 10.0% otomatis dikunci aman.</span>
                     </div>
                 </div>
             </div>
@@ -1464,29 +1464,16 @@ def get_dashboard_html() -> str:
                 }
 
                 // 3. Manajemen Modal Dinamis (Buffer vs Compounding)
-                const badgeMode = document.getElementById('badgeMode');
-                const valModeDesc = document.getElementById('valModeDesc');
-                const valModeTarget = document.getElementById('valModeTarget');
                 const ruleMarginVal = document.getElementById('ruleMarginVal');
                 const ruleMarginDesc = document.getElementById('ruleMarginDesc');
 
                 if (curBal < 100.0) {
-                    badgeMode.textContent = "BUFFER AKTIF";
-                    badgeMode.className = "badge badge-neutral";
-                    valModeDesc.textContent = "Flat $1.00 USDT";
-                    valModeTarget.textContent = "Compounding 1% aktif saat saldo mencapai $100";
-                    
-                    ruleMarginVal.textContent = "Tepat $1.00 USDT";
-                    ruleMarginDesc.textContent = `Mode Buffer: Saldo saat ini $${curBal.toFixed(2)} (di bawah $100 USDT). Alokasi dipatok tetap $1.00 per posisi agar modal aman.`;
+                    if (ruleMarginVal) ruleMarginVal.textContent = "Tepat $1.00 USDT";
+                    if (ruleMarginDesc) ruleMarginDesc.textContent = `Mode Buffer: Saldo saat ini $${curBal.toFixed(2)} (di bawah $100 USDT). Alokasi dipatok tetap $1.00 per posisi agar modal aman.`;
                 } else {
                     const compMargin = (curBal * 0.01).toFixed(2);
-                    badgeMode.textContent = "COMPOUNDING 1%";
-                    badgeMode.className = "badge badge-gold";
-                    valModeDesc.textContent = `1.0% = $${compMargin} USDT`;
-                    valModeTarget.textContent = "Bunga berbunga aktif dari total saldo";
-
-                    ruleMarginVal.textContent = `1.0% = $${compMargin} USDT`;
-                    ruleMarginDesc.textContent = `Mode Compounding: Saldo di atas $100 USDT (atau setelah top-up). Alokasi modal otomatis bertumbuh 1.0% dari saldo.`;
+                    if (ruleMarginVal) ruleMarginVal.textContent = `1.0% = $${compMargin} USDT`;
+                    if (ruleMarginDesc) ruleMarginDesc.textContent = `Mode Compounding: Saldo di atas $100 USDT (atau setelah top-up). Alokasi modal otomatis bertumbuh 1.0% dari saldo.`;
                 }
 
                 // 4. Target Surplus Bulanan (Wajib >= 10.0% Dikunci Aman Sesuai Backtest 2 Tahun)
@@ -1510,12 +1497,14 @@ def get_dashboard_html() -> str:
                     }
                 }
 
-                // 4. Target Leverage Adaptif
+                // 5. Target Leverage Adaptif
                 const maxCoinLev = d.coin_max_leverage || 50;
-                document.getElementById('ruleLevVal').textContent = `Maksimal 50x (Adaptif 20x - 50x)`;
-                document.getElementById('ruleLevDesc').textContent = `Sistem menembak 50x. Jika Binance membatasi koin tersebut, bot otomatis menurunkan ke 49x, 48x, hingga batas yang diizinkan (minimal aman 20x). Koin saat ini mendukung hingga: ${maxCoinLev}x.`;
+                const ruleLevVal = document.getElementById('ruleLevVal');
+                const ruleLevDesc = document.getElementById('ruleLevDesc');
+                if (ruleLevVal) ruleLevVal.textContent = `Maksimal 50x (Adaptif 20x - 50x)`;
+                if (ruleLevDesc) ruleLevDesc.textContent = `Sistem menembak 50x. Jika Binance membatasi koin tersebut, bot otomatis menurunkan ke 49x, 48x, hingga batas yang diizinkan (minimal aman 20x). Koin saat ini mendukung hingga: ${maxCoinLev}x.`;
 
-                // 5. Status Terminal Posisi Aktif
+                // 6. Status Terminal Posisi Aktif
                 const posTerminal = document.getElementById('sec-position');
                 const viewOpen = document.getElementById('viewPosOpen');
                 const viewStandby = document.getElementById('viewPosStandby');
@@ -1528,42 +1517,60 @@ def get_dashboard_html() -> str:
                 const pos = d.active_position;
                 currentActivePosition = (pos && pos.symbol) ? pos : null;
                 if (pos && pos.symbol) {
-                    posTerminal.classList.add('is-open');
-                    viewOpen.style.display = 'block';
-                    viewStandby.style.display = 'none';
-                    posPnlBlock.style.display = 'flex';
+                    if (posTerminal) posTerminal.classList.add('is-open');
+                    if (viewOpen) viewOpen.style.display = 'block';
+                    if (viewStandby) viewStandby.style.display = 'none';
+                    if (posPnlBlock) posPnlBlock.style.display = 'flex';
 
                     const isBuy = (pos.side === 'BUY' || pos.side === 'LONG');
-                    posTypeBadge.textContent = isBuy ? 'LONG' : 'SHORT';
-                    posTypeBadge.className = isBuy ? 'badge badge-green' : 'badge badge-red';
+                    if (posTypeBadge) {
+                        posTypeBadge.textContent = isBuy ? 'LONG' : 'SHORT';
+                        posTypeBadge.className = isBuy ? 'badge badge-green' : 'badge badge-red';
+                    }
 
-                    posSymbolText.textContent = pos.symbol;
-                    posSubtitle.textContent = `Posisi aktif dieksekusi pada ${pos.entry_time || 'Baru saja'}.`;
-                    posLevBadge.textContent = `${pos.leverage || 50}X ISOLATED`;
+                    if (posSymbolText) posSymbolText.textContent = pos.symbol;
+                    if (posSubtitle) posSubtitle.textContent = `Posisi aktif dieksekusi pada ${pos.entry_time || 'Baru saja'}.`;
+                    if (posLevBadge) posLevBadge.textContent = `${pos.leverage || 50}X ISOLATED`;
 
                     // PnL Kalkulasi Live
                     const unrPnl = parseFloat(pos.unrealized_pnl_usd || 0.0);
                     const unrPct = parseFloat(pos.unrealized_pnl_pct || 0.0);
                     const pnlSignPos = unrPnl >= 0 ? '+' : '';
-                    
-                    document.getElementById('posPnlVal').textContent = `${pnlSignPos}$${unrPnl.toFixed(4)}`;
-                    document.getElementById('posPnlVal').style.color = unrPnl >= 0 ? 'var(--bull-green)' : 'var(--bear-red)';
-                    document.getElementById('posPnlPct').textContent = `${pnlSignPos}${unrPct.toFixed(2)}%`;
-                    document.getElementById('posPnlPct').style.color = unrPnl >= 0 ? 'var(--bull-green)' : 'var(--bear-red)';
+
+                    const elPosPnlVal = document.getElementById('posPnlVal');
+                    if (elPosPnlVal) {
+                        elPosPnlVal.textContent = `${pnlSignPos}$${unrPnl.toFixed(4)}`;
+                        elPosPnlVal.style.color = unrPnl >= 0 ? 'var(--bull-green)' : 'var(--bear-red)';
+                    }
+                    const elPosPnlPct = document.getElementById('posPnlPct');
+                    if (elPosPnlPct) {
+                        elPosPnlPct.textContent = `${pnlSignPos}${unrPct.toFixed(2)}%`;
+                        elPosPnlPct.style.color = unrPnl >= 0 ? 'var(--bull-green)' : 'var(--bear-red)';
+                    }
 
                     // Spesifikasi Posisi
-                    document.getElementById('specMargin').textContent = `$${parseFloat(pos.margin_used || 1.0).toFixed(2)} USDT`;
-                    document.getElementById('specNotional').textContent = `$${parseFloat(pos.notional_value || 50.0).toFixed(2)} USDT`;
-                    document.getElementById('specEntry').textContent = `$${parseFloat(pos.entry_price || 0.0).toFixed(4)}`;
-                    document.getElementById('specMark').textContent = `$${parseFloat(pos.current_price || pos.entry_price || 0.0).toFixed(4)}`;
-                    document.getElementById('specTp').textContent = `$${parseFloat(pos.tp_price || 0.0).toFixed(4)}`;
-                    document.getElementById('specSl').textContent = `$${parseFloat(pos.sl_price || 0.0).toFixed(4)}`;
-                    document.getElementById('specLiq').textContent = pos.liquidation_price ? `$${parseFloat(pos.liquidation_price).toFixed(4)}` : 'Aman (Jauh)';
+                    const elSpecMargin = document.getElementById('specMargin');
+                    if (elSpecMargin) elSpecMargin.textContent = `$${parseFloat(pos.margin_used || 1.0).toFixed(2)} USDT`;
+                    const elSpecNotional = document.getElementById('specNotional');
+                    if (elSpecNotional) elSpecNotional.textContent = `$${parseFloat(pos.notional_value || 50.0).toFixed(2)} USDT`;
+                    const elSpecEntry = document.getElementById('specEntry');
+                    if (elSpecEntry) elSpecEntry.textContent = `$${parseFloat(pos.entry_price || 0.0).toFixed(4)}`;
+                    const elSpecMark = document.getElementById('specMark');
+                    if (elSpecMark) elSpecMark.textContent = `$${parseFloat(pos.current_price || pos.entry_price || 0.0).toFixed(4)}`;
+                    const elSpecTp = document.getElementById('specTp');
+                    if (elSpecTp) elSpecTp.textContent = `$${parseFloat(pos.tp_price || 0.0).toFixed(4)}`;
+                    const elSpecSl = document.getElementById('specSl');
+                    if (elSpecSl) elSpecSl.textContent = `$${parseFloat(pos.sl_price || 0.0).toFixed(4)}`;
+                    const elSpecLiq = document.getElementById('specLiq');
+                    if (elSpecLiq) elSpecLiq.textContent = pos.liquidation_price ? `$${parseFloat(pos.liquidation_price).toFixed(4)}` : 'Aman (Jauh)';
 
                     // Visual Gauge
-                    document.getElementById('gaugeEntryVal').textContent = parseFloat(pos.entry_price || 0.0).toFixed(4);
-                    document.getElementById('gaugeSlVal').textContent = parseFloat(pos.sl_price || 0.0).toFixed(4);
-                    document.getElementById('gaugeTpVal').textContent = parseFloat(pos.tp_price || 0.0).toFixed(4);
+                    const elGaugeEntry = document.getElementById('gaugeEntryVal');
+                    if (elGaugeEntry) elGaugeEntry.textContent = parseFloat(pos.entry_price || 0.0).toFixed(4);
+                    const elGaugeSl = document.getElementById('gaugeSlVal');
+                    if (elGaugeSl) elGaugeSl.textContent = parseFloat(pos.sl_price || 0.0).toFixed(4);
+                    const elGaugeTp = document.getElementById('gaugeTpVal');
+                    if (elGaugeTp) elGaugeTp.textContent = parseFloat(pos.tp_price || 0.0).toFixed(4);
 
                     const ep = parseFloat(pos.entry_price || 0.0);
                     const cp = parseFloat(pos.current_price || ep);
@@ -1574,40 +1581,65 @@ def get_dashboard_html() -> str:
                     if (tp !== sl) {
                         pinPct = Math.max(5, Math.min(95, ((cp - sl) / (tp - sl)) * 100));
                     }
-                    document.getElementById('gaugeLivePin').style.left = pinPct + '%';
+                    const elPin = document.getElementById('gaugeLivePin');
+                    if (elPin) elPin.style.left = pinPct + '%';
 
                 } else {
-                    posTerminal.classList.remove('is-open');
-                    viewOpen.style.display = 'none';
-                    viewStandby.style.display = 'block';
-                    posPnlBlock.style.display = 'none';
+                    if (posTerminal) posTerminal.classList.remove('is-open');
+                    if (viewOpen) viewOpen.style.display = 'none';
+                    if (viewStandby) viewStandby.style.display = 'block';
+                    if (posPnlBlock) posPnlBlock.style.display = 'none';
 
-                    posTypeBadge.textContent = "STANDBY";
-                    posTypeBadge.className = "badge badge-neutral";
-                    posSymbolText.textContent = "Menunggu Sinyal Presisi";
-                    posSubtitle.textContent = "Sedang menyisir semesta koin mencari setup konfluensi tinggi (Minimal Skor 80/100).";
-                    posLevBadge.textContent = "50X ISOLATED";
+                    if (posTypeBadge) { posTypeBadge.textContent = "STANDBY"; posTypeBadge.className = "badge badge-neutral"; }
+                    if (posSymbolText) posSymbolText.textContent = "Menunggu Sinyal Presisi";
+                    if (posSubtitle) posSubtitle.textContent = "Sedang menyisir semesta koin mencari setup konfluensi tinggi (Minimal Skor 85/100).";
+                    if (posLevBadge) posLevBadge.textContent = "50X ISOLATED";
                 }
 
-                // 6. Target Analisis & Rotasi Koin
+                // 7. Target Analisis & Rotasi Koin (Real-Time Synchronized)
                 if (d.rotation_status) {
-                    document.getElementById('badgeRotNumber').textContent = d.rotation_status.split('(')[0].trim().toUpperCase();
+                    const rotEl = document.getElementById('badgeRotNumber');
+                    if (rotEl) rotEl.textContent = d.rotation_status.split('(')[0].trim().toUpperCase();
                 }
                 if (d.current_coin && d.current_coin.symbol) {
                     liveTargetSymbol = d.current_coin.symbol;
                     currentCoinData = d.current_coin;
-                    document.getElementById('liveActiveSymbol').textContent = d.current_coin.symbol;
+                    const symEl = document.getElementById('liveActiveSymbol');
+                    if (symEl) symEl.textContent = d.current_coin.symbol;
 
                     const struct = d.current_coin.market_structure_1h || "SIDEWAYS";
                     const macro = d.current_coin.macro_trend_4h || "NETRAL";
                     const score = d.current_coin.score || 50;
                     const price = d.current_coin.price ? `$${d.current_coin.price}` : "";
-                    document.getElementById('liveActiveMetrics').textContent = `Struktur: ${struct} | Makro 4h: ${macro} | Skor: ${score}/100 ${price ? '| ' + price : ''}`;
+                    const metEl = document.getElementById('liveActiveMetrics');
+                    if (metEl) metEl.textContent = `Struktur: ${struct} | Makro 4h: ${macro} | Skor: ${score}/100 ${price ? '| ' + price : ''}`;
+
+                    // Pastikan koin yang sedang dianalisis masuk ke dalam bubble konstelasi
+                    const cleanSym = d.current_coin.symbol.replace("USDT", "").trim();
+                    let existing = bubbleList.find(b => b.name === cleanSym);
+                    if (!existing && cleanSym) {
+                        const angle = Math.random() * Math.PI * 2;
+                        const dist = 55 + Math.random() * (Math.min(canvasW, canvasH) * 0.40 - 55);
+                        bubbleList.push({
+                            name: cleanSym,
+                            x: canvasW / 2 + Math.cos(angle) * dist,
+                            y: canvasH / 2 + Math.sin(angle) * dist,
+                            vx: (Math.random() - 0.5) * 0.2,
+                            vy: (Math.random() - 0.5) * 0.2,
+                            score: score,
+                            analyzed: true
+                        });
+                    } else if (existing) {
+                        existing.score = score;
+                        existing.analyzed = true;
+                    }
                 }
 
-                // 7. Navbar Info
-                document.getElementById('topUptime').textContent = `UPTIME: ${(d.uptime_str || 'AKTIF 24/7').toUpperCase()}`;
-                document.getElementById('wsStatusText').textContent = `${d.tracked_symbols_count || 427} KOIN LIVE`;
+                // 8. Navbar Info
+                const elUptime = document.getElementById('topUptime');
+                if (elUptime) elUptime.textContent = `UPTIME: ${(d.uptime_str || 'AKTIF 24/7').toUpperCase()}`;
+                const elWsStatus = document.getElementById('wsStatusText');
+                if (elWsStatus) elWsStatus.textContent = `${d.tracked_symbols_count || 427} KOIN LIVE`;
 
             } catch (err) {
                 console.warn("Dashboard sync notice:", err);
