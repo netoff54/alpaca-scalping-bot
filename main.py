@@ -415,13 +415,17 @@ def trade_history(limit: int = 100):
     cleaned = []
     for t in raw_trades:
         created = t.get("closed_at") or t.get("created_at")
-        is_vps = False
-        if created:
-            if hasattr(created, "year"):
-                is_vps = (created >= vps_start_ts)
-            else:
-                s_c = str(created)
-                is_vps = ("2026-10-26" in s_c or "2026-10-27" in s_c or "26 Oct" in s_c or "27 Oct" in s_c)
+        sc_ver = t.get("screening_version") or "v1_legacy"
+        tid = int(t.get("id") or 0)
+        sym = str(t.get("symbol") or "")
+
+        # Sesuai instruksi user:
+        # Sesi VPS Terkini HANYA mencatat posisi dengan cara skrining yang terbaru ('v2_new_screening').
+        # Seluruh 3 posisi SL lama (DASH, BIRB, DOOD) dan posisi SPXUSDT lama dipindahkan ke seluruh riwayat.
+        if tid <= 116 or sc_ver == "v1_legacy" or (sym == "SPXUSDT" and tid <= 117):
+            is_vps = False
+        else:
+            is_vps = (sc_ver == "v2_new_screening")
 
         pnl_val = float(t.get("pnl_usd") or 0.0)
         pnl_pct_val = float(t.get("pnl_pct") or 0.0)
@@ -441,6 +445,7 @@ def trade_history(limit: int = 100):
             "pnl_usd": pnl_val,
             "pnl_pct": pnl_pct_val,
             "result": res_val,
+            "screening_version": sc_ver,
             "created_at": created.strftime("%d %b %Y %H:%M") if hasattr(created, "strftime") else str(created or ""),
             "is_vps_session": is_vps
         })

@@ -992,7 +992,7 @@ def get_dashboard_html() -> str:
             <!-- Tab Switcher: Sesi VPS Terkini vs Seluruh Riwayat -->
             <div class="history-tab-group">
                 <button class="history-tab-btn active" id="tabVpsSession" onclick="switchTradeTab('session')">Sesi VPS Terkini</button>
-                <button class="history-tab-btn" id="tabAllHistory" onclick="switchTradeTab('all')">Seluruh Riwayat (113 Trade)</button>
+                <button class="history-tab-btn" id="tabAllHistory" onclick="switchTradeTab('all')">Seluruh Riwayat</button>
             </div>
 
             <!-- Performance Win Rate Mini Strip -->
@@ -1669,17 +1669,22 @@ def get_dashboard_html() -> str:
         function renderTrades() {
             const container = document.getElementById('tradesContainer');
             const summaryPill = document.getElementById('tradeSummaryPill');
+            const tabAllHistoryBtn = document.getElementById('tabAllHistory');
+            const tabVpsSessionBtn = document.getElementById('tabVpsSession');
 
-            // Filter riwayat berdasarkan tab yang aktif (Fallback ke seluruh riwayat jika sesi terkini masih 0)
+            const vpsCount = rawTradeList.filter(t => t.is_vps_session === true).length;
+            if (tabVpsSessionBtn) {
+                tabVpsSessionBtn.textContent = `Sesi VPS Terkini (${vpsCount})`;
+            }
+            if (tabAllHistoryBtn && rawTradeList.length > 0) {
+                tabAllHistoryBtn.textContent = `Seluruh Riwayat (${rawTradeList.length} Trade)`;
+            }
+
+            // Filter riwayat berdasarkan tab yang aktif (Sesi VPS Terkini HANYA skrining terbaru v2)
             let listToRender = [];
             if (activeTradeTab === 'session') {
                 listToRender = rawTradeList.filter(t => t.is_vps_session === true);
-                if (listToRender.length === 0 && rawTradeList.length > 0) {
-                    listToRender = rawTradeList;
-                    summaryPill.textContent = `${rawTradeList.length} TOTAL TRADE (SINKRON)`;
-                } else {
-                    summaryPill.textContent = `${listToRender.length} TRADE SESI VPS`;
-                }
+                summaryPill.textContent = `${listToRender.length} TRADE SESI VPS`;
             } else {
                 listToRender = rawTradeList;
                 summaryPill.textContent = `${rawTradeList.length} TOTAL TRADE`;
@@ -1718,21 +1723,10 @@ def get_dashboard_html() -> str:
             elStatPnl.textContent = `${pnlSign}$${totalPnl.toFixed(2)}`;
             elStatPnl.style.color = totalPnl >= 0 ? 'var(--bull-green)' : 'var(--bear-red)';
 
-            // Tampilan jika belum ada transaksi sama sekali
-            if (listToRender.length === 0 && (!currentActivePosition || !currentActivePosition.symbol)) {
-                container.innerHTML = `
-                    <div style="text-align: center; padding: 22px 14px; background: rgba(0,0,0,0.25); border-radius: 12px; border: 1px solid rgba(255,255,255,0.03);">
-                        <div style="color: var(--binance-gold); font-size: 13px; font-weight: 700; margin-bottom: 4px;">Belum Ada Posisi Tertutup</div>
-                        <p style="color: var(--text-secondary); font-size: 11px; line-height: 1.5; max-width: 440px; margin: 0 auto;">
-                            Bot aktif memindai seluruh koin semesta Binance. Menunggu konfirmasi setup 4 Skenario Kalimasada (Minimal Skor 85, volume >= 1.15x, dan RR 1:2.0 NET).
-                        </p>
-                    </div>
-                `;
-                return;
-            }
-
-            // Render Kartu Transaksi (Tampilkan Posisi Aktif di paling atas jika sedang open posisi)
+            // Render Kartu Transaksi
             let html = '';
+
+            // Tampilkan Posisi Aktif di paling atas jika sedang open posisi
             if (currentActivePosition && currentActivePosition.symbol) {
                 const posPnl = parseFloat(currentActivePosition.unrealized_pnl_usd || 0.0);
                 const posPnlPct = parseFloat(currentActivePosition.unrealized_pnl_pct || 0.0);
@@ -1756,6 +1750,31 @@ def get_dashboard_html() -> str:
                     </div>
                 `;
             }
+
+            if (listToRender.length === 0) {
+                if (activeTradeTab === 'session') {
+                    html += `
+                        <div style="text-align: center; padding: 22px 14px; background: rgba(0,0,0,0.25); border-radius: 12px; border: 1px dashed rgba(240, 185, 11, 0.25); margin-top: 4px;">
+                            <div style="color: var(--binance-gold); font-size: 13px; font-weight: 700; margin-bottom: 6px;">Sesi Skrining Terbaru Aktif (0 Transaksi Tertutup)</div>
+                            <p style="color: var(--text-secondary); font-size: 11px; line-height: 1.5; max-width: 480px; margin: 0 auto;">
+                                Seluruh 3 posisi Stop Loss lama (DASH, BIRB, DOOD) dan 116 trade metode terdahulu telah dipindahkan rapi ke tab <strong>Seluruh Riwayat</strong>. Tab ini dikhususkan secara paten hanya untuk transaksi yang dieksekusi dengan metode skrining terbaru (Dynamic Leverage & Verifikasi 24 Bulan).
+                            </p>
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div style="text-align: center; padding: 22px 14px; background: rgba(0,0,0,0.25); border-radius: 12px; border: 1px solid rgba(255,255,255,0.03);">
+                            <div style="color: var(--binance-gold); font-size: 13px; font-weight: 700; margin-bottom: 4px;">Belum Ada Riwayat Transaksi</div>
+                            <p style="color: var(--text-secondary); font-size: 11px; line-height: 1.5; max-width: 440px; margin: 0 auto;">
+                                Data riwayat transaksi bursa sedang dimuat atau belum ada transaksi tercatat.
+                            </p>
+                        </div>
+                    `;
+                }
+                container.innerHTML = html;
+                return;
+            }
+
             listToRender.forEach(t => {
                 const pnlVal = parseFloat(t.pnl_usd || 0.0);
                 const pnlPct = parseFloat(t.pnl_pct || 0.0);
@@ -1775,6 +1794,10 @@ def get_dashboard_html() -> str:
                     resultBadge = '<span class="badge badge-gold" style="font-size: 8px;">SL BEP (LOSS)</span>';
                 }
 
+                const verBadge = (t.screening_version === 'v1_legacy' || !t.is_vps_session) 
+                    ? '<span class="badge badge-neutral" style="font-size: 8px; opacity: 0.65;">METODE LAMA</span>' 
+                    : '<span class="badge badge-gold" style="font-size: 8px;">SESI TERKINI</span>';
+
                 html += `
                     <div class="trade-card-item">
                         <div class="trade-col-left">
@@ -1783,6 +1806,7 @@ def get_dashboard_html() -> str:
                                 <span>${t.symbol}</span>
                                 <span class="badge badge-neutral" style="font-size: 9px;">${t.leverage || 50}x</span>
                                 ${resultBadge}
+                                ${activeTradeTab === 'all' ? verBadge : ''}
                             </div>
                             <div class="date-row">
                                 ${t.created_at || '-'} • Margin $${parseFloat(t.margin_used || 1.0).toFixed(2)}

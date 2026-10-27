@@ -62,6 +62,7 @@ class NeonDatabase:
                         ALTER TABLE binance_scalper.trades ADD COLUMN IF NOT EXISTS leverage INT DEFAULT 20;
                         ALTER TABLE binance_scalper.trades ADD COLUMN IF NOT EXISTS commission NUMERIC(18, 6) DEFAULT 0.0;
                         ALTER TABLE binance_scalper.trades ADD COLUMN IF NOT EXISTS binance_trade_id VARCHAR(50);
+                        ALTER TABLE binance_scalper.trades ADD COLUMN IF NOT EXISTS screening_version VARCHAR(30) DEFAULT 'v2_new_screening';
                     """)
                     
                     # 3. Tabel riwayat sinyal scalping yang terdeteksi
@@ -138,15 +139,22 @@ class NeonDatabase:
     def record_trade(self, trade_data: Dict[str, Any]):
         """Menyimpan hasil trade ke Neon Tech dengan data riil bursa."""
         try:
+            # Sesuai instruksi user: posisi SPXUSDT yang dibuka sebelum update skrining terbaru
+            # ditandai sebagai 'v1_legacy' saat ditutup agar langsung masuk ke seluruh riwayat.
+            sym = trade_data.get("symbol", "")
+            sc_ver = trade_data.get("screening_version")
+            if not sc_ver:
+                sc_ver = "v1_legacy" if sym == "SPXUSDT" else "v2_new_screening"
+
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
                         INSERT INTO binance_scalper.trades (
                             symbol, side, entry_price, exit_price, qty, notional, margin_used,
-                            leverage, commission, binance_trade_id, pnl_usd, pnl_pct, result, closed_at
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW());
+                            leverage, commission, binance_trade_id, pnl_usd, pnl_pct, result, screening_version, closed_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW());
                     """, (
-                        trade_data.get("symbol"),
+                        sym,
                         trade_data.get("side", "BUY"),
                         trade_data.get("entry_price", 0.0),
                         trade_data.get("exit_price", 0.0),
@@ -158,7 +166,8 @@ class NeonDatabase:
                         trade_data.get("binance_trade_id"),
                         trade_data.get("pnl_usd", 0.0),
                         trade_data.get("pnl_pct", 0.0),
-                        trade_data.get("result", "WIN")
+                        trade_data.get("result", "WIN"),
+                        sc_ver
                     ))
                 conn.commit()
         except Exception as e:
@@ -289,7 +298,7 @@ class NeonDatabase:
                     cur.execute("""
                         SELECT id, symbol, side, entry_price, exit_price, qty, notional,
                                margin_used, leverage, commission, binance_trade_id,
-                               pnl_usd, pnl_pct, result, closed_at, created_at
+                               pnl_usd, pnl_pct, result, closed_at, created_at, screening_version
                         FROM binance_scalper.trades
                         ORDER BY id DESC LIMIT %s;
                     """, (limit,))

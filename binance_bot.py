@@ -464,6 +464,7 @@ class BinanceScalper:
         res = "WIN" if (real_pnl_usd > 0.0 and not is_bep) else "LOSS"
         margin_used = round((c_notional / c_lev) if c_lev > 0 else (c_notional / 20.0), 4)
 
+        sc_ver = closed_pos.get("screening_version") or ("v1_legacy" if sym == "SPXUSDT" else "v2_new_screening")
         trade_record = {
             "symbol": sym,
             "side": c_side.upper(),
@@ -478,6 +479,7 @@ class BinanceScalper:
             "pnl_usd": round(real_pnl_usd, 4),
             "pnl_pct": round(real_pnl_pct, 2),
             "result": res,
+            "screening_version": sc_ver,
             "closed_at": time.strftime("%Y-%m-%d %H:%M:%S")
         }
 
@@ -1053,7 +1055,8 @@ class BinanceScalper:
                             "risk_usd": formatted_qty * formatted_price * config.SL_PERCENT,
                             "reward_usd": formatted_qty * formatted_price * config.TP_PERCENT,
                             "opened_at": time.time(),
-                            "notional": formatted_qty * formatted_price
+                            "notional": formatted_qty * formatted_price,
+                            "screening_version": "v2_new_screening"
                         }
                         self.active_order = None
                         self.active_signals = [s for s in self.active_signals if s.get("symbol") != symbol]
