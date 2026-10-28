@@ -874,11 +874,11 @@ def get_dashboard_html() -> str:
                         <span class="pos-spec-val" id="specMark">$0.00</span>
                     </div>
                     <div class="pos-spec-item">
-                        <span class="pos-spec-label">Target Take Profit (+2.5%)</span>
+                        <span class="pos-spec-label">Target Take Profit (RR 1:2.0)</span>
                         <span class="pos-spec-val" style="color: var(--bull-green);" id="specTp">$0.00</span>
                     </div>
                     <div class="pos-spec-item">
-                        <span class="pos-spec-label">Batas Stop Loss (-1.0%)</span>
+                        <span class="pos-spec-label">Batas Stop Loss (Struktur Wick)</span>
                         <span class="pos-spec-val" style="color: var(--bear-red);" id="specSl">$0.00</span>
                     </div>
                     <div class="pos-spec-item" style="grid-column: span 2;">
@@ -926,8 +926,8 @@ def get_dashboard_html() -> str:
                     <!-- Rule 2: Leverage -->
                     <div class="rule-card">
                         <span class="rule-title">Target Leverage Adaptif</span>
-                        <span class="rule-val" id="ruleLevVal">Maksimal 50x (20x - 50x)</span>
-                        <span class="rule-desc" id="ruleLevDesc">Dynamic Leverage: Dihitung fleksibel dari SL wick candle agar kerugian tepat sebesar margin ($1.00 habis) & keuntungan tepat 2x margin (+2.00 dolar net).</span>
+                        <span class="rule-val" id="ruleLevVal">Adaptif 7x s/d 75x</span>
+                        <span class="rule-desc" id="ruleLevDesc">Dynamic Leverage: Dihitung fleksibel dari SL wick candle (rentang 7x s/d 75x) dengan rasio Risk-to-Reward tepat 1:2.0 Murni & perlindungan mutlak anti-likuidasi MMR bursa.</span>
                     </div>
 
                     <!-- Rule 3: Rasio Profit & Rugi -->
@@ -1872,6 +1872,11 @@ def get_dashboard_html() -> str:
                 const pColor = posPnl >= 0 ? 'var(--bull-green)' : 'var(--bear-red)';
                 const pSign = posPnl >= 0 ? '+' : '';
                 const posSide = (currentActivePosition.side || 'BUY').toUpperCase();
+                const ep = parseFloat(currentActivePosition.entry_price || 0);
+                const tp = parseFloat(currentActivePosition.tp_price || 0);
+                const sl = parseFloat(currentActivePosition.sl_price || 0);
+                const slPct = ep > 0 ? (Math.abs(ep - sl) / ep * 100).toFixed(2) : '0.00';
+                const tpPct = ep > 0 ? (Math.abs(tp - ep) / ep * 100).toFixed(2) : '0.00';
                 html += `
                     <div class="trade-card-item" style="border: 1px solid var(--binance-gold); background: rgba(240, 185, 11, 0.09); margin-bottom: 8px;">
                         <div class="trade-col-left">
@@ -1879,12 +1884,13 @@ def get_dashboard_html() -> str:
                                 <span class="badge badge-gold" style="font-size: 8px;">POSISI AKTIF</span>
                                 <span>${currentActivePosition.symbol}</span>
                                 <span class="badge ${posSide === 'BUY' || posSide === 'LONG' ? 'badge-green' : 'badge-red'}">${posSide} ${currentActivePosition.leverage || 50}x</span>
+                                <span class="badge badge-gold" style="font-size: 8px;">RR 1:2.0 MURNI</span>
                             </div>
-                            <div class="date-row">Entry: $${parseFloat(currentActivePosition.entry_price || 0).toFixed(4)} | TP: $${parseFloat(currentActivePosition.tp_price || 0).toFixed(4)} | SL: $${parseFloat(currentActivePosition.sl_price || 0).toFixed(4)}</div>
+                            <div class="date-row">Entry: $${ep.toFixed(4)} | TP: $${tp.toFixed(4)} (+${tpPct}%) | SL: $${sl.toFixed(4)} (-${slPct}%)</div>
                         </div>
                         <div class="trade-col-right">
                             <span class="pnl-text" style="color: ${pColor};">${pSign}$${posPnl.toFixed(2)} (${pSign}${posPnlPct.toFixed(2)}%)</span>
-                            <span class="price-row" style="color: var(--binance-gold);">MEMANTAU KELUARAN 1:2</span>
+                            <span class="price-row" style="color: var(--binance-gold);">TARGET 1:2.0 AKTIF</span>
                         </div>
                     </div>
                 `;

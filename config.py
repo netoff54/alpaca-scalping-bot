@@ -72,9 +72,9 @@ class BotConfig:
     VOLUME_SPIKE_FACTOR: float = 1.15      # Konfirmasi volume transaksi >= 115% rata-rata
 
     # --- Risk / Reward Ratio Kalibrasi Grid Kalimasada (Wajib 1:2.0 NET Murni) ---
-    SL_PERCENT: float = 0.0080             # Stop Loss presisi 0.80% kotor (Net Loss: 0.88% setelah seluruh fee)
-    TP_PERCENT: float = 0.0181             # Take Profit presisi 1.81% kotor (Net Win: 1.76% setelah seluruh fee)
-    RR_RATIO: float = 2.000                # Rasio Risk-to-Reward Net Bersih Tepat 1:2.000 (1.76% / 0.88% = 2.000)
+    SL_PERCENT: float = 0.0080             # Stop Loss presisi 0.80%
+    TP_PERCENT: float = 0.0160             # Take Profit presisi 1.60% (Tepat 2x SL 0.80% = Rasio 1:2.0 Murni)
+    RR_RATIO: float = 2.000                # Rasio Risk-to-Reward Tepat 1:2.000 Murni (TP Distance = 2.0 * SL Distance)
     BEP_PROFIT_TRIGGER: float = 0.0128     # Pemicu Break-Even saat profit mencapai 1.6R (+1.28%)
     BEP_LOCK_PROFIT: float = 0.0012        # Kunci profit kotor +0.12% saat BEP aktif (+0.04% Net Profit, 100% fee tertutup total!)
     STRUCTURAL_SL_ENABLED: bool = True     # Stop Loss struktural berbasis ekor lilin Price Action

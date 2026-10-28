@@ -342,8 +342,9 @@ def run_3year_audit():
                 else:
                     trade_margin = wallet * 0.010
 
-                tp_dist = (2.0 * eff_risk) + ROUNDTRIP_FEE
-                tp_p = entry_p * (1.0 + tp_dist) if top_side == "BUY" else entry_p - tp_dist
+                # Strict 1:2 Risk to Reward (TP distance is exactly 2.0x SL distance)
+                tp_dist = 2.0 * sl_dist
+                tp_p = entry_p * (1.0 + tp_dist) if top_side == "BUY" else entry_p * (1.0 - tp_dist)
 
                 active_pos = {
                     "sym": top_s, "side": top_side, "entry": entry_p, "sl": sl_p, "tp": tp_p,

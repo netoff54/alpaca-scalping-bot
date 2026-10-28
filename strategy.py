@@ -547,13 +547,13 @@ def analyze_coin_comprehensive(
         safe_max_lev = min(config.LEVERAGE_MAX, max_symbol_leverage, max_liq_safe_lev) if max_symbol_leverage > 0 else min(config.LEVERAGE_MAX, max_liq_safe_lev)
         dynamic_leverage = max(config.LEVERAGE_MIN, min(safe_max_lev, calc_lev))
 
-        net_loss = eff_risk
-        net_win = 2.0 * net_loss
-        tp_percent = net_win + maker_fee + maker_fee + funding_buf
-        tp_dist = entry_price * tp_percent
+        # 3. Rasio Risk-to-Reward Paten Tepat 1:2.0 Murni (Jarak TP Tepat 2x Lipat Jarak SL):
+        # Memastikan perbandingan harga TP dan SL di Binance App, TradingView, & Web selalu 1:2 presisi.
+        tp_dist = 2.0 * risk_dist
+        tp_percent = 2.0 * sl_percent
         tp_price = entry_price + tp_dist if signal_side == "BUY" else entry_price - tp_dist
 
-        bep_trigger_percent = max(0.0128, sl_percent * 1.6)
+        bep_trigger_percent = max(0.0128, sl_percent * 1.5)
         bep_trigger_dist = entry_price * bep_trigger_percent
         bep_trigger_price = entry_price + bep_trigger_dist if signal_side == "BUY" else entry_price - bep_trigger_dist
 

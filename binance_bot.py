@@ -320,7 +320,9 @@ class BinanceScalper:
                 bep_trig_val = getattr(config, "BEP_PROFIT_TRIGGER", 0.0070)
                 if self.active_position and self.active_position.get("symbol") == symbol:
                     sl_price = self.active_position.get("sl_price", entry_price * (1.0 - config.SL_PERCENT if side == "buy" else 1.0 + config.SL_PERCENT))
-                    tp_price = self.active_position.get("tp_price", entry_price * (1.0 + config.TP_PERCENT if side == "buy" else 1.0 - config.TP_PERCENT))
+                    # Strict 1:2 Risk to Reward: Jarak TP wajib tepat 2x lipat jarak SL
+                    sl_dist = abs(entry_price - float(sl_price))
+                    tp_price = self.client.format_price(symbol, entry_price + (2.0 * sl_dist) if side == "buy" else entry_price - (2.0 * sl_dist))
                     bep_trigger_price = self.active_position.get("bep_trigger_price", entry_price * (1.0 + bep_trig_val if side == "buy" else 1.0 - bep_trig_val))
                     bep_activated = self.active_position.get("bep_activated", False)
                     opened_at = self.active_position.get("opened_at", time.time())
@@ -328,8 +330,9 @@ class BinanceScalper:
                     native_sl_id = self.active_position.get("native_sl_order_id")
                     native_tp_id = self.active_position.get("native_tp_order_id")
                 else:
-                    sl_price = entry_price * (1.0 - config.SL_PERCENT) if side == "buy" else entry_price * (1.0 + config.SL_PERCENT)
-                    tp_price = entry_price * (1.0 + config.TP_PERCENT) if side == "buy" else entry_price * (1.0 - config.TP_PERCENT)
+                    sl_price = self.client.format_price(symbol, entry_price * (1.0 - config.SL_PERCENT) if side == "buy" else entry_price * (1.0 + config.SL_PERCENT))
+                    sl_dist = abs(entry_price - float(sl_price))
+                    tp_price = self.client.format_price(symbol, entry_price + (2.0 * sl_dist) if side == "buy" else entry_price - (2.0 * sl_dist))
                     bep_trigger_price = entry_price * (1.0 + bep_trig_val) if side == "buy" else entry_price * (1.0 - bep_trig_val)
                     bep_activated = False
                     opened_at = time.time()
@@ -353,12 +356,21 @@ class BinanceScalper:
                                     self.client.cancel_order(symbol, dup_id)
                         
                         if tp_orders:
-                            native_tp_id = tp_orders[0].get("algoId")
-                            # Batalkan order TP duplikat jika ada lebih dari 1
-                            for dup_tp in tp_orders[1:]:
-                                dup_id = dup_tp.get("algoId")
-                                if dup_id:
-                                    self.client.cancel_order(symbol, dup_id)
+                            cur_tp_price = float(tp_orders[0].get("stopPrice", 0.0) or tp_orders[0].get("price", 0.0))
+                            # Jika harga TP bursa berbeda dari target 1:2 presisi, update ordermya
+                            if cur_tp_price > 0 and abs(cur_tp_price - float(tp_price)) > (0.0005 * entry_price):
+                                console.log(f"[bold yellow]🔄 Memperbarui Take Profit bursa {symbol} dari {cur_tp_price} ke {tp_price} agar strictly 1:2.0 RR![/bold yellow]")
+                                for old_tp in tp_orders:
+                                    old_id = old_tp.get("algoId") or old_tp.get("orderId")
+                                    if old_id:
+                                        self.client.cancel_order(symbol, old_id)
+                                native_tp_id = None
+                            else:
+                                native_tp_id = tp_orders[0].get("algoId")
+                                for dup_tp in tp_orders[1:]:
+                                    dup_id = dup_tp.get("algoId") or dup_tp.get("orderId")
+                                    if dup_id:
+                                        self.client.cancel_order(symbol, dup_id)
                     except Exception as e_chk:
                         console.log(f"[dim]Notice check existing algo orders: {e_chk}[/dim]")
 
@@ -1090,7 +1102,7 @@ class BinanceScalper:
                         sl_side = "SELL" if side.lower() == "buy" else "BUY"
                         bep_trigger = getattr(config, "BEP_PROFIT_TRIGGER", 0.0128)
                         sl_pct = sig.get("sl_percent", config.SL_PERCENT * 100.0) / 100.0
-                        tp_pct = sig.get("tp_percent", config.TP_PERCENT * 100.0) / 100.0
+                        tp_pct = 2.0 * sl_pct  # Strict 1:2.000 Risk-to-Reward Ratio
                         actual_sl = self.client.format_price(symbol, formatted_price * (1.0 - sl_pct) if side.lower() == "buy" else formatted_price * (1.0 + sl_pct))
                         actual_tp = self.client.format_price(symbol, formatted_price * (1.0 + tp_pct) if side.lower() == "buy" else formatted_price * (1.0 - tp_pct))
                         actual_bep = self.client.format_price(symbol, formatted_price * (1.0 + bep_trigger) if side.lower() == "buy" else formatted_price * (1.0 - bep_trigger))
