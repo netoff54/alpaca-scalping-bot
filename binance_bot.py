@@ -76,7 +76,7 @@ class BinanceScalper:
         # Pengunci Target Surplus Bulanan (>= 10.0%) & Rezim Skenario Kalimasada
         self.state_file: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_state.json")
         self.current_month: str = time.strftime("%Y-%m")
-        self.month_start_wallet: float = 98.14
+        self.month_start_wallet: float = 101.15
         self.monthly_profit_locked: bool = False
         self._cached_market_regime: Dict[str, Any] = {"regime": "SIDEWAYS", "updated_at": 0.0}
 
@@ -89,6 +89,8 @@ class BinanceScalper:
     def load_bot_state(self):
         """Memuat status pengunci target bulanan dan circuit breaker dari bot_state.json."""
         try:
+            cap_sum = db.get_capital_summary()
+            net_cap = float(cap_sum.get("net_capital_invested", 101.15))
             if os.path.exists(self.state_file):
                 with open(self.state_file, "r") as fp:
                     st = json.load(fp)
@@ -96,18 +98,21 @@ class BinanceScalper:
                     now_month = time.strftime("%Y-%m")
                     if saved_month == now_month:
                         self.current_month = saved_month
-                        self.month_start_wallet = float(st.get("month_start_wallet", 98.14))
+                        stored_val = float(st.get("month_start_wallet", net_cap))
+                        # Selalu samakan baseline dengan Modal Pokok (101.15) atau lebih tinggi jika ada surplus
+                        self.month_start_wallet = max(net_cap, stored_val)
                         self.monthly_profit_locked = bool(st.get("monthly_profit_locked", False))
                         self.consecutive_losses = int(st.get("consecutive_losses", 0))
                         self.circuit_breaker_until = float(st.get("circuit_breaker_until", 0.0))
                     else:
                         self.current_month = now_month
-                        self.month_start_wallet = self._cached_balance.get("total_wallet", 98.14)
+                        self.month_start_wallet = max(net_cap, self._cached_balance.get("total_wallet", net_cap))
                         self.monthly_profit_locked = False
                         self.consecutive_losses = 0
                         self.circuit_breaker_until = 0.0
                         self.save_bot_state()
             else:
+                self.month_start_wallet = net_cap
                 self.save_bot_state()
         except Exception as e:
             console.log(f"[dim]Load state notice: {e}[/dim]")
@@ -441,17 +446,19 @@ class BinanceScalper:
         real_commission = 0.0
         binance_trade_id = None
 
-        # 1. Coba ambil data riil eksekusi bursa dengan clustering multi-fill
+        # 1. Coba ambil data riil eksekusi bursa dengan clustering multi-fill (mencakup REALIZED_PNL & INSURANCE_CLEAR)
         try:
-            incomes = self.client.fetch_income_history(income_type="REALIZED_PNL", limit=10, symbol=sym)
+            incomes = self.client.fetch_income_history(income_type=None, limit=20, symbol=sym)
             if incomes:
-                sym_incomes = [inc for inc in incomes if inc.get("symbol") == sym]
+                sym_incomes = [inc for inc in incomes if inc.get("symbol") == sym and inc.get("incomeType") in ("REALIZED_PNL", "INSURANCE_CLEAR")]
                 if sym_incomes:
                     # Ambil cluster trade penutupan terbaru (menyatukan multi-fill dalam selang 120s)
                     last_time = int(sym_incomes[-1].get("time", 0))
                     cluster = [inc for inc in sym_incomes if abs(int(inc.get("time", 0)) - last_time) <= 120000]
                     real_pnl_usd = round(sum(float(inc.get("income", 0.0)) for inc in cluster), 4)
-                    binance_trade_id = str(cluster[-1].get("tradeId", ""))
+                    for inc in cluster:
+                        if inc.get("tradeId"):
+                            binance_trade_id = str(inc.get("tradeId"))
         except Exception as e_inc:
             console.log(f"[dim]Notice fetch income PnL: {e_inc}[/dim]")
 
@@ -708,10 +715,17 @@ class BinanceScalper:
         bal = self.get_futures_balance()
         cur_wallet = bal.get("total_wallet", 0.0)
         now_month = time.strftime("%Y-%m")
+        cap_sum = db.get_capital_summary()
+        net_cap = float(cap_sum.get("net_capital_invested", 101.15))
+
         if now_month != self.current_month:
             self.current_month = now_month
-            self.month_start_wallet = cur_wallet if cur_wallet > 0 else 98.14
+            self.month_start_wallet = max(net_cap, cur_wallet if cur_wallet > 0 else net_cap)
             self.monthly_profit_locked = False
+            self.save_bot_state()
+        elif self.month_start_wallet < net_cap:
+            # Fleksibel jika user top up modal baru: samakan baseline dengan Modal Pokok baru
+            self.month_start_wallet = net_cap
             self.save_bot_state()
 
         if self.monthly_profit_locked:

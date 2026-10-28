@@ -119,11 +119,16 @@ def api_dashboard_summary():
     ws_alive = ws_mgr.is_alive() if ws_mgr else False
     tracked_count = len(ws_mgr.prices) if ws_mgr else 829
 
-    month_start = getattr(scalper, "month_start_wallet", init_capital)
+    month_start = float(getattr(scalper, "month_start_wallet", init_capital))
+    if month_start < init_capital:
+        month_start = init_capital
+        scalper.month_start_wallet = init_capital
     month_str = getattr(scalper, "current_month", time.strftime("%Y-%m"))
     month_roi = round(((cur_wallet - month_start) / month_start * 100.0), 2) if month_start > 0 else 0.0
     profit_locked = getattr(scalper, "monthly_profit_locked", False)
     market_regime = getattr(scalper, "_cached_market_regime", {}).get("regime", "SIDEWAYS")
+    monthly_target_wallet = round(month_start * 1.10, 2)
+    month_deficit_usd = round(cur_wallet - month_start, 2)
 
     # Status Istirahat Circuit Breaker
     now_ts = time.time()
@@ -150,6 +155,8 @@ def api_dashboard_summary():
         "websocket_status": "LIVE_STREAMING" if ws_alive else "STANDBY",
         "current_month": month_str,
         "month_start_wallet": round(month_start, 2),
+        "monthly_target_wallet": monthly_target_wallet,
+        "month_deficit_usd": month_deficit_usd,
         "month_roi_pct": month_roi,
         "monthly_profit_locked": profit_locked,
         "market_regime": market_regime,
@@ -157,6 +164,21 @@ def api_dashboard_summary():
         "rest_remaining_minutes": cb_rem_min,
         "rest_remaining_seconds": cb_rem_sec
     }
+
+@app.post("/api/capital/topup", response_class=JSONResponse)
+def api_record_topup(payload: Dict[str, Any]):
+    """Endpoint untuk mencatat penambahan modal pokok (Deposit / Top Up) secara instan."""
+    amt = float(payload.get("amount", 0.0))
+    notes = str(payload.get("notes", "Top Up Modal Pokok via Web Dashboard"))
+    res = db.record_capital_topup(amt, notes)
+    if res.get("status") == "success":
+        cap_sum = db.get_capital_summary()
+        new_net = float(cap_sum.get("net_capital_invested", 101.15))
+        scalper.month_start_wallet = new_net
+        scalper.save_bot_state()
+        res["net_capital_invested"] = new_net
+        res["new_month_start_wallet"] = new_net
+    return JSONResponse(content=res)
 
 @app.get("/api/wallet-history", response_class=JSONResponse)
 def api_wallet_history(limit: int = 60):

@@ -423,7 +423,7 @@ class VPSDatabase:
                             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
                         """, (t_id, sym, itype, ival, asset, info, tr_id, t_timestamp))
 
-                        if itype == "REALIZED_PNL":
+                        if itype in ("REALIZED_PNL", "INSURANCE_CLEAR"):
                             gross_pnl += ival
                         elif itype == "COMMISSION":
                             total_commission += abs(ival)
@@ -433,7 +433,7 @@ class VPSDatabase:
                 # Query summary dari income_records
                 cur.execute("""
                     SELECT 
-                        COALESCE(SUM(CASE WHEN income_type = 'REALIZED_PNL' THEN income ELSE 0 END), 0) as gross_pnl,
+                        COALESCE(SUM(CASE WHEN income_type IN ('REALIZED_PNL', 'INSURANCE_CLEAR') THEN income ELSE 0 END), 0) as gross_pnl,
                         COALESCE(SUM(CASE WHEN income_type = 'COMMISSION' THEN ABS(income) ELSE 0 END), 0) as total_commission,
                         COALESCE(SUM(CASE WHEN income_type = 'FUNDING_FEE' THEN income ELSE 0 END), 0) as total_funding
                     FROM income_records;
@@ -454,6 +454,14 @@ class VPSDatabase:
                     UPDATE trades 
                     SET leverage = 20, margin_used = ROUND(notional / 20.0, 4) 
                     WHERE id >= 14;
+                """)
+
+                # Selaraskan nominal kerugian riil trade yang terkena likuidasi / INSURANCE_CLEAR
+                # agar angka PnL di website 100% persis dengan pembukuan aplikasi resmi Binance
+                cur.execute("""
+                    UPDATE trades 
+                    SET pnl_usd = -0.9070, pnl_pct = -4.53, commission = 0.0040
+                    WHERE symbol = 'COLLECTUSDT' AND id = 127;
                 """)
 
                 # 3. Hitung ringkasan trade
@@ -538,7 +546,7 @@ class VPSDatabase:
                 # 3. Income records
                 cur.execute("""
                     SELECT 
-                        COALESCE(SUM(CASE WHEN income_type = 'REALIZED_PNL' THEN income ELSE 0 END), 0) as gross_pnl,
+                        COALESCE(SUM(CASE WHEN income_type IN ('REALIZED_PNL', 'INSURANCE_CLEAR') THEN income ELSE 0 END), 0) as gross_pnl,
                         COALESCE(SUM(CASE WHEN income_type = 'COMMISSION' THEN ABS(income) ELSE 0 END), 0) as total_commission,
                         COALESCE(SUM(CASE WHEN income_type = 'FUNDING_FEE' THEN income ELSE 0 END), 0) as total_funding
                     FROM income_records;
@@ -577,6 +585,25 @@ class VPSDatabase:
                 "pure_trading_pnl": -1.0684, "total_commission_paid": 0.5546, "total_funding_fee_paid": -0.5454,
                 "total_trades": 104, "winning_trades": 13, "win_rate_pct": 12.50
             }
+
+    def record_capital_topup(self, amount: float, notes: str = "Top Up / Tambah Modal Pokok") -> Dict[str, Any]:
+        """Mencatat penambahan modal pokok (Deposit / Top Up) secara fleksibel."""
+        if amount <= 0:
+            return {"status": "error", "error": "Amount harus lebih besar dari 0"}
+        try:
+            with self.get_connection() as conn:
+                cur = conn.cursor()
+                tran_id = f"TOPUP_{int(time.time())}"
+                cur.execute("""
+                    INSERT INTO capital_history (event_type, amount, tran_id, notes)
+                    VALUES ('DEPOSIT_P2P', ?, ?, ?);
+                """, (amount, tran_id, notes))
+                conn.commit()
+                console.log(f"[bold green]Top up modal pokok sebesar ${amount:.2f} berhasil dicatat di database.[/bold green]")
+                return {"status": "success", "amount": amount, "tran_id": tran_id}
+        except Exception as e:
+            console.log(f"[red]Error mencatat top up modal di database: {e}[/red]")
+            return {"status": "error", "error": str(e)}
 
 # Alias NeonDatabase -> VPSDatabase agar kompatibel 100%
 NeonDatabase = VPSDatabase

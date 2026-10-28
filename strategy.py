@@ -538,6 +538,18 @@ def analyze_coin_comprehensive(
         max_allowed_lev = min(config.LEVERAGE_MAX, max_symbol_leverage) if max_symbol_leverage > 0 else config.LEVERAGE_MAX
         dynamic_leverage = max(min_lev, min(max_allowed_lev, calc_lev))
 
+        # GARANSI ANTI-LIKUIDASI MUTLAK BURSA (Absolute Liquidation Defense):
+        # Jarak Stop Loss HARUS selalu lebih dekat daripada Jarak Likuidasi Bursa!
+        # Formula Jarak Likuidasi Isolated: dist_liq = (1.0 / dynamic_leverage) - MMR (maks 2.5% Tier 1)
+        # Berikan buffer aman 0.50% (0.0050) agar Stop Loss bursa SELALU tereksekusi sebelum likuidasi terjadi!
+        mmr_rate = 0.025 if dynamic_leverage <= 20 else 0.005
+        max_safe_sl = max(0.0100, (1.0 / dynamic_leverage) - mmr_rate - 0.0050)
+        if sl_percent > max_safe_sl:
+            sl_percent = max_safe_sl
+            risk_dist = entry_price * sl_percent
+            sl_price = entry_price - risk_dist if signal_side == "BUY" else entry_price + risk_dist
+            eff_risk = sl_percent + roundtrip_fee
+
         net_loss = eff_risk
         net_win = 2.0 * net_loss
         tp_percent = net_win + maker_fee + maker_fee + funding_buf

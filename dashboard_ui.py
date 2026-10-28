@@ -1525,16 +1525,22 @@ def get_dashboard_html() -> str:
                     const badgeMonthlyLock = document.getElementById('badgeMonthlyLock');
                     const valMonthlyDesc = document.getElementById('valMonthlyDesc');
 
+                    const mBase = parseFloat(d.month_start_wallet || d.initial_capital || 101.15).toFixed(2);
+                    const mTarget = parseFloat(d.monthly_target_wallet || (mBase * 1.10)).toFixed(2);
+                    const mDeficit = parseFloat(d.month_deficit_usd || (curBal - mBase)).toFixed(2);
+
                     if (valMonthlyRoi) {
                         valMonthlyRoi.textContent = `${mRoi >= 0 ? '+' : ''}${mRoi.toFixed(2)}%`;
                         valMonthlyRoi.style.color = mRoi >= 0 ? 'var(--bull-green)' : 'var(--bear-red)';
                     }
                     if (badgeMonthlyLock) {
-                        badgeMonthlyLock.textContent = mLock ? 'PROFIT DIKUNCI' : 'TARGET 10%';
+                        badgeMonthlyLock.textContent = mLock ? 'PROFIT DIKUNCI' : 'TARGET +10%';
                         badgeMonthlyLock.className = mLock ? 'badge badge-green' : 'badge badge-gold';
                     }
                     if (valMonthlyDesc) {
-                        valMonthlyDesc.textContent = mLock ? `Target ${d.current_month || ''} Tercapai! Modal diamankan.` : `Awal: $${d.month_start_wallet || 98.14} | Rezim: ${d.market_regime || 'AUTO'}`;
+                        valMonthlyDesc.textContent = mLock 
+                            ? `Target ${d.current_month || ''} Tercapai ($${mTarget})! Modal diamankan.` 
+                            : `Modal Pokok: $${mBase} | Target 10%: $${mTarget} (${mDeficit >= 0 ? '+' : ''}$${mDeficit})`;
                     }
                 }
 
