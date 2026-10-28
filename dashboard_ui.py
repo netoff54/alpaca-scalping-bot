@@ -1548,8 +1548,8 @@ def get_dashboard_html() -> str:
                 const maxCoinLev = d.coin_max_leverage || 50;
                 const ruleLevVal = document.getElementById('ruleLevVal');
                 const ruleLevDesc = document.getElementById('ruleLevDesc');
-                if (ruleLevVal) ruleLevVal.textContent = `Maksimal 50x (Adaptif 20x - 50x)`;
-                if (ruleLevDesc) ruleLevDesc.textContent = `Sistem menembak 50x. Jika Binance membatasi koin tersebut, bot otomatis menurunkan ke 49x, 48x, hingga batas yang diizinkan (minimal aman 20x). Koin saat ini mendukung hingga: ${maxCoinLev}x.`;
+                if (ruleLevVal) ruleLevVal.textContent = `Maksimal 50x (Adaptif 10x - 50x)`;
+                if (ruleLevDesc) ruleLevDesc.textContent = `Leverage beradaptasi dinamis mengikuti jarak SL wick koin (10x s/d 50x) agar risiko terukur tepat $1.00 margin habis dan likuidasi bursa tidak tersentuh. Koin saat ini mendukung hingga: ${maxCoinLev}x.`;
 
                 // 6. Status Terminal Posisi Aktif
                 const posTerminal = document.getElementById('sec-position');
