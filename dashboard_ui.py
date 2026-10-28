@@ -989,10 +989,10 @@ def get_dashboard_html() -> str:
                 <span class="badge badge-neutral" id="tradeSummaryPill">0 TRADE</span>
             </div>
 
-            <!-- Tab Switcher: Sesi VPS Terkini vs Seluruh Riwayat -->
+            <!-- Tab Switcher: Seluruh Riwayat vs Sesi VPS Terkini -->
             <div class="history-tab-group">
-                <button class="history-tab-btn active" id="tabVpsSession" onclick="switchTradeTab('session')">Sesi VPS Terkini</button>
-                <button class="history-tab-btn" id="tabAllHistory" onclick="switchTradeTab('all')">Seluruh Riwayat</button>
+                <button class="history-tab-btn active" id="tabAllHistory" onclick="switchTradeTab('all')">Seluruh Riwayat</button>
+                <button class="history-tab-btn" id="tabVpsSession" onclick="switchTradeTab('session')">Sesi VPS Terkini</button>
             </div>
 
             <!-- Performance Win Rate Mini Strip -->
@@ -1041,7 +1041,7 @@ def get_dashboard_html() -> str:
     <script>
         // --- GLOBAL APP STATE ---
         let rawTradeList = [];
-        let activeTradeTab = 'session';
+        let activeTradeTab = 'all';
         let liveTargetSymbol = '';
         let currentCoinData = null;
         let currentActivePosition = null;
@@ -1849,9 +1849,9 @@ def get_dashboard_html() -> str:
                 if (activeTradeTab === 'session') {
                     html += `
                         <div style="text-align: center; padding: 22px 14px; background: rgba(0,0,0,0.25); border-radius: 12px; border: 1px dashed rgba(240, 185, 11, 0.25); margin-top: 4px;">
-                            <div style="color: var(--binance-gold); font-size: 13px; font-weight: 700; margin-bottom: 6px;">Sesi Skrining Terbaru Aktif (0 Transaksi Tertutup)</div>
+                            <div style="color: var(--binance-gold); font-size: 13px; font-weight: 700; margin-bottom: 6px;">Sesi VPS Terkini Aktif (0 Transaksi Tertutup)</div>
                             <p style="color: var(--text-secondary); font-size: 11px; line-height: 1.5; max-width: 480px; margin: 0 auto;">
-                                Seluruh 3 posisi Stop Loss lama (DASH, BIRB, DOOD) dan 116 trade metode terdahulu telah dipindahkan rapi ke tab <strong>Seluruh Riwayat</strong>. Tab ini dikhususkan secara paten hanya untuk transaksi yang dieksekusi dengan metode skrining terbaru (Dynamic Leverage & Verifikasi 24 Bulan).
+                                Seluruh 128 riwayat transaksi terdahulu telah dipindahkan rapi ke tab <strong>Seluruh Riwayat</strong>. Tab ini dikhususkan secara bersih untuk mencatat posisi baru yang dieksekusi sejak pembaruan sistem terkini (Dynamic Leverage 7x - 75x).
                             </p>
                         </div>
                     `;

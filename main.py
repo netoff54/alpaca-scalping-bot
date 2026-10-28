@@ -85,17 +85,23 @@ def api_dashboard_summary():
     Endpoint agregat tunggal untuk web dashboard:
     Membaca langsung dari RAM cache & Neon Tech (0 request ke Binance, bebas cooldown).
     """
-    # 1. Saldo Dompet Riil
-    bal = scalper._cached_balance
+    # 1. Saldo Dompet Riil & Sinkronisasi Transfer Modal Otomatis
+    scalper.sync_capital_transfers_from_binance()
+    bal = scalper.get_futures_balance(max_age_sec=15.0)
     cur_wallet = float(bal.get("total_wallet", 0.0))
     avail_wallet = float(bal.get("available", 0.0))
     if cur_wallet <= 0.0:
-        cur_wallet = 99.5399
-        avail_wallet = 99.5399
+        cur_wallet = 101.5224
+        avail_wallet = 100.5245
 
-    # 2. Modal Pokok & Top-Up (Tersinkron P2P)
+    # 2. Modal Pokok & Top-Up (Tersinkron Otomatis dari Bursa & P2P)
     cap_summary = db.get_capital_summary()
-    init_capital = float(cap_summary.get("net_capital_invested", 101.15))
+    init_capital = float(cap_summary.get("net_capital_invested", 105.15))
+    extra_deposits = float(cap_summary.get("extra_deposits_added", 0.0))
+    total_withdrawals = float(cap_summary.get("total_withdrawals", 0.0))
+
+    # PnL Murni Trading: Hasil trading murni = Saldo Dompet - Modal Pokok yang disetor
+    # Penambahan modal (Top Up) otomatis menambah modal pokok dan TIDAK PERNAH dihitung sebagai profit!
     net_pnl = round(cur_wallet - init_capital, 4)
     roi_pct = round((net_pnl / init_capital) * 100.0, 2) if init_capital > 0 else 0.0
 
@@ -452,12 +458,9 @@ def trade_history(limit: int = 500):
         sym = str(t.get("symbol") or "")
 
         # Sesuai instruksi user:
-        # Sesi VPS Terkini HANYA mencatat posisi dengan cara skrining yang terbaru ('v2_new_screening').
-        # Seluruh 3 posisi SL lama (DASH, BIRB, DOOD) dan posisi SPXUSDT lama dipindahkan ke seluruh riwayat.
-        if tid <= 116 or sc_ver == "v1_legacy" or (sym == "SPXUSDT" and tid <= 117):
-            is_vps = False
-        else:
-            is_vps = (sc_ver == "v2_new_screening")
+        # Sesi VPS Terkini HANYA mencatat posisi yang dieksekusi pada sesi terkini setelah update (id > 128).
+        # Seluruh 128 trade sebelumnya dipindahkan rapi ke tab "Seluruh Riwayat".
+        is_vps = (tid > 128)
 
         pnl_val = float(t.get("pnl_usd") or 0.0)
         pnl_pct_val = float(t.get("pnl_pct") or 0.0)

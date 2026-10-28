@@ -13,6 +13,7 @@ klines_1month_cache.json
 data_1year/
 data_2year_samples/
 historical_2y/
+historical_3y/
 test_*.py
 tune_*.py
 experiment_*.py
@@ -23,4 +24,8 @@ run_*.py
 find_*.py
 download_*.py
 *.jsonl
+*.sqlite3
+bot_state.json
 !backtest_2year_official.py
+!backtest_2year_dynamic_1dollar_official.py
+!backtest_3year_dynamic_official.py

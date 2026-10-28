@@ -40,9 +40,9 @@ class BotConfig:
     BALANCE_THRESHOLD_SCALING: float = 100.0# Batas ambang $100 untuk beralih ke 1.0% margin fleksibel
     RISK_PORTFOLIO_PERCENT: float = 0.01   # 1.0% margin fleksibel dari total portofolio jika saldo >= $100 (Compounding)
     COMPOUNDING_ENABLED: bool = True       # Compounding dinamis berdasarkan saldo
-    LEVERAGE: int = 50                     # Leverage 50x target utama
-    LEVERAGE_MAX: int = 50                 # Batas atas leverage (50x diutamakan)
-    LEVERAGE_MIN: int = 10                 # Batas bawah leverage adaptif 10x (memberi ruang SL wick lebar 100% fleksibel)
+    LEVERAGE: int = 75                     # Leverage target maksimal adaptif 75x
+    LEVERAGE_MAX: int = 75                 # Batas atas leverage (75x)
+    LEVERAGE_MIN: int = 7                  # Batas bawah leverage adaptif 7x (notional $1.00 * 7 = $7.00 > $5.00 min Binance)
     FUTURES_ACTIVATION_TIMESTAMP: float = 1791861617.021 # 13 Oktober 2026, 10:20:17 WIB
     MARGIN_MODE: str = "ISOLATED"          # WAJIB ISOLATED MARGIN
     ORDER_TYPE: str = "LIMIT"              # WAJIB LIMIT ORDER (Maker Only - Fee Rendah)
@@ -51,8 +51,8 @@ class BotConfig:
 
     @property
     def dynamic_min_leverage(self) -> int:
-        """Batas bawah leverage dinamis 10x (agar notional $1.00 * 10 = $10.00 lolos syarat Binance $5.00)."""
-        return 10
+        """Batas bawah leverage dinamis 7x (agar notional $1.00 * 7 = $7.00 lolos syarat Binance $5.00)."""
+        return 7
 
     # --- Limit Order & Anti-FOMO Settings ---
     LIMIT_TIMEOUT_SECONDS: int = 30        # Batalkan limit order jika tidak terisi dalam 30 detik

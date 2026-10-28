@@ -362,25 +362,30 @@ class VPSDatabase:
         - Jika income > 0: Penambahan modal (Deposit / Transfer IN) -> Menambah Modal Pokok (BUKAN Profit)
         - Jika income < 0: Penarikan modal (Withdrawal / Transfer OUT) -> Mengurangi Modal Pokok (BUKAN Loss)
         """
-        if not transfers:
-            return {"status": "empty", "new_transfers": 0}
         new_count = 0
         try:
             with self.get_connection() as conn:
                 cur = conn.cursor()
-                for tr in transfers:
-                    t_id = str(tr.get("tranId") or tr.get("id") or "")
-                    if not t_id:
-                        continue
-                    amt = float(tr.get("income", 0.0))
-                    e_type = "DEPOSIT_P2P" if amt > 0 else "WITHDRAWAL_P2P"
-                    notes = f"Transfer {'Masuk (Tambah Modal)' if amt > 0 else 'Keluar (Tarik Saldo)'} via Binance Futures (TranID: {t_id})"
-                    cur.execute("""
-                        INSERT OR IGNORE INTO capital_history (event_type, amount, tran_id, notes)
-                        VALUES (?, ?, ?, ?);
-                    """, (e_type, amt, t_id, notes))
-                    if cur.rowcount > 0:
-                        new_count += 1
+                cur.execute("""
+                    INSERT OR IGNORE INTO capital_history (event_type, amount, tran_id, notes)
+                    VALUES ('INITIAL_CAPITAL', 101.15, 'INIT_SEED_101.15', 'Modal Pokok Awal Terdaftar ($101.15)');
+                """)
+                if transfers:
+                    for tr in transfers:
+                        t_id = str(tr.get("tranId") or tr.get("id") or "")
+                        if not t_id:
+                            continue
+                        amt = float(tr.get("income", 0.0))
+                        if abs(amt) < 0.0001:
+                            continue
+                        e_type = "DEPOSIT_P2P" if amt > 0 else "WITHDRAWAL_P2P"
+                        notes = f"Transfer {'Masuk (Tambah Modal)' if amt > 0 else 'Keluar (Tarik Saldo)'} via Binance Futures (TranID: {t_id})"
+                        cur.execute("""
+                            INSERT OR IGNORE INTO capital_history (event_type, amount, tran_id, notes)
+                            VALUES (?, ?, ?, ?);
+                        """, (e_type, abs(amt), t_id, notes))
+                        if cur.rowcount > 0:
+                            new_count += 1
                 conn.commit()
             return {"status": "success", "new_transfers": new_count}
         except Exception as e:
@@ -513,20 +518,27 @@ class VPSDatabase:
             with self.get_connection() as conn:
                 cur = conn.cursor()
                 
+                # Pastikan modal pokok awal $101.15 selalu tercatat sebagai baseline
+                cur.execute("""
+                    INSERT OR IGNORE INTO capital_history (event_type, amount, tran_id, notes)
+                    VALUES ('INITIAL_CAPITAL', 101.15, 'INIT_SEED_101.15', 'Modal Pokok Awal Terdaftar ($101.15)');
+                """)
+                conn.commit()
+
                 # 1. Total transfer
                 cur.execute("""
                     SELECT 
-                        COALESCE(SUM(CASE WHEN event_type = 'DEPOSIT_P2P' THEN amount ELSE 0 END), 0) as total_deposits,
-                        COALESCE(SUM(CASE WHEN event_type = 'WITHDRAWAL_P2P' THEN ABS(amount) ELSE 0 END), 0) as total_withdrawals
+                        COALESCE(SUM(CASE WHEN event_type IN ('INITIAL_CAPITAL', 'DEPOSIT_P2P') THEN amount ELSE 0 END), 0) as total_deposits,
+                        COALESCE(SUM(CASE WHEN event_type = 'WITHDRAWAL_P2P' THEN amount ELSE 0 END), 0) as total_withdrawals
                     FROM capital_history;
                 """)
                 cap_row = cur.fetchone()
-                raw_deposits = float(cap_row[0]) if cap_row and float(cap_row[0]) > 0 else 101.15
+                initial_cap = 101.15
+                total_deposits = float(cap_row[0]) if cap_row and float(cap_row[0]) >= initial_cap else initial_cap
                 total_withdrawals = float(cap_row[1]) if cap_row else 0.0
                 
-                initial_cap = 101.15
-                extra_deposits = round(max(0.0, raw_deposits - initial_cap), 4)
-                net_capital_invested = round(raw_deposits - total_withdrawals, 4)
+                extra_deposits = round(max(0.0, total_deposits - initial_cap), 4)
+                net_capital_invested = round(total_deposits - total_withdrawals, 4)
 
                 # 2. Ringkasan trades
                 cur.execute("""

@@ -247,8 +247,23 @@ class BinanceScalper:
         except Exception:
             return 0.0
 
-    def get_futures_balance(self, max_age_sec: float = 60.0) -> Dict[str, float]:
-        """Mengambil saldo wallet USDⓈ-M Futures dengan caching 60 detik."""
+    def sync_capital_transfers_from_binance(self):
+        """Sinkronisasi otomatis riwayat transfer masuk/keluar dari Binance secara berkala."""
+        if self.client.is_banned():
+            return
+        now = time.time()
+        if now - getattr(self, "_last_transfer_sync", 0.0) < 15.0:
+            return
+        self._last_transfer_sync = now
+        try:
+            transfers = self.client.fetch_income_history(income_type="TRANSFER", limit=50)
+            if transfers:
+                db.sync_capital_transfers(transfers)
+        except Exception as e:
+            console.log(f"[dim]Auto sync transfers notice: {e}[/dim]")
+
+    def get_futures_balance(self, max_age_sec: float = 30.0) -> Dict[str, float]:
+        """Mengambil saldo wallet USDⓈ-M Futures dengan caching 30 detik."""
         now = time.time()
         if self.client.is_banned():
             return self._cached_balance
@@ -262,6 +277,7 @@ class BinanceScalper:
                 self._cached_balance = bal
                 self._last_balance_time = now
                 self.last_error = None
+                self.sync_capital_transfers_from_binance()
             return self._cached_balance
         except Exception as e:
             err_msg = str(e)
