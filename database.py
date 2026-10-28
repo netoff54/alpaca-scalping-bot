@@ -577,7 +577,7 @@ class VPSDatabase:
 
                 return {
                     "initial_capital": initial_cap,
-                    "total_deposits_all": raw_deposits,
+                    "total_deposits_all": total_deposits,
                     "extra_deposits_added": extra_deposits,
                     "total_withdrawals": total_withdrawals,
                     "net_capital_invested": net_capital_invested,
