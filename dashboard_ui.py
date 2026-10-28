@@ -989,10 +989,10 @@ def get_dashboard_html() -> str:
                 <span class="badge badge-neutral" id="tradeSummaryPill">0 TRADE</span>
             </div>
 
-            <!-- Tab Switcher: Seluruh Riwayat vs Sesi VPS Terkini -->
+            <!-- Tab Switcher: Sesi VPS Terkini vs Seluruh Riwayat -->
             <div class="history-tab-group">
-                <button class="history-tab-btn active" id="tabAllHistory" onclick="switchTradeTab('all')">Seluruh Riwayat</button>
-                <button class="history-tab-btn" id="tabVpsSession" onclick="switchTradeTab('session')">Sesi VPS Terkini</button>
+                <button class="history-tab-btn active" id="tabVpsSession" onclick="switchTradeTab('session')">Sesi VPS Terkini</button>
+                <button class="history-tab-btn" id="tabAllHistory" onclick="switchTradeTab('all')">Seluruh Riwayat</button>
             </div>
 
             <!-- Performance Win Rate Mini Strip -->
@@ -1041,7 +1041,7 @@ def get_dashboard_html() -> str:
     <script>
         // --- GLOBAL APP STATE ---
         let rawTradeList = [];
-        let activeTradeTab = 'all';
+        let activeTradeTab = 'session';
         let liveTargetSymbol = '';
         let currentCoinData = null;
         let currentActivePosition = null;
@@ -1820,8 +1820,11 @@ def get_dashboard_html() -> str:
             // Render Kartu Transaksi
             let html = '';
 
-            // Tampilkan Posisi Aktif di paling atas jika sedang open posisi
-            if (currentActivePosition && currentActivePosition.symbol) {
+            // Tampilkan Posisi Aktif jika sedang open posisi:
+            // - Di tab 'all' (Seluruh Riwayat): Selalu tampilkan posisi aktif (termasuk CHIPUSDT)
+            // - Di tab 'session' (Sesi VPS Terkini): HANYA tampilkan jika posisi aktif berasal dari sesi analisis baru (is_vps_session === true)
+            const shouldShowActiveInTab = (activeTradeTab === 'all') || (activeTradeTab === 'session' && currentActivePosition.is_vps_session === true);
+            if (currentActivePosition && currentActivePosition.symbol && shouldShowActiveInTab) {
                 const posPnl = parseFloat(currentActivePosition.unrealized_pnl_usd || 0.0);
                 const posPnlPct = parseFloat(currentActivePosition.unrealized_pnl_pct || 0.0);
                 const pColor = posPnl >= 0 ? 'var(--bull-green)' : 'var(--bear-red)';
@@ -1849,9 +1852,9 @@ def get_dashboard_html() -> str:
                 if (activeTradeTab === 'session') {
                     html += `
                         <div style="text-align: center; padding: 22px 14px; background: rgba(0,0,0,0.25); border-radius: 12px; border: 1px dashed rgba(240, 185, 11, 0.25); margin-top: 4px;">
-                            <div style="color: var(--binance-gold); font-size: 13px; font-weight: 700; margin-bottom: 6px;">Sesi VPS Terkini Aktif (0 Transaksi Tertutup)</div>
+                            <div style="color: var(--binance-gold); font-size: 13px; font-weight: 700; margin-bottom: 6px;">Sesi VPS Terkini Aktif (0 Transaksi)</div>
                             <p style="color: var(--text-secondary); font-size: 11px; line-height: 1.5; max-width: 480px; margin: 0 auto;">
-                                Seluruh 128 riwayat transaksi terdahulu telah dipindahkan rapi ke tab <strong>Seluruh Riwayat</strong>. Tab ini dikhususkan secara bersih untuk mencatat posisi baru yang dieksekusi sejak pembaruan sistem terkini (Dynamic Leverage 7x - 75x).
+                                Seluruh transaksi terdahulu (termasuk BEATUSDT dan CHIPUSDT) telah dipindahkan rapi ke tab <strong>Seluruh Riwayat</strong>. Tab ini dikhususkan secara bersih untuk mencatat setup dan posisi baru hasil analisis setelah pembaruan sistem terkini (Dynamic Leverage 7x - 75x).
                             </p>
                         </div>
                     `;

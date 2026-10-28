@@ -107,6 +107,12 @@ def api_dashboard_summary():
 
     # 3. Posisi Aktif & Mode Modal
     live_pos = scalper.active_position
+    if live_pos and isinstance(live_pos, dict):
+        live_pos_copy = dict(live_pos)
+        # Sesuai instruksi user: CHIPUSDT adalah posisi yang dibuka sebelum update terkini,
+        # sehingga masuk ke riwayat lama (bukan Sesi VPS Terkini).
+        live_pos_copy["is_vps_session"] = (live_pos.get("symbol") != "CHIPUSDT")
+        live_pos = live_pos_copy
     mode = "FLAT $1.00" if cur_wallet < 100.0 else "COMPOUNDING 1.0%"
 
     # 4. Koin yang Sedang Dianalisis Saat Ini & Batas Leverage
@@ -458,9 +464,11 @@ def trade_history(limit: int = 500):
         sym = str(t.get("symbol") or "")
 
         # Sesuai instruksi user:
-        # Sesi VPS Terkini HANYA mencatat posisi yang dieksekusi pada sesi terkini setelah update (id > 128).
-        # Seluruh 128 trade sebelumnya dipindahkan rapi ke tab "Seluruh Riwayat".
-        is_vps = (tid > 128)
+        # Sesi VPS Terkini HANYA mencatat posisi baru yang dieksekusi dari hasil analisis setelah update.
+        # Seluruh trade lama, termasuk BEATUSDT (id 129) dan CHIPUSDT (posisi aktif sebelum update yang jika nanti tertutup),
+        # wajib dipindahkan ke "Seluruh Riwayat".
+        is_legacy = (tid <= 129 or sym in ("BEATUSDT", "CHIPUSDT"))
+        is_vps = not is_legacy
 
         pnl_val = float(t.get("pnl_usd") or 0.0)
         pnl_pct_val = float(t.get("pnl_pct") or 0.0)
