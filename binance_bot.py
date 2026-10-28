@@ -348,15 +348,20 @@ class BinanceScalper:
                         tp_orders = [o for o in existing_algos if o.get("orderType") == "TAKE_PROFIT_MARKET" or o.get("type") == "TAKE_PROFIT_MARKET"]
                         
                         if sl_orders:
-                            native_sl_id = sl_orders[0].get("algoId")
+                            cur_sl_price = float(sl_orders[0].get("triggerPrice") or sl_orders[0].get("stopPrice") or sl_orders[0].get("price") or 0.0)
+                            if cur_sl_price > 0:
+                                sl_price = self.client.format_price(symbol, cur_sl_price)
+                                sl_dist = abs(entry_price - float(sl_price))
+                                tp_price = self.client.format_price(symbol, entry_price + (2.0 * sl_dist) if side == "buy" else entry_price - (2.0 * sl_dist))
+                            native_sl_id = sl_orders[0].get("algoId") or sl_orders[0].get("orderId")
                             # Batalkan order SL duplikat jika ada lebih dari 1
                             for dup_sl in sl_orders[1:]:
-                                dup_id = dup_sl.get("algoId")
+                                dup_id = dup_sl.get("algoId") or dup_sl.get("orderId")
                                 if dup_id:
                                     self.client.cancel_order(symbol, dup_id)
                         
                         if tp_orders:
-                            cur_tp_price = float(tp_orders[0].get("stopPrice", 0.0) or tp_orders[0].get("price", 0.0))
+                            cur_tp_price = float(tp_orders[0].get("triggerPrice") or tp_orders[0].get("stopPrice") or tp_orders[0].get("price") or 0.0)
                             # Jika harga TP bursa berbeda dari target 1:2 presisi, update ordermya
                             if cur_tp_price > 0 and abs(cur_tp_price - float(tp_price)) > (0.0005 * entry_price):
                                 console.log(f"[bold yellow]🔄 Memperbarui Take Profit bursa {symbol} dari {cur_tp_price} ke {tp_price} agar strictly 1:2.0 RR![/bold yellow]")
@@ -366,7 +371,7 @@ class BinanceScalper:
                                         self.client.cancel_order(symbol, old_id)
                                 native_tp_id = None
                             else:
-                                native_tp_id = tp_orders[0].get("algoId")
+                                native_tp_id = tp_orders[0].get("algoId") or tp_orders[0].get("orderId")
                                 for dup_tp in tp_orders[1:]:
                                     dup_id = dup_tp.get("algoId") or dup_tp.get("orderId")
                                     if dup_id:
