@@ -5,7 +5,7 @@ import requests
 import threading
 from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, HTMLResponse
 import uvicorn
 
@@ -73,6 +73,12 @@ async def lifespan(app: FastAPI):
     print(">>> Menghentikan service Binance Scalper <<<")
 
 app = FastAPI(title="Binance Futures Top-200 Scalping Autonomous Agent", lifespan=lifespan)
+
+@app.middleware("http")
+async def add_ngrok_skip_header(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["ngrok-skip-browser-warning"] = "true"
+    return response
 
 @app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 def index_dashboard():

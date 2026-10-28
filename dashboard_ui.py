@@ -1466,7 +1466,7 @@ def get_dashboard_html() -> str:
         // --- 2. LIVE DASHBOARD DATA SYNC ---
         async function fetchDashboardSummary() {
             try {
-                const res = await fetch('/api/dashboard-summary');
+                const res = await fetch('/api/dashboard-summary', { headers: { 'ngrok-skip-browser-warning': 'true' } });
                 if (!res.ok) return;
                 const d = await res.json();
 
@@ -1784,7 +1784,7 @@ def get_dashboard_html() -> str:
         // --- 3. TRADE HISTORY & WIN RATE ENGINE ---
         async function fetchTradeHistory() {
             try {
-                const res = await fetch('/api/trade-history');
+                const res = await fetch('/api/trade-history', { headers: { 'ngrok-skip-browser-warning': 'true' } });
                 if (!res.ok) return;
                 const d = await res.json();
                 rawTradeList = d.trades || [];
@@ -1969,7 +1969,7 @@ def get_dashboard_html() -> str:
         let autoScrollLogs = true;
         async function fetchLogs() {
             try {
-                const res = await fetch('/api/logs?lines=40');
+                const res = await fetch('/api/logs?lines=40', { headers: { 'ngrok-skip-browser-warning': 'true' } });
                 if (!res.ok) return;
                 const d = await res.json();
                 const logBox = document.getElementById('terminalLogs');
