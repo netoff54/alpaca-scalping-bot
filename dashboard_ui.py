@@ -813,25 +813,25 @@ def get_dashboard_html() -> str:
                 <div class="card-label-row">
                     <span class="card-label">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                        Hasil Bersih
+                        Hasil Bersih (Net PnL)
                     </span>
                     <span class="badge" id="badgeRoi">0.00%</span>
                 </div>
                 <div class="metric-value" id="valNetPnl">$0.00</div>
-                <div class="metric-sub" id="valPnlSubtext">Selaras Buku Resmi Binance</div>
+                <div class="metric-sub" id="valPnlSubtext">Selisih Saldo vs Modal Pokok</div>
             </div>
 
-            <!-- Card 4: Target Surplus Bulanan (Wajib >= 10.0%) -->
+            <!-- Card 4: Target Surplus Bulanan (Compounding 10%) -->
             <div class="card">
                 <div class="card-label-row">
                     <span class="card-label">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                        Target Bulanan
+                        PnL & Target Bulanan
                     </span>
                     <span class="badge badge-gold" id="badgeMonthlyLock">TARGET 10%</span>
                 </div>
-                <div class="metric-value" style="font-size: 16px;" id="valMonthlyRoi">+0.00%</div>
-                <div class="metric-sub" id="valMonthlyDesc">Otomatis Dikunci Aman saat >= 10.0%</div>
+                <div class="metric-value" style="font-size: 16px;" id="valMonthlyRoi">$0.00 (0.00%)</div>
+                <div class="metric-sub" id="valMonthlyDesc">Compounding 10% dari Modal Pokok</div>
             </div>
         </section>
 
@@ -1478,23 +1478,35 @@ def get_dashboard_html() -> str:
                 currentActivePosition = d.active_position || null;
 
                 // 1. Saldo Dompet & Modal Pokok
-                const curBal = parseFloat(d.current_balance || 99.54);
+                const curBal = parseFloat(d.current_balance || 101.52);
                 lastKnownWallet = curBal;
                 document.getElementById('valCurrentBal').textContent = `$${curBal.toFixed(2)}`;
                 document.getElementById('valAvailBal').textContent = `Tersedia: $${parseFloat(d.available_balance || curBal).toFixed(2)} USDT`;
 
-                const initCap = parseFloat(d.initial_capital || 101.15);
+                const initCap = parseFloat(d.initial_capital || 105.15);
+                const baseSeed = parseFloat(d.base_initial_capital || 101.15);
+                const extraDep = parseFloat(d.extra_deposits || 0.0);
                 document.getElementById('valInitialCap').textContent = `$${initCap.toFixed(2)}`;
+                const elTopUpNotice = document.getElementById('valTopUpNotice');
+                if (elTopUpNotice) {
+                    if (extraDep > 0) {
+                        elTopUpNotice.textContent = `Awal: $${baseSeed.toFixed(2)} | Top-Up: +$${extraDep.toFixed(2)}`;
+                    } else {
+                        elTopUpNotice.textContent = `Modal Pokok Terdaftar: $${initCap.toFixed(2)}`;
+                    }
+                }
 
-                // 2. Net PnL & ROI
-                const netPnl = parseFloat(d.net_pnl_usd || (curBal - initCap));
-                const roiPct = parseFloat(d.roi_pct || ((netPnl / initCap) * 100));
+                // 2. Hasil Bersih (Net PnL) - Selisih Fleksibel Saldo vs Modal Pokok
+                const netPnl = parseFloat(d.net_pnl_usd !== undefined ? d.net_pnl_usd : (curBal - initCap));
+                const roiPct = parseFloat(d.roi_pct !== undefined ? d.roi_pct : ((netPnl / initCap) * 100));
                 const elPnl = document.getElementById('valNetPnl');
                 const badgeRoi = document.getElementById('badgeRoi');
+                const elPnlSubtext = document.getElementById('valPnlSubtext');
 
                 const pnlSign = netPnl >= 0 ? '+' : '';
+                const pnlSignPct = roiPct >= 0 ? '+' : '';
                 elPnl.textContent = `${pnlSign}$${netPnl.toFixed(2)} USDT`;
-                badgeRoi.textContent = `${pnlSign}${roiPct.toFixed(2)}%`;
+                badgeRoi.textContent = `${pnlSignPct}${roiPct.toFixed(2)}%`;
 
                 if (netPnl >= 0) {
                     elPnl.style.color = "var(--bull-green)";
@@ -1502,6 +1514,10 @@ def get_dashboard_html() -> str:
                 } else {
                     elPnl.style.color = "var(--bear-red)";
                     badgeRoi.className = "badge badge-red";
+                }
+
+                if (elPnlSubtext) {
+                    elPnlSubtext.textContent = `Selisih Saldo vs Modal: ${pnlSign}$${netPnl.toFixed(2)} (${pnlSignPct}${roiPct.toFixed(2)}%)`;
                 }
 
                 // 3. Manajemen Modal Dinamis (Buffer vs Compounding)
@@ -1517,39 +1533,60 @@ def get_dashboard_html() -> str:
                     if (ruleMarginDesc) ruleMarginDesc.textContent = `Mode Compounding: Saldo di atas $100 USDT (atau setelah top-up). Alokasi modal otomatis bertumbuh 1.0% dari saldo.`;
                 }
 
-                // 4. Target Surplus Bulanan (Wajib >= 10.0% Dikunci Aman Sesuai Backtest 2 Tahun)
-                if (d.month_roi_pct !== undefined) {
-                    const mRoi = parseFloat(d.month_roi_pct || 0);
-                    const mLock = d.monthly_profit_locked;
-                    const valMonthlyRoi = document.getElementById('valMonthlyRoi');
-                    const badgeMonthlyLock = document.getElementById('badgeMonthlyLock');
-                    const valMonthlyDesc = document.getElementById('valMonthlyDesc');
+                // 4. Target Surplus Bulanan (Compounding 10% dari Modal Pokok)
+                const mBase = parseFloat(d.month_start_wallet || initCap || 105.15);
+                const mTarget = parseFloat(d.monthly_target_wallet || (mBase * 1.10));
+                const mPnl = parseFloat(d.month_pnl_usd !== undefined ? d.month_pnl_usd : netPnl);
+                const mRoi = parseFloat(d.month_roi_pct !== undefined ? d.month_roi_pct : roiPct);
+                const mLock = d.monthly_profit_locked;
 
-                    const mBase = parseFloat(d.month_start_wallet || d.initial_capital || 101.15).toFixed(2);
-                    const mTarget = parseFloat(d.monthly_target_wallet || (mBase * 1.10)).toFixed(2);
-                    const mDeficit = parseFloat(d.month_deficit_usd || (curBal - mBase)).toFixed(2);
+                const valMonthlyRoi = document.getElementById('valMonthlyRoi');
+                const badgeMonthlyLock = document.getElementById('badgeMonthlyLock');
+                const valMonthlyDesc = document.getElementById('valMonthlyDesc');
 
-                    if (valMonthlyRoi) {
-                        valMonthlyRoi.textContent = `${mRoi >= 0 ? '+' : ''}${mRoi.toFixed(2)}%`;
-                        valMonthlyRoi.style.color = mRoi >= 0 ? 'var(--bull-green)' : 'var(--bear-red)';
+                const mSign = mPnl >= 0 ? '+' : '';
+                const mSignPct = mRoi >= 0 ? '+' : '';
+
+                if (valMonthlyRoi) {
+                    valMonthlyRoi.textContent = `${mSign}$${mPnl.toFixed(2)} USDT (${mSignPct}${mRoi.toFixed(2)}%)`;
+                    valMonthlyRoi.style.color = mPnl >= 0 ? 'var(--bull-green)' : 'var(--bear-red)';
+                }
+
+                const remainingToTarget = Math.max(0.0, mTarget - curBal);
+
+                if (badgeMonthlyLock) {
+                    if (mLock || curBal >= mTarget) {
+                        badgeMonthlyLock.textContent = 'PROFIT DIKUNCI';
+                        badgeMonthlyLock.className = 'badge badge-green';
+                    } else if (mPnl > 0) {
+                        const progressPct = ((mPnl / (mTarget - mBase)) * 100).toFixed(1);
+                        badgeMonthlyLock.textContent = `PROGRES ${progressPct}%`;
+                        badgeMonthlyLock.className = 'badge badge-gold';
+                    } else {
+                        badgeMonthlyLock.textContent = `TARGET: $${mTarget.toFixed(2)}`;
+                        badgeMonthlyLock.className = 'badge badge-gold';
                     }
-                    if (badgeMonthlyLock) {
-                        badgeMonthlyLock.textContent = mLock ? 'PROFIT DIKUNCI' : 'TARGET +10%';
-                        badgeMonthlyLock.className = mLock ? 'badge badge-green' : 'badge badge-gold';
-                    }
-                    if (valMonthlyDesc) {
-                        valMonthlyDesc.textContent = mLock 
-                            ? `Target ${d.current_month || ''} Tercapai ($${mTarget})! Modal diamankan.` 
-                            : `Modal Pokok: $${mBase} | Target 10%: $${mTarget} (${mDeficit >= 0 ? '+' : ''}$${mDeficit})`;
+                }
+
+                if (valMonthlyDesc) {
+                    if (mLock || curBal >= mTarget) {
+                        valMonthlyDesc.textContent = `🏆 Target Compounding $${mTarget.toFixed(2)} (+10.0%) Tercapai! Modal diamankan.`;
+                        valMonthlyDesc.style.color = 'var(--bull-green)';
+                    } else if (mPnl >= 0) {
+                        valMonthlyDesc.textContent = `Target 10%: $${mTarget.toFixed(2)} (Sisa $${remainingToTarget.toFixed(2)} lagi)`;
+                        valMonthlyDesc.style.color = 'var(--text-secondary)';
+                    } else {
+                        valMonthlyDesc.textContent = `Target 10%: $${mTarget.toFixed(2)} (Butuh +$${remainingToTarget.toFixed(2)} lagi)`;
+                        valMonthlyDesc.style.color = 'var(--text-secondary)';
                     }
                 }
 
                 // 5. Target Leverage Adaptif
-                const maxCoinLev = d.coin_max_leverage || 50;
+                const maxCoinLev = d.coin_max_leverage || 75;
                 const ruleLevVal = document.getElementById('ruleLevVal');
                 const ruleLevDesc = document.getElementById('ruleLevDesc');
-                if (ruleLevVal) ruleLevVal.textContent = `Maksimal 50x (Adaptif 10x - 50x)`;
-                if (ruleLevDesc) ruleLevDesc.textContent = `Leverage beradaptasi dinamis mengikuti jarak SL wick koin (10x s/d 50x) agar risiko terukur tepat $1.00 margin habis dan likuidasi bursa tidak tersentuh. Koin saat ini mendukung hingga: ${maxCoinLev}x.`;
+                if (ruleLevVal) ruleLevVal.textContent = `Maksimal 75x (Adaptif 7x - 75x)`;
+                if (ruleLevDesc) ruleLevDesc.textContent = `Leverage beradaptasi dinamis mengikuti jarak SL wick koin (7x s/d 75x) agar risiko terukur tepat $1.00 margin habis dan likuidasi bursa tidak tersentuh. Koin saat ini mendukung hingga: ${maxCoinLev}x.`;
 
                 // 6. Status Terminal Posisi Aktif
                 const posTerminal = document.getElementById('sec-position');

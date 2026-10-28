@@ -99,6 +99,7 @@ def api_dashboard_summary():
     init_capital = float(cap_summary.get("net_capital_invested", 105.15))
     extra_deposits = float(cap_summary.get("extra_deposits_added", 0.0))
     total_withdrawals = float(cap_summary.get("total_withdrawals", 0.0))
+    base_seed = float(cap_summary.get("initial_capital", 101.15))
 
     # PnL Murni Trading: Hasil trading murni = Saldo Dompet - Modal Pokok yang disetor
     # Penambahan modal (Top Up) otomatis menambah modal pokok dan TIDAK PERNAH dihitung sebagai profit!
@@ -131,12 +132,12 @@ def api_dashboard_summary():
     ws_alive = ws_mgr.is_alive() if ws_mgr else False
     tracked_count = len(ws_mgr.prices) if ws_mgr else 829
 
-    month_start = float(getattr(scalper, "month_start_wallet", init_capital))
-    if month_start < init_capital:
-        month_start = init_capital
-        scalper.month_start_wallet = init_capital
+    # Target Bulanan Compounding 10% dari Modal Pokok
+    # Sesuai instruksi user: Baseline selalu mengikuti modal pokok terkini yang disetor
+    month_start = init_capital
+    scalper.month_start_wallet = month_start
     month_str = getattr(scalper, "current_month", time.strftime("%Y-%m"))
-    month_roi = round(((cur_wallet - month_start) / month_start * 100.0), 2) if month_start > 0 else 0.0
+    month_roi = roi_pct
     profit_locked = getattr(scalper, "monthly_profit_locked", False)
     market_regime = getattr(scalper, "_cached_market_regime", {}).get("regime", "SIDEWAYS")
     monthly_target_wallet = round(month_start * 1.10, 2)
@@ -153,6 +154,9 @@ def api_dashboard_summary():
         "current_balance": cur_wallet,
         "available_balance": avail_wallet,
         "initial_capital": init_capital,
+        "base_initial_capital": base_seed,
+        "extra_deposits": extra_deposits,
+        "total_withdrawals": total_withdrawals,
         "net_pnl_usd": net_pnl,
         "roi_pct": roi_pct,
         "mode": mode,
@@ -169,6 +173,7 @@ def api_dashboard_summary():
         "month_start_wallet": round(month_start, 2),
         "monthly_target_wallet": monthly_target_wallet,
         "month_deficit_usd": month_deficit_usd,
+        "month_pnl_usd": net_pnl,
         "month_roi_pct": month_roi,
         "monthly_profit_locked": profit_locked,
         "market_regime": market_regime,
