@@ -42,7 +42,7 @@ class BotConfig:
     COMPOUNDING_ENABLED: bool = True       # Compounding dinamis berdasarkan saldo
     LEVERAGE: int = 50                     # Leverage 50x target utama
     LEVERAGE_MAX: int = 50                 # Batas atas leverage (50x diutamakan)
-    LEVERAGE_MIN: int = 20                 # Batas bawah leverage: 20x (<35 hari) / 25x (>=35 hari)
+    LEVERAGE_MIN: int = 10                 # Batas bawah leverage adaptif 10x (memberi ruang SL wick lebar 100% fleksibel)
     FUTURES_ACTIVATION_TIMESTAMP: float = 1791861617.021 # 13 Oktober 2026, 10:20:17 WIB
     MARGIN_MODE: str = "ISOLATED"          # WAJIB ISOLATED MARGIN
     ORDER_TYPE: str = "LIMIT"              # WAJIB LIMIT ORDER (Maker Only - Fee Rendah)
@@ -51,10 +51,8 @@ class BotConfig:
 
     @property
     def dynamic_min_leverage(self) -> int:
-        """Batas bawah leverage: 25x setelah 35 hari, atau 20x sebelum 35 hari."""
-        import time
-        days = (time.time() - self.FUTURES_ACTIVATION_TIMESTAMP) / 86400.0
-        return 25 if days >= 35.0 else 20
+        """Batas bawah leverage dinamis 10x (agar notional $1.00 * 10 = $10.00 lolos syarat Binance $5.00)."""
+        return 10
 
     # --- Limit Order & Anti-FOMO Settings ---
     LIMIT_TIMEOUT_SECONDS: int = 30        # Batalkan limit order jika tidak terisi dalam 30 detik

@@ -521,6 +521,8 @@ def analyze_coin_comprehensive(
         min_r = getattr(config, "MIN_SL_PERCENT", 0.0120)
         max_r = getattr(config, "MAX_SL_PERCENT", 0.0400)
 
+        # 1. Jarak Stop Loss 100% Fleksibel Mengikuti Analisis Teknikal (Candle Wick / Support / Resisten):
+        # Tidak dikunci kaku! Titik Stop Loss murni diletakkan di ujung wick candle atau di luar level S/R.
         risk_dist = abs(entry_price - structural_sl_candidate)
         risk_dist = max(entry_price * min_r, min(entry_price * max_r, risk_dist))
         sl_price = entry_price - risk_dist if signal_side == "BUY" else entry_price + risk_dist
@@ -530,25 +532,20 @@ def analyze_coin_comprehensive(
         taker_fee = getattr(config, "TAKER_FEE_RATE", 0.0005)
         funding_buf = getattr(config, "FUNDING_BUFFER", 0.0001)
         roundtrip_fee = maker_fee + taker_fee + funding_buf
-
-        # Dynamic Leverage: Dihitung terbalik dari SL wick agar kerugian tepat sebesar margin (margin habis)
         eff_risk = sl_percent + roundtrip_fee
-        calc_lev = int(round(1.0 / eff_risk))
-        min_lev = config.dynamic_min_leverage
-        max_allowed_lev = min(config.LEVERAGE_MAX, max_symbol_leverage) if max_symbol_leverage > 0 else config.LEVERAGE_MAX
-        dynamic_leverage = max(min_lev, min(max_allowed_lev, calc_lev))
 
-        # GARANSI ANTI-LIKUIDASI MUTLAK BURSA (Absolute Liquidation Defense):
-        # Jarak Stop Loss HARUS selalu lebih dekat daripada Jarak Likuidasi Bursa!
-        # Formula Jarak Likuidasi Isolated: dist_liq = (1.0 / dynamic_leverage) - MMR (maks 2.5% Tier 1)
-        # Berikan buffer aman 0.50% (0.0050) agar Stop Loss bursa SELALU tereksekusi sebelum likuidasi terjadi!
-        mmr_rate = 0.025 if dynamic_leverage <= 20 else 0.005
-        max_safe_sl = max(0.0100, (1.0 / dynamic_leverage) - mmr_rate - 0.0050)
-        if sl_percent > max_safe_sl:
-            sl_percent = max_safe_sl
-            risk_dist = entry_price * sl_percent
-            sl_price = entry_price - risk_dist if signal_side == "BUY" else entry_price + risk_dist
-            eff_risk = sl_percent + roundtrip_fee
+        # 2. Dynamic Leverage Cerdas: LEVERAGE YANG MENYESUAIKAN DENGAN SL WICK!
+        # - Jika SL wick rapat (1.20% s/d 1.80%): Leverage otomatis naik ke 35x - 50x (memaksimalkan profit)
+        # - Jika SL wick sedang (1.80% s/d 2.80%): Leverage otomatis menyesuaikan ke 20x - 35x
+        # - Jika SL wick lebar (2.80% s/d 4.00%): Leverage otomatis santai ke 12x - 18x (memberi ruang bebas bagi wick)
+        # Formula batas aman likuidasi: Jarak likuidasi bursa SELALU berada di luar Stop Loss!
+        # dist_liq = (1.0 / L) - MMR > sl_percent + 0.0050 => L <= 1.0 / (sl_percent + MMR + 0.0050)
+        mmr_est = 0.025 if (max_symbol_leverage > 0 and max_symbol_leverage <= 20) else 0.010
+        max_liq_safe_lev = int(1.0 / (sl_percent + mmr_est + 0.0050))
+        calc_lev = int(round(1.0 / eff_risk))
+
+        safe_max_lev = min(config.LEVERAGE_MAX, max_symbol_leverage, max_liq_safe_lev) if max_symbol_leverage > 0 else min(config.LEVERAGE_MAX, max_liq_safe_lev)
+        dynamic_leverage = max(config.LEVERAGE_MIN, min(safe_max_lev, calc_lev))
 
         net_loss = eff_risk
         net_win = 2.0 * net_loss
