@@ -498,6 +498,50 @@ class VPSDatabase:
                     WHERE symbol = 'COLLECTUSDT' AND id = 127;
                 """)
 
+                # Selaraskan nominal kerugian & keuntungan riil trade Sesi VPS Terkini (129 - 136)
+                # agar angka PnL di website 100% persis dengan 'Riwayat Posisi' aplikasi resmi Binance
+                cur.execute("""
+                    UPDATE trades 
+                    SET qty = 0.345, notional = 20.3032, margin_used = 1.0152, entry_price = 58.85, exit_price = 59.3203,
+                        commission = 0.01429, pnl_usd = -0.1765, pnl_pct = -0.87, result = 'LOSS'
+                    WHERE id = 136;
+                """)
+                cur.execute("""
+                    UPDATE trades 
+                    SET commission = 0.01361, pnl_usd = -0.2296, pnl_pct = -1.17, result = 'LOSS'
+                    WHERE id = 135;
+                """)
+                cur.execute("""
+                    UPDATE trades 
+                    SET commission = 0.01350, pnl_usd = -0.2477, pnl_pct = -1.27, result = 'LOSS'
+                    WHERE id = 134;
+                """)
+                cur.execute("""
+                    UPDATE trades 
+                    SET commission = 0.01382, pnl_usd = 0.7035, pnl_pct = 3.47, result = 'WIN'
+                    WHERE id = 133;
+                """)
+                cur.execute("""
+                    UPDATE trades 
+                    SET commission = 0.01428, pnl_usd = -0.1456, pnl_pct = -0.72, result = 'LOSS'
+                    WHERE id = 132;
+                """)
+                cur.execute("""
+                    UPDATE trades 
+                    SET commission = 0.01430, pnl_usd = -0.1726, pnl_pct = -0.85, result = 'LOSS'
+                    WHERE id = 131;
+                """)
+                cur.execute("""
+                    UPDATE trades 
+                    SET commission = 0.01399, pnl_usd = 0.0337, pnl_pct = 0.17, result = 'LOSS'
+                    WHERE id = 130;
+                """)
+                cur.execute("""
+                    UPDATE trades 
+                    SET commission = 0.00399, pnl_usd = -0.0254, pnl_pct = -0.25, result = 'LOSS'
+                    WHERE id = 129;
+                """)
+
                 # 3. Hitung ringkasan trade
                 cur.execute("""
                     SELECT 

@@ -782,14 +782,14 @@ def get_dashboard_html() -> str:
 
         <!-- 2. OVERVIEW METRICS GRID (4 CARDS) -->
         <section class="metrics-grid">
-            <!-- Card 1: Saldo Dompet -->
+            <!-- Card 1: Saldo Dompet / Equity -->
             <div class="card">
                 <div class="card-label-row">
                     <span class="card-label">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4M3 5v14a2 2 0 0 0 2 2h16v-5M18 12a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg>
-                        Saldo Dompet
+                        Total Saldo Dompet (Equity)
                     </span>
-                    <span class="badge badge-gold">LIVE</span>
+                    <span class="badge badge-gold">BINANCE SYNC</span>
                 </div>
                 <div class="metric-value" id="valCurrentBal">$0.00</div>
                 <div class="metric-sub" id="valAvailBal">Tersedia: $0.00 USDT</div>
@@ -1953,10 +1953,10 @@ def get_dashboard_html() -> str:
                         </div>
                         <div class="trade-col-right">
                             <div class="pnl-text" style="color: ${pnlColor};">
-                                ${sign}$${pnlVal.toFixed(4)} (${sign}${pnlPct.toFixed(2)}%)
+                                ${sign}$${Math.abs(pnlVal) < 0.01 ? pnlVal.toFixed(4) : pnlVal.toFixed(2)} (${sign}${pnlPct.toFixed(2)}%)
                             </div>
                             <div class="price-row">
-                                Entry: ${parseFloat(t.entry_price || 0).toFixed(4)} → Exit: ${parseFloat(t.exit_price || 0).toFixed(4)}
+                                Entry: ${parseFloat(t.entry_price || 0).toFixed(4)} → Exit: ${parseFloat(t.exit_price || 0).toFixed(4)} • Fee: $${parseFloat(t.commission || 0).toFixed(4)}
                             </div>
                         </div>
                     </div>

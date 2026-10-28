@@ -462,45 +462,58 @@ class BinanceScalper:
         real_commission = 0.0
         binance_trade_id = None
 
-        # 1. Coba ambil data riil eksekusi bursa dengan clustering multi-fill (mencakup REALIZED_PNL & INSURANCE_CLEAR)
+        # 1. Coba ambil data riil eksekusi bursa (mencakup seluruh multi-fill, komisi, dan PnL bersih)
+        opened_ts = float(closed_pos.get("opened_at", 0.0))
+        min_time_ms = int((opened_ts - 60.0) * 1000) if opened_ts > 0 else int((time.time() - 86400) * 1000)
+
         try:
-            incomes = self.client.fetch_income_history(income_type=None, limit=20, symbol=sym)
+            incomes = self.client.fetch_income_history(income_type=None, limit=50, symbol=sym)
             if incomes:
-                sym_incomes = [inc for inc in incomes if inc.get("symbol") == sym and inc.get("incomeType") in ("REALIZED_PNL", "INSURANCE_CLEAR")]
-                if sym_incomes:
-                    # Ambil cluster trade penutupan terbaru (menyatukan multi-fill dalam selang 120s)
-                    last_time = int(sym_incomes[-1].get("time", 0))
-                    cluster = [inc for inc in sym_incomes if abs(int(inc.get("time", 0)) - last_time) <= 120000]
-                    real_pnl_usd = round(sum(float(inc.get("income", 0.0)) for inc in cluster), 4)
-                    for inc in cluster:
-                        if inc.get("tradeId"):
-                            binance_trade_id = str(inc.get("tradeId"))
+                sym_incomes = [inc for inc in incomes if inc.get("symbol") == sym and int(inc.get("time", 0)) >= min_time_ms]
+                if not sym_incomes:
+                    # Fallback ke rekaman penutupan terakhir jika window waktu terlewat
+                    sym_incomes = [inc for inc in incomes if inc.get("symbol") == sym][-4:]
+                
+                gross_pnl = sum(float(inc.get("income", 0.0)) for inc in sym_incomes if inc.get("incomeType") in ("REALIZED_PNL", "INSURANCE_CLEAR"))
+                pos_comm = sum(abs(float(inc.get("income", 0.0))) for inc in sym_incomes if inc.get("incomeType") == "COMMISSION")
+                pos_funding = sum(float(inc.get("income", 0.0)) for inc in sym_incomes if inc.get("incomeType") == "FUNDING_FEE")
+                
+                # NET PnL riil setelah dikurangi biaya komisi & funding (100% selaras dengan Riwayat Posisi aplikasi Binance)
+                real_pnl_usd = round(gross_pnl - pos_comm + pos_funding, 4)
+                real_commission = round(pos_comm, 6)
+                for inc in sym_incomes:
+                    if inc.get("tradeId"):
+                        binance_trade_id = str(inc.get("tradeId"))
         except Exception as e_inc:
             console.log(f"[dim]Notice fetch income PnL: {e_inc}[/dim]")
 
         try:
-            user_trades = self.client.fetch_user_trades(sym, limit=10)
+            user_trades = self.client.fetch_user_trades(sym, limit=30)
             if user_trades:
-                closing_trades = [t for t in user_trades if t.get("side", "").lower() != c_side]
+                sym_trades = [t for t in user_trades if int(t.get("time", 0)) >= min_time_ms]
+                closing_trades = [t for t in sym_trades if t.get("side", "").lower() != c_side]
+                if not closing_trades:
+                    closing_trades = [t for t in user_trades if t.get("side", "").lower() != c_side][-3:]
+                
                 if closing_trades:
-                    # Ambil cluster eksekusi penutupan terbaru dalam rentang 120s
-                    last_trade_time = int(closing_trades[-1].get("time", 0))
-                    recent_closing = [t for t in closing_trades if abs(int(t.get("time", 0)) - last_trade_time) <= 120000]
-                    
-                    total_qty = sum(float(t.get("qty", 0.0)) for t in recent_closing)
+                    total_qty = sum(float(t.get("qty", 0.0)) for t in closing_trades)
                     if total_qty > 0:
-                        vwap_price = sum(float(t.get("price", 0.0)) * float(t.get("qty", 0.0)) for t in recent_closing) / total_qty
+                        vwap_price = sum(float(t.get("price", 0.0)) * float(t.get("qty", 0.0)) for t in closing_trades) / total_qty
                         real_exit_price = self.client.format_price(sym, vwap_price)
+                        c_qty = total_qty
+                        c_notional = round(real_exit_price * c_qty, 4)
                     else:
-                        real_exit_price = float(recent_closing[-1].get("price", exit_price_hint))
+                        real_exit_price = float(closing_trades[-1].get("price", exit_price_hint))
                     
-                    real_commission = sum(float(t.get("commission", 0.0)) for t in recent_closing)
-                    if not binance_trade_id and recent_closing[-1].get("id"):
-                        binance_trade_id = str(recent_closing[-1].get("id"))
+                    if real_commission <= 0.0:
+                        real_commission = sum(float(t.get("commission", 0.0)) for t in closing_trades)
+                    if not binance_trade_id and closing_trades[-1].get("id"):
+                        binance_trade_id = str(closing_trades[-1].get("id"))
                 else:
                     target_t = user_trades[-1]
                     real_exit_price = float(target_t.get("price", exit_price_hint))
-                    real_commission = float(target_t.get("commission", 0.0))
+                    if real_commission <= 0.0:
+                        real_commission = float(target_t.get("commission", 0.0))
         except Exception as e_ut:
             console.log(f"[dim]Notice fetch user trades: {e_ut}[/dim]")
 
