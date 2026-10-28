@@ -813,12 +813,12 @@ def get_dashboard_html() -> str:
                 <div class="card-label-row">
                     <span class="card-label">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                        Hasil Bersih (Net PnL)
+                        PnL Terealisasi (Net Realized)
                     </span>
-                    <span class="badge" id="badgeRoi">0.00%</span>
+                    <span class="badge" id="badgeRoi">REALIZED</span>
                 </div>
                 <div class="metric-value" id="valNetPnl">$0.00</div>
-                <div class="metric-sub" id="valPnlSubtext">Selisih Saldo vs Modal Pokok</div>
+                <div class="metric-sub" id="valPnlSubtext">Sinkronisasi Dompet vs Modal</div>
             </div>
 
             <!-- Card 4: Target Surplus Bulanan (Compounding 10%) -->
@@ -1496,19 +1496,23 @@ def get_dashboard_html() -> str:
                     }
                 }
 
-                // 2. Hasil Bersih (Net PnL) - Selisih Fleksibel Saldo vs Modal Pokok
-                const netPnl = parseFloat(d.net_pnl_usd !== undefined ? d.net_pnl_usd : (curBal - initCap));
-                const roiPct = parseFloat(d.roi_pct !== undefined ? d.roi_pct : ((netPnl / initCap) * 100));
+                // 2. Hasil Bersih (Net Realized PnL & Selisih Saldo Dompet)
+                const realPnl = parseFloat(d.realized_pnl_binance !== undefined ? d.realized_pnl_binance : (d.net_pnl_usd || 0.0));
+                const walletDiff = parseFloat(d.wallet_diff_usd !== undefined ? d.wallet_diff_usd : (curBal - initCap));
+                const walletDiffPct = parseFloat(d.wallet_diff_pct !== undefined ? d.wallet_diff_pct : ((walletDiff / initCap) * 100));
+
                 const elPnl = document.getElementById('valNetPnl');
                 const badgeRoi = document.getElementById('badgeRoi');
                 const elPnlSubtext = document.getElementById('valPnlSubtext');
 
-                const pnlSign = netPnl >= 0 ? '+' : '';
-                const pnlSignPct = roiPct >= 0 ? '+' : '';
-                elPnl.textContent = `${pnlSign}$${netPnl.toFixed(2)} USDT`;
-                badgeRoi.textContent = `${pnlSignPct}${roiPct.toFixed(2)}%`;
+                const rSign = realPnl >= 0 ? '+' : '';
+                const wSign = walletDiff >= 0 ? '+' : '';
+                const wSignPct = walletDiffPct >= 0 ? '+' : '';
 
-                if (netPnl >= 0) {
+                elPnl.textContent = `${rSign}$${realPnl.toFixed(2)} USDT`;
+                badgeRoi.textContent = `REALIZED PNL`;
+
+                if (realPnl >= 0) {
                     elPnl.style.color = "var(--bull-green)";
                     badgeRoi.className = "badge badge-green";
                 } else {
@@ -1517,7 +1521,7 @@ def get_dashboard_html() -> str:
                 }
 
                 if (elPnlSubtext) {
-                    elPnlSubtext.textContent = `Selisih Saldo vs Modal: ${pnlSign}$${netPnl.toFixed(2)} (${pnlSignPct}${roiPct.toFixed(2)}%)`;
+                    elPnlSubtext.innerHTML = `Dompet vs Modal: <b style="color:${walletDiff >= 0 ? 'var(--bull-green)' : 'var(--bear-red)'}">${wSign}$${walletDiff.toFixed(2)} (${wSignPct}${walletDiffPct.toFixed(2)}%)</b>`;
                 }
 
                 // 3. Manajemen Modal Dinamis (Buffer vs Compounding)
@@ -1860,8 +1864,9 @@ def get_dashboard_html() -> str:
             // Tampilkan Posisi Aktif jika sedang open posisi:
             // - Di tab 'all' (Seluruh Riwayat): Selalu tampilkan posisi aktif (termasuk CHIPUSDT)
             // - Di tab 'session' (Sesi VPS Terkini): HANYA tampilkan jika posisi aktif berasal dari sesi analisis baru (is_vps_session === true)
-            const shouldShowActiveInTab = (activeTradeTab === 'all') || (activeTradeTab === 'session' && currentActivePosition.is_vps_session === true);
-            if (currentActivePosition && currentActivePosition.symbol && shouldShowActiveInTab) {
+            const hasActivePos = !!(currentActivePosition && currentActivePosition.symbol);
+            const shouldShowActiveInTab = hasActivePos && (activeTradeTab === 'all' || currentActivePosition.is_vps_session === true);
+            if (shouldShowActiveInTab) {
                 const posPnl = parseFloat(currentActivePosition.unrealized_pnl_usd || 0.0);
                 const posPnlPct = parseFloat(currentActivePosition.unrealized_pnl_pct || 0.0);
                 const pColor = posPnl >= 0 ? 'var(--bull-green)' : 'var(--bear-red)';

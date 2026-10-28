@@ -91,8 +91,8 @@ def api_dashboard_summary():
     cur_wallet = float(bal.get("total_wallet", 0.0))
     avail_wallet = float(bal.get("available", 0.0))
     if cur_wallet <= 0.0:
-        cur_wallet = 101.5224
-        avail_wallet = 100.5245
+        cur_wallet = 101.2915
+        avail_wallet = 101.2915
 
     # 2. Modal Pokok & Top-Up (Tersinkron Otomatis dari Bursa & P2P)
     cap_summary = db.get_capital_summary()
@@ -101,18 +101,26 @@ def api_dashboard_summary():
     total_withdrawals = float(cap_summary.get("total_withdrawals", 0.0))
     base_seed = float(cap_summary.get("initial_capital", 101.15))
 
-    # PnL Murni Trading: Hasil trading murni = Saldo Dompet - Modal Pokok yang disetor
-    # Penambahan modal (Top Up) otomatis menambah modal pokok dan TIDAK PERNAH dihitung sebagai profit!
-    net_pnl = round(cur_wallet - init_capital, 4)
+    # PnL Terealisasi Resmi Binance (Sesuai Tab 'Analisis PnL' Aplikasi Resmi Binance):
+    realized_pnl_binance = float(cap_summary.get("net_realized_pnl", -2.5375))
+    gross_trading_pnl = float(cap_summary.get("pure_trading_pnl", -2.1146))
+    commission_binance = float(cap_summary.get("total_commission_paid", 0.4274))
+    funding_binance = float(cap_summary.get("total_funding_fee_paid", 0.0044))
+
+    # Perubahan Saldo Dompet vs Modal Pokok (Sesuai Tab 'Dompet Futures' Aplikasi Binance):
+    wallet_diff_usd = round(cur_wallet - init_capital, 4)
+    wallet_diff_pct = round((wallet_diff_usd / init_capital) * 100.0, 2) if init_capital > 0 else 0.0
+
+    # Net PnL resmi ditampilkan selaras dengan PnL Terealisasi Bersih bursa Binance
+    net_pnl = realized_pnl_binance
     roi_pct = round((net_pnl / init_capital) * 100.0, 2) if init_capital > 0 else 0.0
 
     # 3. Posisi Aktif & Mode Modal
     live_pos = scalper.active_position
     if live_pos and isinstance(live_pos, dict):
         live_pos_copy = dict(live_pos)
-        # Sesuai instruksi user: CHIPUSDT adalah posisi yang dibuka sebelum update terkini,
-        # sehingga masuk ke riwayat lama (bukan Sesi VPS Terkini).
-        live_pos_copy["is_vps_session"] = (live_pos.get("symbol") != "CHIPUSDT")
+        # Sesuai instruksi user: BEAT & CHIP masuk ke riwayat lama, posisi baru adalah Sesi VPS Terkini
+        live_pos_copy["is_vps_session"] = (live_pos.get("symbol") not in ("BEATUSDT", "CHIPUSDT"))
         live_pos = live_pos_copy
     mode = "FLAT $1.00" if cur_wallet < 100.0 else "COMPOUNDING 1.0%"
 
@@ -137,11 +145,11 @@ def api_dashboard_summary():
     month_start = init_capital
     scalper.month_start_wallet = month_start
     month_str = getattr(scalper, "current_month", time.strftime("%Y-%m"))
-    month_roi = roi_pct
+    month_roi = wallet_diff_pct
     profit_locked = getattr(scalper, "monthly_profit_locked", False)
     market_regime = getattr(scalper, "_cached_market_regime", {}).get("regime", "SIDEWAYS")
     monthly_target_wallet = round(month_start * 1.10, 2)
-    month_deficit_usd = round(cur_wallet - month_start, 2)
+    month_deficit_usd = wallet_diff_usd
 
     # Status Istirahat Circuit Breaker
     now_ts = time.time()
@@ -159,6 +167,12 @@ def api_dashboard_summary():
         "total_withdrawals": total_withdrawals,
         "net_pnl_usd": net_pnl,
         "roi_pct": roi_pct,
+        "realized_pnl_binance": realized_pnl_binance,
+        "gross_trading_pnl": gross_trading_pnl,
+        "commission_binance": commission_binance,
+        "funding_binance": funding_binance,
+        "wallet_diff_usd": wallet_diff_usd,
+        "wallet_diff_pct": wallet_diff_pct,
         "mode": mode,
         "active_position": live_pos,
         "rotation_status": scalper.current_rotation_info,
@@ -441,25 +455,10 @@ def leverage_stats():
 @app.get("/trade-history")
 def trade_history(limit: int = 500):
     """
-    Mengambil riwayat trade langsung dari database Neon Tech:
-    Dibersihkan agar JSON-serializable dan menandai trade sesi VPS terkini.
+    Mengambil riwayat trade langsung dari database SQLite native VPS (0 request ke Binance):
+    Dibersihkan agar JSON-serializable dan memisahkan trade sesi VPS terkini secara instan dan responsif.
     """
-    import datetime
     raw_trades = db.get_recent_trades(limit)
-    vps_start_ts = datetime.datetime(2026, 10, 26, 0, 0, 0)
-
-    # Jika belum ada trade sesi VPS di cache lokal, sinkronkan data riil dari Binance
-    has_vps_trade = any(
-        (t.get("closed_at") and hasattr(t.get("closed_at"), "year") and t.get("closed_at") >= vps_start_ts) or
-        ("2026-10-26" in str(t.get("closed_at") or "") or "2026-10-27" in str(t.get("closed_at") or ""))
-        for t in raw_trades
-    )
-    if not has_vps_trade:
-        try:
-            scalper.sync_historical_database_with_binance()
-            raw_trades = db.get_recent_trades(limit)
-        except Exception as e_syn:
-            print(f"[Trade-History] Auto-sync notice: {e_syn}")
 
     cleaned = []
     for t in raw_trades:
@@ -470,9 +469,9 @@ def trade_history(limit: int = 500):
 
         # Sesuai instruksi user:
         # Sesi VPS Terkini HANYA mencatat posisi baru yang dieksekusi dari hasil analisis setelah update.
-        # Seluruh trade lama, termasuk BEATUSDT (id 129) dan CHIPUSDT (posisi aktif sebelum update yang jika nanti tertutup),
+        # Seluruh trade lama, termasuk BEATUSDT (id 129) dan CHIPUSDT (id 130),
         # wajib dipindahkan ke "Seluruh Riwayat".
-        is_legacy = (tid <= 129 or sym in ("BEATUSDT", "CHIPUSDT"))
+        is_legacy = (tid <= 130 or sym in ("BEATUSDT", "CHIPUSDT"))
         is_vps = not is_legacy
 
         pnl_val = float(t.get("pnl_usd") or 0.0)

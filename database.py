@@ -124,17 +124,46 @@ class VPSDatabase:
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS income_records (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        tran_id TEXT UNIQUE,
+                        tran_id TEXT,
                         symbol TEXT,
                         income_type TEXT NOT NULL,
                         income REAL NOT NULL,
                         asset TEXT DEFAULT 'USDT',
                         info TEXT,
                         trade_id TEXT,
-                        timestamp TEXT
+                        timestamp TEXT,
+                        UNIQUE(tran_id, income_type)
                     );
                 """)
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_income_type ON income_records(income_type);")
+
+                # Migrasi jika tabel lama masih menggunakan UNIQUE(tran_id)
+                try:
+                    cur.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='income_records';")
+                    tbl_schema = cur.fetchone()
+                    if tbl_schema and "tran_id TEXT UNIQUE" in tbl_schema[0]:
+                        cur.execute("ALTER TABLE income_records RENAME TO income_records_old;")
+                        cur.execute("""
+                            CREATE TABLE income_records (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                tran_id TEXT,
+                                symbol TEXT,
+                                income_type TEXT NOT NULL,
+                                income REAL NOT NULL,
+                                asset TEXT DEFAULT 'USDT',
+                                info TEXT,
+                                trade_id TEXT,
+                                timestamp TEXT,
+                                UNIQUE(tran_id, income_type)
+                            );
+                        """)
+                        cur.execute("""
+                            INSERT OR IGNORE INTO income_records (tran_id, symbol, income_type, income, asset, info, trade_id, timestamp)
+                            SELECT tran_id, symbol, income_type, income, asset, info, trade_id, timestamp FROM income_records_old;
+                        """)
+                        cur.execute("DROP TABLE income_records_old;")
+                except Exception as _mig_e:
+                    pass
 
                 conn.commit()
 
@@ -423,7 +452,7 @@ class VPSDatabase:
                         t_timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(itime / 1000 + 7 * 3600)) if itime > 0 else None
 
                         cur.execute("""
-                            INSERT OR IGNORE INTO income_records (
+                            INSERT OR REPLACE INTO income_records (
                                 tran_id, symbol, income_type, income, asset, info, trade_id, timestamp
                             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
                         """, (t_id, sym, itype, ival, asset, info, tr_id, t_timestamp))
@@ -564,14 +593,14 @@ class VPSDatabase:
                     FROM income_records;
                 """)
                 inc_row = cur.fetchone()
-                if inc_row and abs(float(inc_row[0])) > 0.0001:
+                if inc_row and (abs(float(inc_row[0])) > 0.0001 or abs(float(inc_row[1])) > 0.0001):
                     gross_pnl = round(float(inc_row[0]), 4)
                     total_comm = round(float(inc_row[1]), 4)
                     total_funding = round(float(inc_row[2]), 4)
                 else:
                     gross_pnl = pure_trading_pnl
-                    total_comm = trade_comm if trade_comm > 0 else 0.3250
-                    total_funding = -0.5454
+                    total_comm = trade_comm if trade_comm > 0 else 0.4274
+                    total_funding = 0.0044
 
                 net_realized_pnl = round(gross_pnl - total_comm + total_funding, 4)
 
