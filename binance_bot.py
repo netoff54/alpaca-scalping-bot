@@ -470,8 +470,8 @@ class BinanceScalper:
         c_side = closed_pos.get("side", "buy").lower()
         c_notional = float(closed_pos.get("notional", 0.0))
         c_qty = float(closed_pos.get("qty", 0.0))
-        # Ambil leverage riil (rentang 20x s/d 50x)
-        c_lev = int(closed_pos.get("leverage") or self.client.get_max_leverage(sym))
+        # Ambil leverage riil (rentang adaptif 7x s/d 75x)
+        c_lev = int(closed_pos.get("leverage") or self.client.get_max_leverage(sym) or 20)
         c_lev = max(config.LEVERAGE_MIN, min(c_lev, config.LEVERAGE_MAX))
 
         real_exit_price = exit_price_hint
@@ -547,7 +547,11 @@ class BinanceScalper:
         # - LOSS: Jika rugi (pnl <= 0) atau terkena Stop Loss BEP (pnl < 1.5%)
         is_real_win = (real_pnl_usd > 0.0 and real_pnl_pct >= 1.5)
         res = "WIN" if is_real_win else "LOSS"
-        margin_used = round((c_notional / c_lev) if c_lev > 0 else (c_notional / 20.0), 4)
+        recorded_margin = float(closed_pos.get("margin_used") or 0.0)
+        if recorded_margin > 0.0:
+            margin_used = round(recorded_margin, 4)
+        else:
+            margin_used = round((c_notional / c_lev) if c_lev > 0 else (c_notional / 20.0), 4)
 
         sc_ver = closed_pos.get("screening_version") or ("v1_legacy" if sym == "SPXUSDT" else "v2_new_screening")
         trade_record = {
@@ -1107,7 +1111,7 @@ class BinanceScalper:
                         sl_side = "SELL" if side.lower() == "buy" else "BUY"
                         bep_trigger = getattr(config, "BEP_PROFIT_TRIGGER", 0.0128)
                         sl_pct = sig.get("sl_percent", config.SL_PERCENT * 100.0) / 100.0
-                        tp_pct = 2.0 * sl_pct  # Strict 1:2.000 Risk-to-Reward Ratio
+                        tp_pct = sig.get("tp_percent", (2.0 * sl_pct * 100.0) + (3.0 * (config.MAKER_FEE_RATE + config.TAKER_FEE_RATE + config.FUNDING_BUFFER) * 100.0)) / 100.0
                         actual_sl = self.client.format_price(symbol, formatted_price * (1.0 - sl_pct) if side.lower() == "buy" else formatted_price * (1.0 + sl_pct))
                         actual_tp = self.client.format_price(symbol, formatted_price * (1.0 + tp_pct) if side.lower() == "buy" else formatted_price * (1.0 - tp_pct))
                         actual_bep = self.client.format_price(symbol, formatted_price * (1.0 + bep_trigger) if side.lower() == "buy" else formatted_price * (1.0 - bep_trigger))
@@ -1167,10 +1171,11 @@ class BinanceScalper:
                             "native_sl_order_id": native_sl_id,
                             "native_tp_order_id": native_tp_id,
                             "leverage": actual_leverage,
-                            "risk_usd": formatted_qty * formatted_price * config.SL_PERCENT,
-                            "reward_usd": formatted_qty * formatted_price * config.TP_PERCENT,
+                            "margin_used": round(margin_used, 4),
+                            "risk_usd": round(formatted_qty * formatted_price * sl_pct, 4),
+                            "reward_usd": round(formatted_qty * formatted_price * tp_pct, 4),
                             "opened_at": time.time(),
-                            "notional": formatted_qty * formatted_price,
+                            "notional": round(formatted_qty * formatted_price, 4),
                             "screening_version": "v2_new_screening"
                         }
                         self.active_order = None

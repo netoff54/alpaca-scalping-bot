@@ -554,16 +554,16 @@ def analyze_coin_comprehensive(
 
         # Analisis apakah ada tembok resisten tebal (BUY) atau support tebal (SELL) sebelum target 1:2 tercapai
         if signal_side == "BUY":
-            natural_target = max(nearest_resistance, entry_price * (1.0 + req_tp_dist)) if entry_price >= nearest_resistance else nearest_resistance
+            natural_target = nearest_resistance if nearest_resistance > entry_price else (entry_price * (1.0 + req_tp_percent))
             room_to_target = (natural_target - entry_price) / entry_price
             if room_to_target < (req_tp_percent * 0.95):
-                console.log(f"[bold yellow]🛡️ Filter SKIP: Ruang gerak ke Resisten ({room_to_target*100:.2f}%) < Syarat RR 1:2 ({req_tp_percent*100:.2f}%). Menolak setup {symbol} agar tidak mentok di resisten.[/bold yellow]")
+                console.log(f"[bold yellow]🛡️ Filter SKIP: Ruang gerak ke Resisten ({room_to_target*100:.2f}%) < Syarat RR 1:2 ({req_tp_percent*100:.2f}%). Menolak setup {symbol} agar tidak terbentur resisten.[/bold yellow]")
                 return {"symbol": symbol, "score": 0.0, "signal": None, "reason": "ROOM_TO_TARGET_INSUFFICIENT"}
         elif signal_side == "SELL":
-            natural_target = min(nearest_support, entry_price * (1.0 - req_tp_dist)) if entry_price <= nearest_support else nearest_support
+            natural_target = nearest_support if nearest_support < entry_price else (entry_price * (1.0 - req_tp_percent))
             room_to_target = (entry_price - natural_target) / entry_price
             if room_to_target < (req_tp_percent * 0.95):
-                console.log(f"[bold yellow]🛡️ Filter SKIP: Ruang gerak ke Support ({room_to_target*100:.2f}%) < Syarat RR 1:2 ({req_tp_percent*100:.2f}%). Menolak setup {symbol} agar tidak mentok di support.[/bold yellow]")
+                console.log(f"[bold yellow]🛡️ Filter SKIP: Ruang gerak ke Support ({room_to_target*100:.2f}%) < Syarat RR 1:2 ({req_tp_percent*100:.2f}%). Menolak setup {symbol} agar tidak terbentur support.[/bold yellow]")
                 return {"symbol": symbol, "score": 0.0, "signal": None, "reason": "ROOM_TO_TARGET_INSUFFICIENT"}
 
         tp_dist = req_tp_dist

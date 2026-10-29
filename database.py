@@ -478,7 +478,8 @@ class VPSDatabase:
                     total_commission = float(inc_summary[1])
                     total_funding = float(inc_summary[2])
 
-                # 2. Perbaiki leverage dan margin_used di database
+                # 2. Perbaiki leverage dan margin_used di database:
+                # Batasi penyeragaman hanya untuk trade historis benih (id 1 s/d 128)
                 cur.execute("""
                     UPDATE trades 
                     SET leverage = 10, margin_used = ROUND(notional / 10.0, 4) 
@@ -487,7 +488,21 @@ class VPSDatabase:
                 cur.execute("""
                     UPDATE trades 
                     SET leverage = 20, margin_used = ROUND(notional / 20.0, 4) 
-                    WHERE id >= 14;
+                    WHERE id BETWEEN 14 AND 128;
+                """)
+
+                # Pulihkan koin sesi aktif (id 141 & 142) yang menggunakan leverage riil 10x dan modal $1.00
+                cur.execute("""
+                    UPDATE trades 
+                    SET leverage = 10, margin_used = ROUND(notional / 10.0, 4)
+                    WHERE id IN (141, 142) AND symbol IN ('ACUUSDT', 'AINUSDT');
+                """)
+
+                # Pastikan margin_used terisi otomatis untuk seluruh trade sesi aktif lainnya
+                cur.execute("""
+                    UPDATE trades 
+                    SET margin_used = ROUND(notional / leverage, 4)
+                    WHERE id >= 129 AND (margin_used IS NULL OR margin_used = 0) AND leverage > 0;
                 """)
 
                 # Selaraskan nominal kerugian riil trade yang terkena likuidasi / INSURANCE_CLEAR
