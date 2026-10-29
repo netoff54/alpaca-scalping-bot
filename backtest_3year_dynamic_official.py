@@ -316,15 +316,30 @@ def run_3year_audit():
                             sig_side = "SELL"; structural_sl = c_high * 1.0020; score = 96.0 + vol_ratio * 2.0
 
                 if sig_side and structural_sl > 0:
-                    candidates.append((score, s, sig_side, c_close, structural_sl))
+                    raw_sl_dist = abs(c_close - structural_sl) / c_close
+                    sl_dist = max(0.0120, min(0.0400, raw_sl_dist))
+                    req_tp_dist = (2.0 * sl_dist) + (3.0 * ROUNDTRIP_FEE)
+
+                    # Analisis Ruang Gerak Alami (Room to Run Filter):
+                    # Cek apakah ada resisten/support tebal sebelum TP 1:2 tercapai. Jika terhalang -> SKIP!
+                    if sig_side == "BUY":
+                        natural_target = max(res, c_close * (1.0 + req_tp_dist)) if c_close >= res else res
+                        room_to_target = (natural_target - c_close) / c_close
+                    else:
+                        natural_target = min(sup, c_close * (1.0 - req_tp_dist)) if c_close <= sup else sup
+                        room_to_target = (c_close - natural_target) / c_close
+
+                    if room_to_target < (req_tp_dist * 0.95):
+                        continue
+
+                    candidates.append((score, s, sig_side, c_close, structural_sl, req_tp_dist, sl_dist))
 
             if candidates:
                 candidates.sort(key=lambda x: x[0], reverse=True)
-                top_score, top_s, top_side, entry_p, structural_sl = candidates[0]
+                top_score, top_s, top_side, entry_p, structural_sl, req_tp_dist, sl_dist = candidates[0]
 
-                raw_sl_dist = abs(entry_p - structural_sl) / entry_p
-                sl_dist = max(0.0120, min(0.0400, raw_sl_dist))
                 sl_p = entry_p * (1.0 - sl_dist) if top_side == "BUY" else entry_p * (1.0 + sl_dist)
+                tp_p = entry_p * (1.0 + req_tp_dist) if top_side == "BUY" else entry_p * (1.0 - req_tp_dist)
 
                 eff_risk = sl_dist + ROUNDTRIP_FEE
                 dynamic_lev = int(round(1.0 / eff_risk))
@@ -341,10 +356,6 @@ def run_3year_audit():
                     trade_margin = 1.00
                 else:
                     trade_margin = wallet * 0.010
-
-                # Strict 1:2 Risk to Reward (TP distance is exactly 2.0x SL distance)
-                tp_dist = 2.0 * sl_dist
-                tp_p = entry_p * (1.0 + tp_dist) if top_side == "BUY" else entry_p * (1.0 - tp_dist)
 
                 active_pos = {
                     "sym": top_s, "side": top_side, "entry": entry_p, "sl": sl_p, "tp": tp_p,

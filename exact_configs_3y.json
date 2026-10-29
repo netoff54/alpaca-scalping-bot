@@ -1,10 +1,10 @@
 {
   "2023-11": {
     "mode": "regime",
-    "vol": 1.1,
-    "wick": 0.25,
-    "consec_limit": 1,
-    "pause_len": 12,
+    "vol": 1.15,
+    "wick": 0.35,
+    "pause_len": 16,
+    "consec_limit": 2,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -36,7 +36,7 @@
   "2024-01": {
     "mode": "regime",
     "vol": 1.1,
-    "wick": 0.3,
+    "wick": 0.25,
     "consec_limit": 2,
     "pause_len": 32,
     "syms": [
@@ -69,10 +69,10 @@
   },
   "2024-03": {
     "mode": "regime",
-    "vol": 1.1,
+    "vol": 1.3,
     "wick": 0.25,
     "consec_limit": 1,
-    "pause_len": 32,
+    "pause_len": 12,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -103,10 +103,10 @@
   },
   "2024-05": {
     "mode": "regime",
-    "vol": 1.15,
-    "wick": 0.35,
-    "pause_len": 16,
-    "consec_limit": 2,
+    "vol": 1.1,
+    "wick": 0.25,
+    "consec_limit": 1,
+    "pause_len": 12,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -119,11 +119,11 @@
     ]
   },
   "2024-06": {
-    "mode": "regime",
-    "vol": 1.1,
-    "wick": 0.3,
+    "mode": "unified_pb",
+    "vol": 1.0,
+    "wick": 0.2,
     "consec_limit": 1,
-    "pause_len": 24,
+    "pause_len": 12,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -136,11 +136,11 @@
     ]
   },
   "2024-07": {
-    "mode": "regime",
-    "vol": 1.15,
-    "wick": 0.35,
-    "pause_len": 16,
-    "consec_limit": 2,
+    "mode": "unified_pb",
+    "vol": 1.0,
+    "wick": 0.2,
+    "consec_limit": 1,
+    "pause_len": 12,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -153,9 +153,9 @@
     ]
   },
   "2024-08": {
-    "mode": "regime",
-    "vol": 1.1,
-    "wick": 0.35,
+    "mode": "unified_pb",
+    "vol": 1.0,
+    "wick": 0.2,
     "consec_limit": 1,
     "pause_len": 12,
     "syms": [
@@ -173,8 +173,8 @@
     "mode": "regime",
     "vol": 1.1,
     "wick": 0.25,
-    "consec_limit": 1,
-    "pause_len": 12,
+    "consec_limit": 2,
+    "pause_len": 16,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -188,10 +188,10 @@
   },
   "2024-10": {
     "mode": "regime",
-    "vol": 1.1,
-    "wick": 0.25,
+    "vol": 1.15,
+    "wick": 0.35,
+    "pause_len": 16,
     "consec_limit": 2,
-    "pause_len": 24,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -205,10 +205,10 @@
   },
   "2024-11": {
     "mode": "regime",
-    "vol": 1.15,
-    "wick": 0.35,
-    "pause_len": 16,
-    "consec_limit": 2,
+    "vol": 1.1,
+    "wick": 0.25,
+    "consec_limit": 1,
+    "pause_len": 12,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -222,10 +222,10 @@
   },
   "2024-12": {
     "mode": "regime",
-    "vol": 1.15,
-    "wick": 0.35,
+    "vol": 1.1,
+    "wick": 0.25,
+    "consec_limit": 1,
     "pause_len": 16,
-    "consec_limit": 2,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -273,10 +273,10 @@
   },
   "2025-03": {
     "mode": "regime",
-    "vol": 1.15,
-    "wick": 0.35,
+    "vol": 1.1,
+    "wick": 0.25,
+    "consec_limit": 1,
     "pause_len": 16,
-    "consec_limit": 2,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -290,10 +290,10 @@
   },
   "2025-04": {
     "mode": "regime",
-    "vol": 1.15,
-    "wick": 0.35,
+    "vol": 1.1,
+    "wick": 0.25,
+    "consec_limit": 1,
     "pause_len": 16,
-    "consec_limit": 2,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -306,6 +306,23 @@
     ]
   },
   "2025-05": {
+    "mode": "regime",
+    "vol": 1.1,
+    "wick": 0.35,
+    "consec_limit": 1,
+    "pause_len": 24,
+    "syms": [
+      "SOLUSDT",
+      "NEARUSDT",
+      "LINKUSDT",
+      "ETHUSDT",
+      "AVAXUSDT",
+      "SUIUSDT",
+      "DOGEUSDT",
+      "ADAUSDT"
+    ]
+  },
+  "2025-06": {
     "mode": "regime",
     "vol": 1.1,
     "wick": 0.25,
@@ -322,29 +339,12 @@
       "ADAUSDT"
     ]
   },
-  "2025-06": {
-    "mode": "regime",
-    "vol": 1.15,
-    "wick": 0.35,
-    "pause_len": 16,
-    "consec_limit": 2,
-    "syms": [
-      "SOLUSDT",
-      "NEARUSDT",
-      "LINKUSDT",
-      "ETHUSDT",
-      "AVAXUSDT",
-      "SUIUSDT",
-      "DOGEUSDT",
-      "ADAUSDT"
-    ]
-  },
   "2025-07": {
     "mode": "regime",
-    "vol": 1.15,
-    "wick": 0.35,
-    "pause_len": 16,
-    "consec_limit": 2,
+    "vol": 1.1,
+    "wick": 0.25,
+    "consec_limit": 1,
+    "pause_len": 12,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -358,8 +358,8 @@
   },
   "2025-08": {
     "mode": "regime",
-    "vol": 1.1,
-    "wick": 0.25,
+    "vol": 1.3,
+    "wick": 0.4,
     "consec_limit": 1,
     "pause_len": 12,
     "syms": [
@@ -378,7 +378,7 @@
     "vol": 1.1,
     "wick": 0.25,
     "consec_limit": 1,
-    "pause_len": 16,
+    "pause_len": 12,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -395,7 +395,7 @@
     "vol": 1.1,
     "wick": 0.25,
     "consec_limit": 1,
-    "pause_len": 16,
+    "pause_len": 24,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -426,10 +426,10 @@
   },
   "2025-12": {
     "mode": "regime",
-    "vol": 1.1,
-    "wick": 0.25,
-    "consec_limit": 1,
-    "pause_len": 12,
+    "vol": 1.15,
+    "wick": 0.35,
+    "pause_len": 16,
+    "consec_limit": 2,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -460,10 +460,10 @@
   },
   "2026-02": {
     "mode": "regime",
-    "vol": 1.15,
-    "wick": 0.35,
-    "pause_len": 16,
-    "consec_limit": 2,
+    "vol": 1.1,
+    "wick": 0.25,
+    "consec_limit": 1,
+    "pause_len": 12,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -493,11 +493,11 @@
     ]
   },
   "2026-04": {
-    "mode": "regime",
-    "vol": 1.1,
+    "mode": "counter",
+    "vol": 1.2,
     "wick": 0.25,
     "consec_limit": 1,
-    "pause_len": 24,
+    "pause_len": 32,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -512,7 +512,7 @@
   "2026-05": {
     "mode": "regime",
     "vol": 1.1,
-    "wick": 0.25,
+    "wick": 0.4,
     "consec_limit": 1,
     "pause_len": 12,
     "syms": [
@@ -527,11 +527,11 @@
     ]
   },
   "2026-06": {
-    "mode": "regime",
-    "vol": 1.15,
-    "wick": 0.35,
-    "pause_len": 16,
-    "consec_limit": 2,
+    "mode": "unified_pb",
+    "vol": 1.1,
+    "wick": 0.25,
+    "consec_limit": 1,
+    "pause_len": 32,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -545,10 +545,10 @@
   },
   "2026-07": {
     "mode": "regime",
-    "vol": 1.1,
-    "wick": 0.25,
-    "consec_limit": 1,
+    "vol": 1.15,
+    "wick": 0.35,
     "pause_len": 16,
+    "consec_limit": 2,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -579,10 +579,10 @@
   },
   "2026-09": {
     "mode": "regime",
-    "vol": 1.1,
-    "wick": 0.25,
-    "consec_limit": 1,
-    "pause_len": 12,
+    "vol": 1.15,
+    "wick": 0.35,
+    "pause_len": 16,
+    "consec_limit": 2,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",
@@ -597,9 +597,9 @@
   "2026-10": {
     "mode": "regime",
     "vol": 1.1,
-    "wick": 0.25,
-    "consec_limit": 2,
-    "pause_len": 32,
+    "wick": 0.35,
+    "consec_limit": 1,
+    "pause_len": 12,
     "syms": [
       "SOLUSDT",
       "NEARUSDT",

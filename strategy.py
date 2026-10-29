@@ -547,10 +547,27 @@ def analyze_coin_comprehensive(
         safe_max_lev = min(config.LEVERAGE_MAX, max_symbol_leverage, max_liq_safe_lev) if max_symbol_leverage > 0 else min(config.LEVERAGE_MAX, max_liq_safe_lev)
         dynamic_leverage = max(config.LEVERAGE_MIN, min(safe_max_lev, calc_lev))
 
-        # 3. Rasio Risk-to-Reward Paten Tepat 1:2.0 Murni (Jarak TP Tepat 2x Lipat Jarak SL):
-        # Memastikan perbandingan harga TP dan SL di Binance App, TradingView, & Web selalu 1:2 presisi.
-        tp_dist = 2.0 * risk_dist
-        tp_percent = 2.0 * sl_percent
+        # 3. Analisis Target Alami Pasar & Filter SKIP Mutlak (Room to Run Filter):
+        # Menghitung target TP 1:2.0 Net yang menutup 100% roundtrip fee bursa
+        req_tp_percent = (2.0 * sl_percent) + (3.0 * roundtrip_fee)
+        req_tp_dist = entry_price * req_tp_percent
+
+        # Analisis apakah ada tembok resisten tebal (BUY) atau support tebal (SELL) sebelum target 1:2 tercapai
+        if signal_side == "BUY":
+            natural_target = max(nearest_resistance, entry_price * (1.0 + req_tp_dist)) if entry_price >= nearest_resistance else nearest_resistance
+            room_to_target = (natural_target - entry_price) / entry_price
+            if room_to_target < (req_tp_percent * 0.95):
+                console.log(f"[bold yellow]🛡️ Filter SKIP: Ruang gerak ke Resisten ({room_to_target*100:.2f}%) < Syarat RR 1:2 ({req_tp_percent*100:.2f}%). Menolak setup {symbol} agar tidak mentok di resisten.[/bold yellow]")
+                return {"symbol": symbol, "score": 0.0, "signal": None, "reason": "ROOM_TO_TARGET_INSUFFICIENT"}
+        elif signal_side == "SELL":
+            natural_target = min(nearest_support, entry_price * (1.0 - req_tp_dist)) if entry_price <= nearest_support else nearest_support
+            room_to_target = (entry_price - natural_target) / entry_price
+            if room_to_target < (req_tp_percent * 0.95):
+                console.log(f"[bold yellow]🛡️ Filter SKIP: Ruang gerak ke Support ({room_to_target*100:.2f}%) < Syarat RR 1:2 ({req_tp_percent*100:.2f}%). Menolak setup {symbol} agar tidak mentok di support.[/bold yellow]")
+                return {"symbol": symbol, "score": 0.0, "signal": None, "reason": "ROOM_TO_TARGET_INSUFFICIENT"}
+
+        tp_dist = req_tp_dist
+        tp_percent = req_tp_percent
         tp_price = entry_price + tp_dist if signal_side == "BUY" else entry_price - tp_dist
 
         bep_trigger_percent = max(0.0128, sl_percent * 1.5)
