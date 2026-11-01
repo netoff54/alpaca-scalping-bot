@@ -32,6 +32,109 @@ class BinanceWebSocketManager:
         self.total_messages_received: int = 0
         self.reconnect_count: int = 0
 
+        # High-Speed Dedicated Stream untuk Pengawalan Posisi Aktif (Zero-Delay Real-Time)
+        self._active_symbol: Optional[str] = None
+        self._active_callback = None
+        self._active_stream_running: bool = False
+        self._active_stream_thread: Optional[threading.Thread] = None
+
+    @property
+    def active_symbol(self) -> Optional[str]:
+        with self._lock:
+            return self._active_symbol
+
+    def track_active_symbol(self, symbol: str, callback):
+        """
+        Mengaktifkan pengawalan real-time WebSocket tick-by-tick (Zero-Delay) untuk posisi aktif.
+        Mendengarkan stream aggTrade individu sehingga setiap pergerakan harga sekecil apa pun
+        (dalam hitungan milidetik) langsung memicu evaluasi BEP dan SL/TP tanpa jeda 2.5 detik.
+        """
+        sym = symbol.upper()
+        with self._lock:
+            self._active_symbol = sym
+            self._active_callback = callback
+
+        # Hentikan thread active stream sebelumnya jika ada
+        self._active_stream_running = False
+        if self._active_stream_thread and self._active_stream_thread.is_alive():
+            try:
+                self._active_stream_thread.join(timeout=1.0)
+            except Exception:
+                pass
+
+        self._active_stream_running = True
+        self._active_stream_thread = threading.Thread(
+            target=self._run_active_symbol_stream,
+            args=(sym,),
+            daemon=True,
+            name=f"BinanceWS-Active-{sym}"
+        )
+        self._active_stream_thread.start()
+        console.log(f"[bold green]⚡ [Zero-Delay WebSocket] Pengawalan real-time aktif diaktifkan untuk {sym} (Stream aggTrade tick-by-tick)![/bold green]")
+
+    def untrack_active_symbol(self):
+        """Menghentikan pengawalan high-frequency koin aktif saat posisi telah selesai/tutup."""
+        with self._lock:
+            sym = self._active_symbol
+            self._active_symbol = None
+            self._active_callback = None
+        self._active_stream_running = False
+        if sym:
+            console.log(f"[dim]⚡ [Zero-Delay WebSocket] Pengawalan koin aktif {sym} dihentikan (Posisi selesai).[/dim]")
+
+    def _run_active_symbol_stream(self, symbol: str):
+        """Background thread khusus mendengarkan push stream aggTrade live (sub-millisecond latency)."""
+        try:
+            import websockets.sync.client
+        except ImportError:
+            return
+
+        stream_name = f"{symbol.lower()}@aggTrade"
+        failover_hosts = [
+            "fstream.binance.com",
+            "fstream1.binance.com",
+            "fstream2.binance.com",
+            "fstream3.binance.com"
+        ]
+        host_idx = 0
+
+        while self._active_stream_running and self._active_symbol == symbol:
+            host = failover_hosts[host_idx]
+            current_url = f"wss://{host}/market/ws/{stream_name}"
+            try:
+                with websockets.sync.client.connect(
+                    current_url,
+                    open_timeout=8,
+                    ping_interval=20,
+                    ping_timeout=20,
+                    close_timeout=5
+                ) as ws:
+                    while self._active_stream_running and self._active_symbol == symbol:
+                        try:
+                            msg = ws.recv(timeout=10)
+                            if not msg:
+                                continue
+                            data = json.loads(msg)
+                            price_str = data.get("p")
+                            if price_str:
+                                p = float(price_str)
+                                with self._lock:
+                                    self.prices[symbol] = p
+                                    self.last_update_time = time.time()
+                                    cb = self._active_callback
+                                if cb and self._active_symbol == symbol:
+                                    try:
+                                        cb(symbol, p)
+                                    except Exception as e_cb:
+                                        console.log(f"[dim]Active tick callback notice: {e_cb}[/dim]")
+                        except TimeoutError:
+                            continue
+                        except Exception:
+                            break
+            except Exception:
+                host_idx = (host_idx + 1) % len(failover_hosts)
+                time.sleep(1.0)
+
     def start(self):
         """Memulai background listener thread."""
         if self._running:
@@ -116,6 +219,15 @@ class BinanceWebSocketManager:
                                             self.volumes_24h.update(updated_vols)
                                         self.last_update_time = now
                                         self.total_messages_received += 1
+                                        act_sym = self._active_symbol
+                                        act_cb = self._active_callback
+
+                                    # Cadangan: Evaluasi callback koin aktif dari stream miniTicker
+                                    if act_sym and act_cb and act_sym in updated_prices:
+                                        try:
+                                            act_cb(act_sym, updated_prices[act_sym])
+                                        except Exception as e_cb:
+                                            pass
 
                             # Handle individual ticker
                             elif isinstance(data, dict):
@@ -123,12 +235,23 @@ class BinanceWebSocketManager:
                                 c = data.get("c") or data.get("p")
                                 q = data.get("q")
                                 if s and c:
-                                    with self._lock:
-                                        self.prices[s] = float(c)
-                                        if q:
-                                            self.volumes_24h[s] = float(q)
-                                        self.last_update_time = now
-                                        self.total_messages_received += 1
+                                    try:
+                                        p_val = float(c)
+                                        with self._lock:
+                                            self.prices[s] = p_val
+                                            if q:
+                                                self.volumes_24h[s] = float(q)
+                                            self.last_update_time = now
+                                            self.total_messages_received += 1
+                                            act_sym = self._active_symbol
+                                            act_cb = self._active_callback
+                                        if act_sym and act_cb and s == act_sym:
+                                            try:
+                                                act_cb(act_sym, p_val)
+                                            except Exception:
+                                                pass
+                                    except (ValueError, TypeError):
+                                        pass
 
                         except TimeoutError:
                             # Jika tidak ada pesan selama 25 detik, reconnect
