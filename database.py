@@ -74,6 +74,11 @@ class VPSDatabase:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_trades_id ON trades(id DESC);")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_trades_sc ON trades(screening_version);")
+                cur.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_binance_trade_id 
+                    ON trades(binance_trade_id) 
+                    WHERE binance_trade_id IS NOT NULL AND binance_trade_id != '';
+                """)
 
                 # 2. Tabel wallet_history
                 cur.execute("""
@@ -197,15 +202,38 @@ class VPSDatabase:
             console.log(f"[red]VPS Database init error: {e}[/red]")
 
     def record_trade(self, trade_data: Dict[str, Any]):
-        """Menyimpan hasil trade ke SQLite lokal VPS."""
+        """Menyimpan hasil trade ke SQLite lokal VPS dengan proteksi mutlak anti-duplikasi."""
         sym = trade_data.get("symbol", "")
         sc_ver = trade_data.get("screening_version")
         if not sc_ver:
             sc_ver = "v1_legacy" if sym in ("DOODUSDT", "BIRBUSDT", "DASHUSDT", "SPXUSDT") else "v2_new_screening"
 
+        b_tid = str(trade_data.get("binance_trade_id") or "").strip()
+
         try:
             with self.get_connection() as conn:
                 cur = conn.cursor()
+
+                # 1. Deduplikasi mutlak via binance_trade_id (mencegah double record dari multi-thread)
+                if b_tid:
+                    cur.execute("SELECT id FROM trades WHERE binance_trade_id = ? LIMIT 1;", (b_tid,))
+                    existing = cur.fetchone()
+                    if existing:
+                        console.log(f"[bold yellow]⚠️ Trade {sym} (Binance Trade ID: {b_tid}) sudah ada di database (ID #{existing[0]}). Menolak duplikasi.[/bold yellow]")
+                        return
+
+                # 2. Deduplikasi cadangan berdasarkan simbol & waktu tutup (jika trade_id belum terisi)
+                cur.execute("""
+                    SELECT id FROM trades 
+                    WHERE symbol = ? AND side = ? 
+                    AND datetime(closed_at) >= datetime('now', '-30 seconds')
+                    LIMIT 1;
+                """, (sym, trade_data.get("side", "BUY")))
+                existing_recent = cur.fetchone()
+                if existing_recent:
+                    console.log(f"[bold yellow]⚠️ Trade {sym} baru saja tercatat dalam 30 detik terakhir (ID #{existing_recent[0]}). Menolak duplikasi.[/bold yellow]")
+                    return
+
                 tid = trade_data.get("id")
                 if not tid:
                     cur.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM trades;")

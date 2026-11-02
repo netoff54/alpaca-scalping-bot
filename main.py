@@ -107,19 +107,17 @@ def api_dashboard_summary():
     total_withdrawals = float(cap_summary.get("total_withdrawals", 0.0))
     base_seed = float(cap_summary.get("initial_capital", 101.15))
 
-    # PnL Terealisasi Resmi Binance (Sesuai Tab 'Analisis PnL' Aplikasi Resmi Binance):
-    realized_pnl_binance = float(cap_summary.get("net_realized_pnl", -2.5375))
-    gross_trading_pnl = float(cap_summary.get("pure_trading_pnl", -2.1146))
-    commission_binance = float(cap_summary.get("total_commission_paid", 0.4274))
-    funding_binance = float(cap_summary.get("total_funding_fee_paid", 0.0044))
-
-    # Perubahan Saldo Dompet vs Modal Pokok (Sesuai Tab 'Dompet Futures' Aplikasi Binance):
+    # Perubahan Saldo Dompet vs Modal Pokok (100% Selaras dengan Tab 'Dompet Futures' Aplikasi Binance):
     wallet_diff_usd = round(cur_wallet - init_capital, 4)
     wallet_diff_pct = round((wallet_diff_usd / init_capital) * 100.0, 2) if init_capital > 0 else 0.0
 
-    # Net PnL resmi ditampilkan selaras dengan PnL Terealisasi Bersih bursa Binance
-    net_pnl = realized_pnl_binance
-    roi_pct = round((net_pnl / init_capital) * 100.0, 2) if init_capital > 0 else 0.0
+    # PnL Terealisasi resmi ditampilkan murni Dompet vs Modal Pokok (Sesuai saldo riil aplikasi Binance)
+    realized_pnl_binance = wallet_diff_usd
+    net_pnl = wallet_diff_usd
+    roi_pct = wallet_diff_pct
+    gross_trading_pnl = float(cap_summary.get("pure_trading_pnl", 0.0))
+    commission_binance = float(cap_summary.get("total_commission_paid", 0.0))
+    funding_binance = float(cap_summary.get("total_funding_fee_paid", 0.0))
 
     # 3. Posisi Aktif & Mode Modal
     live_pos = scalper.active_position
@@ -171,9 +169,9 @@ def api_dashboard_summary():
         "base_initial_capital": base_seed,
         "extra_deposits": extra_deposits,
         "total_withdrawals": total_withdrawals,
-        "net_pnl_usd": net_pnl,
-        "roi_pct": roi_pct,
-        "realized_pnl_binance": realized_pnl_binance,
+        "net_pnl_usd": wallet_diff_usd,
+        "roi_pct": wallet_diff_pct,
+        "realized_pnl_binance": wallet_diff_usd,
         "gross_trading_pnl": gross_trading_pnl,
         "commission_binance": commission_binance,
         "funding_binance": funding_binance,
@@ -192,9 +190,9 @@ def api_dashboard_summary():
         "current_month": month_str,
         "month_start_wallet": round(month_start, 2),
         "monthly_target_wallet": monthly_target_wallet,
-        "month_deficit_usd": month_deficit_usd,
-        "month_pnl_usd": net_pnl,
-        "month_roi_pct": month_roi,
+        "month_deficit_usd": wallet_diff_usd,
+        "month_pnl_usd": wallet_diff_usd,
+        "month_roi_pct": wallet_diff_pct,
         "monthly_profit_locked": profit_locked,
         "market_regime": market_regime,
         "is_resting": is_resting,
@@ -466,8 +464,14 @@ def trade_history(limit: int = 500):
     """
     raw_trades = db.get_recent_trades(limit)
 
+    seen_trade_ids = set()
     cleaned = []
     for t in raw_trades:
+        b_tid = str(t.get("binance_trade_id") or "").strip()
+        if b_tid:
+            if b_tid in seen_trade_ids:
+                continue
+            seen_trade_ids.add(b_tid)
         created = t.get("closed_at") or t.get("created_at")
         sc_ver = t.get("screening_version") or "v1_legacy"
         tid = int(t.get("id") or 0)

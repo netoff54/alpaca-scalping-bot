@@ -813,12 +813,12 @@ def get_dashboard_html() -> str:
                 <div class="card-label-row">
                     <span class="card-label">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                        PnL Terealisasi (Net Realized)
+                        PnL Terealisasi (Dompet vs Modal)
                     </span>
-                    <span class="badge" id="badgeRoi">REALIZED</span>
+                    <span class="badge" id="badgeRoi">DOMPET VS MODAL</span>
                 </div>
                 <div class="metric-value" id="valNetPnl">$0.00</div>
-                <div class="metric-sub" id="valPnlSubtext">Sinkronisasi Dompet vs Modal</div>
+                <div class="metric-sub" id="valPnlSubtext">Sinkron Saldo Dompet Aplikasi Binance</div>
             </div>
 
             <!-- Card 4: Target Surplus Bulanan (Compounding 10%) -->
@@ -1497,7 +1497,6 @@ def get_dashboard_html() -> str:
                 }
 
                 // 2. Hasil Bersih (Net Realized PnL & Selisih Saldo Dompet)
-                const realPnl = parseFloat(d.realized_pnl_binance !== undefined ? d.realized_pnl_binance : (d.net_pnl_usd || 0.0));
                 const walletDiff = parseFloat(d.wallet_diff_usd !== undefined ? d.wallet_diff_usd : (curBal - initCap));
                 const walletDiffPct = parseFloat(d.wallet_diff_pct !== undefined ? d.wallet_diff_pct : ((walletDiff / initCap) * 100));
 
@@ -1505,14 +1504,13 @@ def get_dashboard_html() -> str:
                 const badgeRoi = document.getElementById('badgeRoi');
                 const elPnlSubtext = document.getElementById('valPnlSubtext');
 
-                const rSign = realPnl >= 0 ? '+' : '';
                 const wSign = walletDiff >= 0 ? '+' : '';
                 const wSignPct = walletDiffPct >= 0 ? '+' : '';
 
-                elPnl.textContent = `${rSign}$${realPnl.toFixed(2)} USDT`;
-                badgeRoi.textContent = `REALIZED PNL`;
+                elPnl.textContent = `${wSign}$${walletDiff.toFixed(2)} USDT`;
+                badgeRoi.textContent = `DOMPET VS MODAL`;
 
-                if (realPnl >= 0) {
+                if (walletDiff >= 0) {
                     elPnl.style.color = "var(--bull-green)";
                     badgeRoi.className = "badge badge-green";
                 } else {
@@ -1521,7 +1519,7 @@ def get_dashboard_html() -> str:
                 }
 
                 if (elPnlSubtext) {
-                    elPnlSubtext.innerHTML = `Dompet vs Modal: <b style="color:${walletDiff >= 0 ? 'var(--bull-green)' : 'var(--bear-red)'}">${wSign}$${walletDiff.toFixed(2)} (${wSignPct}${walletDiffPct.toFixed(2)}%)</b>`;
+                    elPnlSubtext.innerHTML = `Modal Disetor: <b>$${initCap.toFixed(2)}</b> • Dompet: <b>$${curBal.toFixed(2)}</b> (${wSignPct}${walletDiffPct.toFixed(2)}%)`;
                 }
 
                 // 3. Manajemen Modal Dinamis (Buffer vs Compounding)
@@ -1540,8 +1538,8 @@ def get_dashboard_html() -> str:
                 // 4. Target Surplus Bulanan (Compounding 10% dari Modal Pokok)
                 const mBase = parseFloat(d.month_start_wallet || initCap || 105.15);
                 const mTarget = parseFloat(d.monthly_target_wallet || (mBase * 1.10));
-                const mPnl = parseFloat(d.month_pnl_usd !== undefined ? d.month_pnl_usd : netPnl);
-                const mRoi = parseFloat(d.month_roi_pct !== undefined ? d.month_roi_pct : roiPct);
+                const mPnl = parseFloat(d.month_pnl_usd !== undefined ? d.month_pnl_usd : walletDiff);
+                const mRoi = parseFloat(d.month_roi_pct !== undefined ? d.month_roi_pct : walletDiffPct);
                 const mLock = d.monthly_profit_locked;
 
                 const valMonthlyRoi = document.getElementById('valMonthlyRoi');

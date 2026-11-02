@@ -446,6 +446,7 @@ class BinanceScalper:
                 # 2. Rekam posisi yang baru saja tertutup
                 if self.active_position is not None:
                     closed_pos = self.active_position
+                    self.active_position = None
                     sym = closed_pos.get("symbol")
                     console.log(f"[bold yellow]Posisi {sym} telah selesai/tertutup di Binance (Eksekusi Native Stop Loss / Take Profit / BEP Bursa).[/bold yellow]")
                     self.client.cancel_all_open_orders(sym)
@@ -471,6 +472,24 @@ class BinanceScalper:
         3. Menjamin leverage dan margin_used tercatat akurat (maks 20x untuk akun baru).
         4. Menyimpan ke database Neon dan memperbarui agregat portofolio.
         """
+        # Proteksi Anti-Race Condition: Cegah eksekusi ganda jika dipanggil berdekatan oleh WS tick dan sync loop
+        if getattr(self, "_is_recording_pos", False):
+            return None
+        self._is_recording_pos = True
+
+        self.active_position = None
+        if hasattr(self.client, 'ws_manager') and self.client.ws_manager:
+            try:
+                self.client.ws_manager.untrack_active_symbol()
+            except Exception:
+                pass
+
+        try:
+            return self._do_record_closed_position(closed_pos, exit_price_hint, result_hint)
+        finally:
+            self._is_recording_pos = False
+
+    def _do_record_closed_position(self, closed_pos: Dict[str, Any], exit_price_hint: float, result_hint: str = "WIN") -> Dict[str, Any]:
         sym = closed_pos.get("symbol", "")
         entry_p = float(closed_pos.get("entry_price", 0.0))
         c_side = closed_pos.get("side", "buy").lower()
@@ -628,8 +647,10 @@ class BinanceScalper:
             if res.get("status") == "success":
                 self.total_trades = res["total_trades"]
                 self.winning_trades = res["winning_trades"]
-                # Gunakan selisih riil saldo dompet Binance (-$1.4373 / -$1.44) agar 100% selaras dengan aplikasi pengguna
-                wallet_net_pnl = round(bal["total_wallet"] - config.INITIAL_CAPITAL, 4)
+                # Gunakan selisih riil saldo dompet Binance (Dompet vs Modal Pokok) agar 100% selaras dengan aplikasi pengguna
+                cap_summary = db.get_capital_summary()
+                net_invested = cap_summary.get("net_capital_invested", config.INITIAL_CAPITAL)
+                wallet_net_pnl = round(bal["total_wallet"] - net_invested, 4)
                 self.total_pnl_usd = wallet_net_pnl
                 console.log(f"[bold green]Sinkronisasi database sukses: {res.get('matched_trades', 0)} trade dicocokkan, Net PnL Dompet Binance: ${self.total_pnl_usd:+.4f} (Gross PnL: -0.5669, Fee: 0.3250, Funding: -0.5454)[/bold green]")
             return res
