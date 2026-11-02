@@ -203,6 +203,62 @@ def detect_candlestick_reversal(
         "body_ratio": body_ratio
     }
 
+def scan_historical_candlestick_patterns(
+    ohlcv: List[List[float]],
+    lookback: int = 1000
+) -> Dict[str, Any]:
+    """
+    Menganalisis hingga 1000 candle ke belakang dan membaca per-candle di harga berapa
+    Open, High, Low, Close untuk mendeteksi pola Wick (Pinbar/Hammer/Shooting Star)
+    dan Full Engulfing (Bullish/Bearish) sesuai standar ketat Kalimasada.
+    """
+    candles = ohlcv[-lookback:] if len(ohlcv) > lookback else ohlcv
+    if len(candles) < 2:
+        return {"total_analyzed": len(candles), "summary": {}, "patterns": []}
+
+    patterns_found = []
+    hammers = 0
+    shooting_stars = 0
+    bull_engulfings = 0
+    bear_engulfings = 0
+
+    for i in range(1, len(candles)):
+        k = candles[i]
+        pk = candles[i - 1]
+        t_ms = k[0]
+        o, h, l, c = float(k[1]), float(k[2]), float(k[3]), float(k[4])
+        po, ph, pl, pc = float(pk[1]), float(pk[2]), float(pk[3]), float(pk[4])
+
+        rev = detect_candlestick_reversal(o, h, l, c, po, ph, pl, pc)
+        if rev["pattern_name"] != "NONE":
+            pattern_info = {
+                "index": i,
+                "timestamp": int(t_ms),
+                "pattern": rev["pattern_name"],
+                "candle": {"open": o, "high": h, "low": l, "close": c},
+                "prev_candle": {"open": po, "high": ph, "low": pl, "close": pc},
+                "lower_wick_ratio": round(rev["lower_wick_ratio"], 4),
+                "upper_wick_ratio": round(rev["upper_wick_ratio"], 4),
+                "body_ratio": round(rev["body_ratio"], 4)
+            }
+            patterns_found.append(pattern_info)
+            if rev["is_hammer"]: hammers += 1
+            elif rev["is_shooting_star"]: shooting_stars += 1
+            elif rev["is_bullish_engulfing"]: bull_engulfings += 1
+            elif rev["is_bearish_engulfing"]: bear_engulfings += 1
+
+    return {
+        "total_analyzed": len(candles),
+        "summary": {
+            "hammer_pinbars": hammers,
+            "shooting_star_pinbars": shooting_stars,
+            "full_bullish_engulfing": bull_engulfings,
+            "full_bearish_engulfing": bear_engulfings,
+            "total_patterns": len(patterns_found)
+        },
+        "patterns": patterns_found
+    }
+
 def detect_market_structure(highs: List[float], lows: List[float], closes: List[float]) -> Dict[str, Any]:
     """
     Menganalisis Struktur Pasar (Market Structure) sesuai Poin 3 Kalimasada:
@@ -482,7 +538,7 @@ def analyze_coin_comprehensive(
                     setup_desc = f"Retest Pullback EMA 21 ({ema21:.4f}) + Reversal ({rev_pattern['pattern_name']}) Bullish"
                     structural_sl_candidate = min(c_low, ema21) * 0.9985
                     score = 92.0 + (vol_ratio * 2.0)
-                elif (c_low < nearest_support and c_close >= nearest_support and is_bullish_reversal) and has_room_for_buy:
+                elif (c_low < nearest_support and c_close >= nearest_support and is_bullish_reversal and rsi_val <= 48) and has_room_for_buy:
                     sweep_status = "LONG_LIQUIDITY_SWEPT"
                     signal_side = "BUY"
                     setup_name = "LIQUIDITY_SWEEP"
@@ -506,7 +562,7 @@ def analyze_coin_comprehensive(
                     setup_desc = f"Retest Pullback EMA 21 ({ema21:.4f}) + Reversal ({rev_pattern['pattern_name']}) Bearish"
                     structural_sl_candidate = max(c_high, ema21) * 1.0015
                     score = 92.0 + (vol_ratio * 2.0)
-                elif (c_high > nearest_resistance and c_close <= nearest_resistance and is_bearish_reversal) and has_room_for_sell:
+                elif (c_high > nearest_resistance and c_close <= nearest_resistance and is_bearish_reversal and rsi_val >= 52) and has_room_for_sell:
                     sweep_status = "SHORT_LIQUIDITY_SWEPT"
                     signal_side = "SELL"
                     setup_name = "LIQUIDITY_SWEEP"
@@ -521,19 +577,20 @@ def analyze_coin_comprehensive(
                 score = 88.0 + (vol_ratio * 2.0)
 
         # SKENARIO 3: SIDEWAYS (Range-bound)
+        # Kalimasada: Konfirmasi Candlestick Reversal + Confluence RSI Ekstrem (Oversold/Overbought)
         elif "SIDEWAYS" in effective_regime:
             range_h = (nearest_resistance - nearest_support) / nearest_support if nearest_support > 0 else 0.0
             if range_h >= 0.020:
-                if c_low <= nearest_support * 1.002 and is_bullish_reversal and has_room_for_buy:
+                if c_low <= nearest_support * 1.002 and is_bullish_reversal and rsi_val <= 42 and has_room_for_buy:
                     signal_side = "BUY"
                     setup_name = "RANGE_LOW_REVERSAL"
-                    setup_desc = f"Reversal Batas Bawah Range Sideways ({nearest_support:.4f}) + ({rev_pattern['pattern_name']})"
+                    setup_desc = f"Reversal Batas Bawah Range Sideways ({nearest_support:.4f}) + ({rev_pattern['pattern_name']}) + RSI ({rsi_val:.1f})"
                     structural_sl_candidate = c_low * 0.9985
                     score = 91.0 + (vol_ratio * 2.0)
-                elif c_high >= nearest_resistance * 0.998 and is_bearish_reversal and has_room_for_sell:
+                elif c_high >= nearest_resistance * 0.998 and is_bearish_reversal and rsi_val >= 58 and has_room_for_sell:
                     signal_side = "SELL"
                     setup_name = "RANGE_HIGH_REVERSAL"
-                    setup_desc = f"Reversal Batas Atas Range Sideways ({nearest_resistance:.4f}) + ({rev_pattern['pattern_name']})"
+                    setup_desc = f"Reversal Batas Atas Range Sideways ({nearest_resistance:.4f}) + ({rev_pattern['pattern_name']}) + RSI ({rsi_val:.1f})"
                     structural_sl_candidate = c_high * 1.0015
                     score = 91.0 + (vol_ratio * 2.0)
 
