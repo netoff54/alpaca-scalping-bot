@@ -37,6 +37,7 @@ class BinanceFuturesClient:
         })
         self._symbols_rules: Dict[str, Dict[str, Any]] = {}
         self._symbols_max_leverage: Dict[str, int] = {}
+        self._symbols_mmr: Dict[str, float] = {}
         self.allowed_crypto_symbols: Set[str] = set()
         self.ban_until: float = 0.0
         self.public_ban_until: float = 0.0
@@ -416,14 +417,20 @@ class BinanceFuturesClient:
                     brackets = item.get("brackets", [])
                     if sym and brackets:
                         max_lev = int(brackets[0].get("initialLeverage", 20))
+                        mmr = float(brackets[0].get("maintMarginRatio", 0.025))
                         self._symbols_max_leverage[sym] = max_lev
-                console.log(f"[bold green]Berhasil memuat batas leverage maksimal untuk {len(self._symbols_max_leverage)} koin.[/bold green]")
+                        self._symbols_mmr[sym] = mmr
+                console.log(f"[bold green]Berhasil memuat batas leverage maksimal & MMR untuk {len(self._symbols_max_leverage)} koin.[/bold green]")
         except Exception as e:
             console.log(f"[dim]Notice load leverage brackets: {e}[/dim]")
 
     def get_max_leverage(self, symbol: str) -> int:
         """Mengembalikan leverage maksimal resmi koin (default 50 jika belum termuat)."""
         return self._symbols_max_leverage.get(symbol, 50)
+
+    def get_maintenance_margin_rate(self, symbol: str) -> float:
+        """Mengembalikan rasio Maintenance Margin (MMR) resmi bursa koin (default 0.025 / 2.5% jika belum termuat)."""
+        return self._symbols_mmr.get(symbol, 0.025)
 
     def set_leverage(self, symbol: str, target_leverage: int = 50, min_leverage: Optional[int] = None) -> int:
         """
@@ -435,7 +442,7 @@ class BinanceFuturesClient:
         # 1. Hitung umur akun untuk batas minimal leverage dinamis
         import time
         days_active = (time.time() - 1791861617.021) / 86400.0  # Aktif sejak 13 Okt 2026 10:20 WIB
-        effective_min_leverage = 25 if days_active >= 35.0 else (min_leverage if min_leverage else 20)
+        effective_min_leverage = min_leverage if min_leverage is not None else (25 if days_active >= 35.0 else 20)
 
         if self.is_banned():
             return max(effective_min_leverage, min(target_leverage, self.get_max_leverage(symbol)))

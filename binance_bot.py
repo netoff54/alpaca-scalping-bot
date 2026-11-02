@@ -967,25 +967,67 @@ class BinanceScalper:
             return False
 
         try:
-            # 1. Pastikan ISOLATED margin dan atur leverage dinamis sesuai SL wick (Loss = -1x Margin, Win = +2x Margin)
-            target_lev = sig.get("dynamic_leverage", config.LEVERAGE_MAX)
-            curr_min_lev = config.dynamic_min_leverage
-            if symbol in self._symbol_leverage and self._symbol_leverage[symbol] == target_lev:
-                actual_leverage = self._symbol_leverage[symbol]
+            # 1. Ambil best bid/ask untuk harga Maker dan validasi likuiditas buku order
+            depth = self.client.fetch_best_bid_ask(symbol)
+            bid_p = depth.get("bid", 0.0)
+            ask_p = depth.get("ask", 0.0)
+            if bid_p > 0 and ask_p > 0:
+                spread_pct = (ask_p - bid_p) / bid_p
+                if spread_pct > config.MAX_SPREAD_PERCENT:
+                    console.log(
+                        f"[bold yellow]🛡️ Filter Spread Ketat: Spread {symbol} sebesar {spread_pct*100:.3f}% "
+                        f"melebihi batas maksimal {config.MAX_SPREAD_PERCENT*100:.2f}%. Melewati koin ini untuk mencegah slippage & flashdump.[/bold yellow]"
+                    )
+                    self.active_order = None
+                    self.active_signals = [s for s in self.active_signals if s.get("symbol") != symbol]
+                    self._symbol_order_cooldown[symbol] = time.time() + 300
+                    return False
+
+            if side == "BUY":
+                best_price = bid_p if bid_p > 0 else target_price
             else:
-                self.client.set_margin_type(symbol, "ISOLATED")
-                actual_leverage = self.client.set_leverage(
-                    symbol,
-                    target_leverage=target_lev,
-                    min_leverage=curr_min_lev
-                )
-                if actual_leverage >= curr_min_lev:
-                    self._symbol_leverage[symbol] = actual_leverage
-                    self._configured_symbols.add(symbol)
-            
-            # Saring koin jika leverage di bawah batas minimal dinamis (20x sebelum 35 hari, 25x setelah 35 hari)
+                best_price = ask_p if ask_p > 0 else target_price
+                
+            formatted_price = self.client.format_price(symbol, best_price)
+            if formatted_price <= 0:
+                formatted_price = self.client.format_price(symbol, target_price)
+
+            # 2. Hitung Ulang Jarak Stop Loss & Take Profit dari Harga Maker Terkini (Anti-Drift)
+            sl_pct = sig.get("sl_percent", config.SL_PERCENT * 100.0) / 100.0
+            tp_pct = sig.get("tp_percent", (2.0 * sl_pct * 100.0) + (3.0 * (config.MAKER_FEE_RATE + config.TAKER_FEE_RATE + config.FUNDING_BUFFER) * 100.0)) / 100.0
+
+            target_sl = formatted_price * (1.0 - sl_pct) if side == "BUY" else formatted_price * (1.0 + sl_pct)
+            target_tp = formatted_price * (1.0 + tp_pct) if side == "BUY" else formatted_price * (1.0 - tp_pct)
+            initial_sl = self.client.format_price(symbol, target_sl)
+            initial_tp = self.client.format_price(symbol, target_tp)
+
+            # 3. PERLINDUNGAN LIKUIDASI MUTLAK: Hitung Batas Leverage Aman dari MMR Resmi Bursa
+            # Jarak Likuidasi Bursa SELALU Berada Jauh di Luar Stop Loss (Buffer Pengaman >= 1.50%)
+            mmr = self.client.get_maintenance_margin_rate(symbol)
+            safe_max_lev = strategy.calculate_max_safe_leverage(sl_pct, mmr=mmr, safety_buffer=0.0150)
             curr_min_lev = config.dynamic_min_leverage
-            if actual_leverage < curr_min_lev:
+            target_lev = min(sig.get("dynamic_leverage", config.LEVERAGE_MAX), safe_max_lev)
+
+            if target_lev < curr_min_lev:
+                console.log(
+                    f"[bold red]🛑 ORDER DITOLAK: Jarak Stop Loss ({sl_pct*100:.2f}%) membutuhkan leverage aman {target_lev}x "
+                    f"(< batas minimal {curr_min_lev}x) agar terhindar dari margin call/likuidasi bursa! Melewati {symbol}.[/bold red]"
+                )
+                self.active_order = None
+                self.active_signals = [s for s in self.active_signals if s.get("symbol") != symbol]
+                self._symbol_order_cooldown[symbol] = time.time() + 600
+                return False
+
+            self.client.set_margin_type(symbol, "ISOLATED")
+            actual_leverage = self.client.set_leverage(
+                symbol,
+                target_leverage=target_lev,
+                min_leverage=curr_min_lev
+            )
+            if actual_leverage >= curr_min_lev:
+                self._symbol_leverage[symbol] = actual_leverage
+                self._configured_symbols.add(symbol)
+            else:
                 console.log(
                     f"[bold yellow]🛡️ Filter Leverage Rendah: {symbol} hanya mendukung {actual_leverage}x (< {curr_min_lev}x). "
                     f"Melewati koin agar modal tetap aman dan terukur.[/bold yellow]"
@@ -995,7 +1037,21 @@ class BinanceScalper:
                 self._symbol_order_cooldown[symbol] = time.time() + 600
                 return False
 
-            # Hitung target margin sesuai portofolio terkini
+            # Verifikasi Matematika Mutlak: Posisi Stop Loss Wajib Lebih Dekat dari Harga Likuidasi
+            liq_price = strategy.calculate_isolated_liquidation_price(formatted_price, side, actual_leverage, mmr)
+            is_safe_liq = (initial_sl > liq_price * 1.010) if side == "BUY" else (initial_sl < liq_price * 0.990)
+            if not is_safe_liq:
+                console.log(
+                    f"[bold red]🛑 PERLINDUNGAN LIKUIDASI AKTIF: Stop Loss {initial_sl} terlalu dekat dengan harga likuidasi "
+                    f"bursa {liq_price:.6f} pada {symbol} (Lev: {actual_leverage}x, MMR: {mmr*100:.2f}%)! "
+                    f"Order DIBATALKAN MUTLAK sebelum ditembak ke bursa.[/bold red]"
+                )
+                self.active_order = None
+                self.active_signals = [s for s in self.active_signals if s.get("symbol") != symbol]
+                self._symbol_order_cooldown[symbol] = time.time() + 600
+                return False
+
+            # 4. Hitung target margin sesuai portofolio terkini
             bal = self.get_futures_balance()
             avail = bal["available"] if bal["available"] >= 1.0 else config.DEFAULT_CAPITAL
             if avail < config.BALANCE_THRESHOLD_SCALING:
@@ -1020,32 +1076,7 @@ class BinanceScalper:
                 self._symbol_order_cooldown[symbol] = time.time() + 600
                 return False
 
-            # 2. Ambil best bid/ask untuk harga Maker dan validasi likuiditas buku order
-            depth = self.client.fetch_best_bid_ask(symbol)
-            bid_p = depth.get("bid", 0.0)
-            ask_p = depth.get("ask", 0.0)
-            if bid_p > 0 and ask_p > 0:
-                spread_pct = (ask_p - bid_p) / bid_p
-                if spread_pct > config.MAX_SPREAD_PERCENT:
-                    console.log(
-                        f"[bold yellow]🛡️ Filter Spread Ketat: Spread {symbol} sebesar {spread_pct*100:.3f}% "
-                        f"melebihi batas maksimal {config.MAX_SPREAD_PERCENT*100:.2f}%. Melewati koin ini untuk mencegah slippage & flashdump.[/bold yellow]"
-                    )
-                    self.active_order = None
-                    self.active_signals = [s for s in self.active_signals if s.get("symbol") != symbol]
-                    self._symbol_order_cooldown[symbol] = time.time() + 300
-                    return False
-
-            if side == "BUY":
-                best_price = bid_p if bid_p > 0 else target_price
-            else:
-                best_price = ask_p if ask_p > 0 else target_price
-                
-            formatted_price = self.client.format_price(symbol, best_price)
-            if formatted_price <= 0:
-                formatted_price = self.client.format_price(symbol, target_price)
-            
-            # 3. Hitung qty dengan presisi tepat
+            # 5. Hitung qty dengan presisi tepat
             formatted_qty = self.client.calculate_order_qty(symbol, target_notional, formatted_price)
             
             if formatted_qty <= 0:
@@ -1093,8 +1124,7 @@ class BinanceScalper:
             
             # Pasang Pre-Order Native Stop Loss & Take Profit langsung di Binance (Tab 'Pesanan Pemicu' / 'Order Terbuka Bersyarat')
             sl_side = "SELL" if side.lower() == "buy" else "BUY"
-            initial_sl = self.client.format_price(symbol, sig["sl_price"])
-            initial_tp = self.client.format_price(symbol, sig["tp_price"])
+            # initial_sl dan initial_tp sudah dihitung presisi dari formatted_price & teruji aman dari likuidasi
             
             pre_sl = self.client.create_stop_loss_order(
                 symbol=symbol,

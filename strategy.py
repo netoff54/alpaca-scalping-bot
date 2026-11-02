@@ -87,29 +87,95 @@ def calculate_rsi_series(closes: List[float], period: int = 14) -> List[float]:
             rsi.append(100.0 - (100.0 / (1.0 + rs)))
     return [50.0] + rsi
 
+def calculate_isolated_liquidation_price(entry_price: float, side: str, leverage: int, mmr: float = 0.025) -> float:
+    """
+    Menghitung harga likuidasi pasti (exact liquidation price) untuk akun ISOLATED margin di Binance Futures.
+    Formula Resmi Binance:
+      Long:  Liq = Entry * (1 - 1/L) / (1 - MMR)
+      Short: Liq = Entry * (1 + 1/L) / (1 + MMR)
+    """
+    if leverage <= 0 or entry_price <= 0:
+        return 0.0
+    lev_f = float(leverage)
+    mmr_f = float(mmr)
+    if side.upper() == "BUY":
+        return entry_price * (1.0 - (1.0 / lev_f)) / (1.0 - mmr_f)
+    else:
+        return entry_price * (1.0 + (1.0 / lev_f)) / (1.0 + mmr_f)
+
+def calculate_max_safe_leverage(sl_percent: float, mmr: float = 0.025, safety_buffer: float = 0.0150) -> int:
+    """
+    Menghitung leverage maksimal yang DIJAMIN AMAN dari margin call / likuidasi:
+    Jarak likuidasi bursa SELALU berada jauh di luar Stop Loss dengan safety buffer minimal >= 1.50%.
+    Formula:
+      Max_Safe_L = floor( 1.0 / (sl_percent + MMR + safety_buffer) )
+    """
+    denom = sl_percent + mmr + safety_buffer
+    if denom <= 0:
+        return 50
+    return max(1, int(1.0 / denom))
+
 def detect_candlestick_reversal(
-    o: float, h: float, l: float, c: float, prev_o: float, prev_c: float
+    o: float, h: float, l: float, c: float,
+    prev_o: float, prev_h: float, prev_l: float, prev_c: float
 ) -> Dict[str, Any]:
     """
-    Mendeteksi Pola Pembalikan Arah (Reversal Patterns) sesuai Poin 6 Kalimasada:
-    - Pin Bar / Hammer (Ekor bawah panjang menolak level bawah)
-    - Shooting Star (Ekor atas panjang menolak level atas)
-    - Bullish Engulfing (Candle hijau membungkus penuh candle merah sebelumnya)
-    - Bearish Engulfing (Candle merah membungkus penuh candle hijau sebelumnya)
+    Mendeteksi Pola Pembalikan Arah (Reversal Patterns) Ketat Kalimasada:
+    - Hammer / Bullish Pinbar: Ekor bawah panjang menolak level support (>= 50% rentang), ekor atas kecil (<= 20%), close di 45% teratas.
+    - Shooting Star / Bearish Pinbar: Ekor atas panjang menolak level resisten (>= 50% rentang), ekor bawah kecil (<= 20%), close di 45% terbawah.
+    - Full Bullish Engulfing: Candle hijau yang membungkus PENUH (high, low, dan body) candle merah sebelumnya secara dominan.
+    - Full Bearish Engulfing: Candle merah yang membungkus PENUH (high, low, dan body) candle hijau sebelumnya secara dominan.
     """
     rng = h - l if (h - l) > 0 else 0.00001
+    prev_rng = prev_h - prev_l if (prev_h - prev_l) > 0 else 0.00001
     body = abs(c - o)
+    prev_body = abs(prev_c - prev_o)
     lower_wick = min(o, c) - l
     upper_wick = h - max(o, c)
 
     lower_wick_ratio = lower_wick / rng
     upper_wick_ratio = upper_wick / rng
+    body_ratio = body / rng
 
-    is_hammer = (lower_wick_ratio >= 0.38) and (upper_wick_ratio <= 0.25) and (c > o)
-    is_shooting_star = (upper_wick_ratio >= 0.38) and (lower_wick_ratio <= 0.25) and (c < o)
+    # Pin Bar / Hammer (Bullish Rejection): Ekor bawah >= 50%, ekor atas <= 20%, body <= 40%, close di separuh atas
+    is_hammer = (
+        (lower_wick_ratio >= 0.50) and
+        (upper_wick_ratio <= 0.20) and
+        (body_ratio <= 0.40) and
+        ((c - l) / rng >= 0.50) and
+        (c >= o or (o - c) / rng <= 0.15)
+    )
 
-    is_bullish_engulfing = (prev_c < prev_o) and (c > o) and (c >= prev_o) and (o <= prev_c)
-    is_bearish_engulfing = (prev_c > prev_o) and (c < o) and (c <= prev_o) and (o >= prev_c)
+    # Shooting Star (Bearish Rejection): Ekor atas >= 50%, ekor bawah <= 20%, body <= 40%, close di separuh bawah
+    is_shooting_star = (
+        (upper_wick_ratio >= 0.50) and
+        (lower_wick_ratio <= 0.20) and
+        (body_ratio <= 0.40) and
+        ((h - c) / rng >= 0.50) and
+        (c <= o or (c - o) / rng <= 0.15)
+    )
+
+    # Full Bullish Engulfing: Menutup penuh seluruh high dan low candle merah sebelumnya dengan body dominan (>= 1.15x)
+    is_bullish_engulfing = (
+        (prev_c < prev_o) and
+        (c > o) and
+        (c >= prev_h) and
+        (l <= prev_l) and
+        (c >= prev_o) and
+        (o <= prev_c) and
+        (body >= prev_body * 1.15)
+    )
+
+    # Full Bearish Engulfing: Menutup penuh seluruh low dan high candle hijau sebelumnya dengan body dominan (>= 1.15x)
+    is_bearish_engulfing = (
+        (prev_c > prev_o) and
+        (c < o) and
+        (c <= prev_l) and
+        (h >= prev_h) and
+        (c <= prev_o) and
+        (o >= prev_c) and
+        (body >= prev_body * 1.15)
+    )
 
     is_bullish_reversal = is_hammer or is_bullish_engulfing
     is_bearish_reversal = is_shooting_star or is_bearish_engulfing
@@ -120,9 +186,9 @@ def detect_candlestick_reversal(
     elif is_shooting_star:
         pattern_name = "SHOOTING_STAR_PINBAR"
     elif is_bullish_engulfing:
-        pattern_name = "BULLISH_ENGULFING"
+        pattern_name = "FULL_BULLISH_ENGULFING"
     elif is_bearish_engulfing:
-        pattern_name = "BEARISH_ENGULFING"
+        pattern_name = "FULL_BEARISH_ENGULFING"
 
     return {
         "pattern_name": pattern_name,
@@ -133,7 +199,8 @@ def detect_candlestick_reversal(
         "is_bullish_reversal": is_bullish_reversal,
         "is_bearish_reversal": is_bearish_reversal,
         "lower_wick_ratio": lower_wick_ratio,
-        "upper_wick_ratio": upper_wick_ratio
+        "upper_wick_ratio": upper_wick_ratio,
+        "body_ratio": body_ratio
     }
 
 def detect_market_structure(highs: List[float], lows: List[float], closes: List[float]) -> Dict[str, Any]:
@@ -352,20 +419,23 @@ def analyze_coin_comprehensive(
     c_range = max(0.0001, c_high - c_low)
     lower_wick = min(c_open, c_close) - c_low
     upper_wick = c_high - max(c_open, c_close)
-    cur_month = time.strftime("%Y-%m")
-    m_cfg = EXACT_CONFIGS.get(cur_month, {})
-    min_wick_ratio = m_cfg.get("wick", getattr(config, "MIN_WICK_RATIO", 0.35))
-    is_hammer = (lower_wick / c_range >= min_wick_ratio)
-    is_shooting = (upper_wick / c_range >= min_wick_ratio)
+
+    # Pola Reversal Candlestick Kalimasada (Wick Reject >= 50% & Full Engulfing)
+    rev_pattern = detect_candlestick_reversal(c_open, c_high, c_low, c_close, p_open, p_high, p_low, p_close)
+    is_hammer = rev_pattern["is_hammer"]
+    is_shooting = rev_pattern["is_shooting_star"]
+    is_bullish_engulfing = rev_pattern["is_bullish_engulfing"]
+    is_bearish_engulfing = rev_pattern["is_bearish_engulfing"]
+    is_bullish_reversal = rev_pattern["is_bullish_reversal"]
+    is_bearish_reversal = rev_pattern["is_bearish_reversal"]
 
     avg_vol = sum(ltf_volumes[-21:-1]) / 20.0 if len(ltf_volumes) >= 21 else c_vol
     vol_ratio = (c_vol / avg_vol) if avg_vol > 0 else 1.0
     has_volume_expansion = vol_ratio >= 1.0
+    cur_month = time.strftime("%Y-%m")
+    m_cfg = EXACT_CONFIGS.get(cur_month, {})
     min_vol_ratio = m_cfg.get("vol", getattr(config, "MIN_VOL_RATIO", 1.15))
     has_strong_volume = vol_ratio >= min_vol_ratio
-
-    # Pola Reversal Candlestick
-    rev_pattern = detect_candlestick_reversal(c_open, c_high, c_low, c_close, p_open, p_close)
 
     # Data Derivatif
     deriv = derivatives_data or {
@@ -399,30 +469,30 @@ def analyze_coin_comprehensive(
 
     # =========================================================================
     # 4 SKENARIO PASAR KALIMASADA (SESUAI LOGIKA AUDIT RESMI BACKTEST 2 TAHUN)
-    # Wajib Konfirmasi Volume Ekspansi >= 1.15x MA20 & Room to Run
+    # Wajib Konfirmasi Volume Ekspansi >= 1.15x MA20, Reversal Candle Ketat, & Room to Run
     # =========================================================================
     if has_strong_volume:
         # SKENARIO 1: BULLISH TREND
         if "BULLISH" in effective_regime:
             cond_200 = (c_close > ema200_macro or c_close > ema200_htf or c_close > ema200_ltf)
             if cond_200 and ema13 > ema21:
-                if c_close > ema50 and (c_low <= ema21 * 1.002 or is_hammer) and rsi_val <= 58 and has_room_for_buy:
+                if c_close > ema50 and (c_low <= ema21 * 1.002) and is_bullish_reversal and rsi_val <= 60 and has_room_for_buy:
                     signal_side = "BUY"
                     setup_name = "EMA21_PULLBACK_RETEST"
-                    setup_desc = f"Retest Pullback EMA 21 ({ema21:.4f}) searah tren Bullish Kalimasada"
+                    setup_desc = f"Retest Pullback EMA 21 ({ema21:.4f}) + Reversal ({rev_pattern['pattern_name']}) Bullish"
                     structural_sl_candidate = min(c_low, ema21) * 0.9985
                     score = 92.0 + (vol_ratio * 2.0)
-                elif (c_low < nearest_support and c_close >= nearest_support and is_hammer) and has_room_for_buy:
+                elif (c_low < nearest_support and c_close >= nearest_support and is_bullish_reversal) and has_room_for_buy:
                     sweep_status = "LONG_LIQUIDITY_SWEPT"
                     signal_side = "BUY"
                     setup_name = "LIQUIDITY_SWEEP"
                     setup_desc = f"Liquidity Sweep di bawah Support {nearest_support:.4f} & Reclaim ({rev_pattern['pattern_name']})"
                     structural_sl_candidate = c_low * 0.9985
                     score = 90.0 + (vol_ratio * 2.0)
-            elif (c_low <= nearest_support * 1.0015 and is_hammer and rsi_val <= 38) and has_room_for_buy:
+            elif (c_low <= nearest_support * 1.0015 and is_bullish_reversal and rsi_val <= 42) and has_room_for_buy:
                 signal_side = "BUY"
                 setup_name = "SUPPORT_REVERSAL_BOUNCE"
-                setup_desc = f"Pantulan Support {nearest_support:.4f} + Reversal Wick + RSI Oversold ({rsi_val:.1f})"
+                setup_desc = f"Pantulan Support {nearest_support:.4f} + Reversal ({rev_pattern['pattern_name']}) + RSI ({rsi_val:.1f})"
                 structural_sl_candidate = c_low * 0.9985
                 score = 88.0 + (vol_ratio * 2.0)
 
@@ -430,23 +500,23 @@ def analyze_coin_comprehensive(
         elif "BEARISH" in effective_regime:
             cond_200 = (c_close < ema200_macro or c_close < ema200_htf or c_close < ema200_ltf)
             if cond_200 and ema13 < ema21:
-                if c_close < ema50 and (c_high >= ema21 * 0.998 or is_shooting) and rsi_val >= 42 and has_room_for_sell:
+                if c_close < ema50 and (c_high >= ema21 * 0.998) and is_bearish_reversal and rsi_val >= 40 and has_room_for_sell:
                     signal_side = "SELL"
                     setup_name = "EMA21_PULLBACK_RETEST"
-                    setup_desc = f"Retest Pullback EMA 21 ({ema21:.4f}) searah tren Bearish Kalimasada"
+                    setup_desc = f"Retest Pullback EMA 21 ({ema21:.4f}) + Reversal ({rev_pattern['pattern_name']}) Bearish"
                     structural_sl_candidate = max(c_high, ema21) * 1.0015
                     score = 92.0 + (vol_ratio * 2.0)
-                elif (c_high > nearest_resistance and c_close <= nearest_resistance and is_shooting) and has_room_for_sell:
+                elif (c_high > nearest_resistance and c_close <= nearest_resistance and is_bearish_reversal) and has_room_for_sell:
                     sweep_status = "SHORT_LIQUIDITY_SWEPT"
                     signal_side = "SELL"
                     setup_name = "LIQUIDITY_SWEEP"
                     setup_desc = f"Liquidity Sweep di atas Resistance {nearest_resistance:.4f} & Reclaim ({rev_pattern['pattern_name']})"
                     structural_sl_candidate = c_high * 1.0015
                     score = 90.0 + (vol_ratio * 2.0)
-            elif (c_high >= nearest_resistance * 0.9985 and is_shooting and rsi_val >= 62) and has_room_for_sell:
+            elif (c_high >= nearest_resistance * 0.9985 and is_bearish_reversal and rsi_val >= 58) and has_room_for_sell:
                 signal_side = "SELL"
                 setup_name = "RESISTANCE_REVERSAL_BOUNCE"
-                setup_desc = f"Penolakan Resistance {nearest_resistance:.4f} + Shooting Star + RSI Overbought ({rsi_val:.1f})"
+                setup_desc = f"Penolakan Resistance {nearest_resistance:.4f} + Reversal ({rev_pattern['pattern_name']}) + RSI ({rsi_val:.1f})"
                 structural_sl_candidate = c_high * 1.0015
                 score = 88.0 + (vol_ratio * 2.0)
 
@@ -454,28 +524,28 @@ def analyze_coin_comprehensive(
         elif "SIDEWAYS" in effective_regime:
             range_h = (nearest_resistance - nearest_support) / nearest_support if nearest_support > 0 else 0.0
             if range_h >= 0.020:
-                if c_low <= nearest_support * 1.002 and (is_hammer or rsi_val <= 38) and has_room_for_buy:
+                if c_low <= nearest_support * 1.002 and is_bullish_reversal and has_room_for_buy:
                     signal_side = "BUY"
                     setup_name = "RANGE_LOW_REVERSAL"
-                    setup_desc = f"Reversal Batas Bawah Range Sideways ({nearest_support:.4f})"
+                    setup_desc = f"Reversal Batas Bawah Range Sideways ({nearest_support:.4f}) + ({rev_pattern['pattern_name']})"
                     structural_sl_candidate = c_low * 0.9985
                     score = 91.0 + (vol_ratio * 2.0)
-                elif c_high >= nearest_resistance * 0.998 and (is_shooting or rsi_val >= 62) and has_room_for_sell:
+                elif c_high >= nearest_resistance * 0.998 and is_bearish_reversal and has_room_for_sell:
                     signal_side = "SELL"
                     setup_name = "RANGE_HIGH_REVERSAL"
-                    setup_desc = f"Reversal Batas Atas Range Sideways ({nearest_resistance:.4f})"
+                    setup_desc = f"Reversal Batas Atas Range Sideways ({nearest_resistance:.4f}) + ({rev_pattern['pattern_name']})"
                     structural_sl_candidate = c_high * 1.0015
                     score = 91.0 + (vol_ratio * 2.0)
 
         # SKENARIO 4: MARKET ANEH (Wicks Ekstrem / Flash Anomali)
         elif "ANEH" in effective_regime:
-            if c_low < nearest_support * 0.990 and (lower_wick / c_range >= 0.40) and rsi_val <= 28 and has_room_for_buy:
+            if c_low < nearest_support * 0.990 and (lower_wick / c_range >= 0.50) and (upper_wick / c_range <= 0.20) and rsi_val <= 28 and has_room_for_buy:
                 signal_side = "BUY"
                 setup_name = "FLASH_DUMP_RECLAIM"
                 setup_desc = f"Reclaim Anomali Ekor Flash Dump ({c_low:.4f}) dengan RSI Ekstrem ({rsi_val:.1f})"
                 structural_sl_candidate = c_low * 0.9980
                 score = 96.0 + (vol_ratio * 2.0)
-            elif c_high > nearest_resistance * 1.010 and (upper_wick / c_range >= 0.40) and rsi_val >= 72 and has_room_for_sell:
+            elif c_high > nearest_resistance * 1.010 and (upper_wick / c_range >= 0.50) and (lower_wick / c_range <= 0.20) and rsi_val >= 72 and has_room_for_sell:
                 signal_side = "SELL"
                 setup_name = "FLASH_PUMP_REJECTION"
                 setup_desc = f"Penolakan Anomali Ekor Flash Pump ({c_high:.4f}) dengan RSI Ekstrem ({rsi_val:.1f})"
@@ -535,17 +605,32 @@ def analyze_coin_comprehensive(
         eff_risk = sl_percent + roundtrip_fee
 
         # 2. Dynamic Leverage Cerdas: LEVERAGE YANG MENYESUAIKAN DENGAN SL WICK!
-        # - Jika SL wick rapat (1.20% s/d 1.80%): Leverage otomatis naik ke 35x - 50x (memaksimalkan profit)
-        # - Jika SL wick sedang (1.80% s/d 2.80%): Leverage otomatis menyesuaikan ke 20x - 35x
-        # - Jika SL wick lebar (2.80% s/d 4.00%): Leverage otomatis santai ke 12x - 18x (memberi ruang bebas bagi wick)
-        # Formula batas aman likuidasi: Jarak likuidasi bursa SELALU berada di luar Stop Loss!
-        # dist_liq = (1.0 / L) - MMR > sl_percent + 0.0050 => L <= 1.0 / (sl_percent + MMR + 0.0050)
-        mmr_est = 0.025 if (max_symbol_leverage > 0 and max_symbol_leverage <= 20) else 0.010
-        max_liq_safe_lev = int(1.0 / (sl_percent + mmr_est + 0.0050))
+        # - Jika SL wick rapat (1.20% s/d 1.80%): Leverage naik proporsional (memaksimalkan profit)
+        # - Jika SL wick sedang (1.80% s/d 2.80%): Leverage menengah aman
+        # - Jika SL wick lebar (2.80% s/d 4.00%): Leverage otomatis santai ke bawah (memberi ruang bebas bagi wick)
+        # Formula batas aman likuidasi: Jarak likuidasi bursa SELALU berada JAUH di luar Stop Loss!
+        # safety_cushion >= 1.50% wajib menjamin Stop Loss tertrigger sebelum margin call bursa!
+        mmr_est = 0.025  # Standar konservatif Binance Futures Tier 1
+        safety_cushion = 0.0150  # Buffer pengaman wajib 1.50% antara SL dan Titik Likuidasi
+        max_liq_safe_lev = calculate_max_safe_leverage(sl_percent, mmr=mmr_est, safety_buffer=safety_cushion)
         calc_lev = int(round(1.0 / eff_risk))
 
         safe_max_lev = min(config.LEVERAGE_MAX, max_symbol_leverage, max_liq_safe_lev) if max_symbol_leverage > 0 else min(config.LEVERAGE_MAX, max_liq_safe_lev)
         dynamic_leverage = max(config.LEVERAGE_MIN, min(safe_max_lev, calc_lev))
+
+        # Verifikasi Matematika Mutlak: Harga Likuidasi ISOLATED vs Stop Loss
+        test_liq = calculate_isolated_liquidation_price(entry_price, signal_side, dynamic_leverage, mmr_est)
+        is_liq_safe = (sl_price > test_liq * 1.015) if signal_side == "BUY" else (sl_price < test_liq * 0.985)
+        if not is_liq_safe:
+            while dynamic_leverage > config.LEVERAGE_MIN:
+                dynamic_leverage -= 1
+                test_liq = calculate_isolated_liquidation_price(entry_price, signal_side, dynamic_leverage, mmr_est)
+                if (signal_side == "BUY" and sl_price > test_liq * 1.015) or (signal_side == "SELL" and sl_price < test_liq * 0.985):
+                    is_liq_safe = True
+                    break
+            if not is_liq_safe:
+                console.log(f"[bold red]🛑 FILTER LIKUIDASI: Setup {symbol} ditolak karena Stop Loss ({sl_price:.6f}) melanggar jarak aman harga likuidasi ({test_liq:.6f})![/bold red]")
+                return {"symbol": symbol, "score": 0.0, "signal": None, "reason": "SL_TOO_CLOSE_TO_LIQUIDATION"}
 
         # 3. Analisis Target Alami Pasar & Filter SKIP Mutlak (Room to Run Filter):
         # Menghitung target TP 1:2.0 Net yang menutup 100% roundtrip fee bursa
